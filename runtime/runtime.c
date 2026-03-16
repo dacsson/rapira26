@@ -4,6 +4,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+RAP_Object *RAP_create_null_obj(void) {
+  RAP_Object *obj = malloc(sizeof(RAP_Object));
+  obj->tag = RAP_OBJECT_TAG_NULL;
+  return obj;
+}
+
 RAP_Object *RAP_create_int_obj(int64_t value) {
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_INT;

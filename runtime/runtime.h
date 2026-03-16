@@ -5,6 +5,7 @@
 
 // CONSTRUCTORS
 
+RAP_Object *RAP_create_null_obj(void);
 RAP_Object *RAP_create_int_obj(int64_t value);
 RAP_Object *RAP_create_float_obj(double value);
 RAP_Object *RAP_create_text_obj(const char *value);
