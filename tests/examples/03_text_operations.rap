@@ -1,0 +1,85 @@
+\ Tests: text operations — length, index, concat, repeat, slice, subscript assign
+\ No input required.
+
+Т := "огурец"       \ length 6, 1-indexed
+
+\ --- length ---
+вывод: #Т
+\ => 6
+вывод: #""
+\ => 0
+
+\ --- indexing (1-based) ---
+вывод: Т[1]
+\ => о
+вывод: Т[3]
+\ => у
+вывод: Т[6]
+\ => ц
+
+\ --- slicing ---
+вывод: Т[2:4]
+\ => гур
+вывод: Т[4:]
+\ => рец          (from 4 to end)
+вывод: Т[:3]
+\ => огу          (from 1 to 3)
+вывод: Т[:]
+\ => огурец       (full copy)
+
+\ --- from spec (p.5): "аб вг д"
+АБ := "аб вг д"
+вывод: АБ[4:]
+\ => вг д
+вывод: АБ[4:5]
+\ => вг
+
+\ --- concat ---
+вывод: "аб" + "вг"
+\ => абвг
+вывод: "привет" + " " + "мир"
+\ => привет мир
+
+\ --- repeat (text * non-negative integer) ---
+вывод: "аб" * 3
+\ => абабаб
+вывод: "х" * 0
+\ => (empty string)
+вывод: 3 * "аб"
+\ => абабаб        (order can be either way per spec)
+
+\ --- concat builds reversed string ---
+НАОБОРОТ := ""
+Т2 := "abcd"
+для К от 1 до #Т2 цикл
+  НАОБОРОТ := Т2[К] + НАОБОРОТ
+кц
+вывод: НАОБОРОТ
+\ => dcba
+
+\ --- subscript assignment ---
+С := "hello"
+С[1] := "H"           \ replace single char (assigned value must be text of length 1)
+вывод: С
+\ => Hello
+
+\ --- slice assignment (replaces the slice) ---
+С[2:3] := "EL"
+вывод: С
+\ => HELlo
+
+\ --- equality ---
+вывод: "abc" = "abc"
+\ => да
+вывод: "abc" = "ABC"
+\ => нет
+вывод: "" = ""
+\ => да
+
+\ --- индекс: first occurrence of substring in text, or 0 ---
+вывод: индекс("вг", "аб вг д")
+\ => 4
+вывод: индекс("х", "аб вг д")
+\ => 0
+вывод: индекс("", "abc")
+\ => 1              (empty string found at position 1)

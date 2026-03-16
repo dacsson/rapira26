@@ -1,0 +1,79 @@
+\ Tests: чужие (foreign names), свои (own names), dynamic scoping
+\ No input required.
+\ Key rule: any non-local name used inside a procedure must be listed
+\ in чужие: — otherwise it is treated as a fresh local name (= пусто).
+
+\ --- basic: чужие allows reading a caller's variable ---
+проц ПЕЧАТАЕТ_ВНЕШНЕЕ ()
+  чужие: ЗНАЧЕНИЕ
+  вывод: ЗНАЧЕНИЕ
+конец
+
+ЗНАЧЕНИЕ := 42
+вызов ПЕЧАТАЕТ_ВНЕШНЕЕ()
+\ => 42
+
+\ --- without чужие: the name is local, defaults to пусто ---
+проц БЕЗ_ЧУЖИХ ()
+  вывод: ЗНАЧЕНИЕ          \ ЗНАЧЕНИЕ here is a fresh local, not the outer one
+конец
+
+вызов БЕЗ_ЧУЖИХ()
+\ => пусто
+
+\ --- чужие allows writing to caller's variable ---
+проц УДВАИВАЕТ ()
+  чужие: X
+  X := X * 2
+конец
+
+X := 5
+вызов УДВАИВАЕТ()
+вывод: X
+\ => 10
+
+\ --- dynamic (not lexical): lookup goes up the call chain ---
+\ ВНЕШНЯЯ sets СЧЁТЧИК, calls СРЕДНЯЯ, which calls ВНУТРЕННЯЯ.
+\ ВНУТРЕННЯЯ declares СЧЁТЧИК in чужие: and finds it in ВНЕШНЯЯ's frame.
+
+проц ВНУТРЕННЯЯ ()
+  чужие: СЧЁТЧИК
+  СЧЁТЧИК := СЧЁТЧИК + 100
+конец
+
+проц СРЕДНЯЯ ()
+  вызов ВНУТРЕННЯЯ()        \ СРЕДНЯЯ has no СЧЁТЧИК, call goes further up
+конец
+
+проц ВНЕШНЯЯ ()
+  свои: СЧЁТЧИК
+  СЧЁТЧИК := 1
+  вызов СРЕДНЯЯ()
+  вывод: СЧЁТЧИК
+конец
+
+вызов ВНЕШНЯЯ()
+\ => 101
+
+\ --- свои declares a fresh local, hiding any outer variable of same name ---
+проц С_ЛОКАЛЬНЫМ ()
+  свои: X
+  X := 999
+  вывод: "локальный X = ", X
+конец
+
+X := 77
+вызов С_ЛОКАЛЬНЫМ()
+вывод: "внешний X = ", X    \ X unchanged because С_ЛОКАЛЬНЫМ's X is local
+\ => локальный X = 999
+\ => внешний X = 77
+
+\ --- procedure name is local within itself (for recursion without чужие) ---
+\ (spec §2.2.2: procedure/function name is local inside itself)
+функ РЕКУРС (N)
+  если N <= 0 то возврат 0 все
+  возврат 1 + РЕКУРС(N - 1)
+конец
+
+вывод: РЕКУРС(5)
+\ => 5

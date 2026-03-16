@@ -1,0 +1,62 @@
+\ Tests: basic вывод, all literal types, multi-value output
+\ No input required.
+
+\ --- null ---
+вывод: пусто
+\ => пусто
+
+\ --- booleans ---
+вывод: да
+\ => да
+вывод: нет
+\ => нет
+
+\ --- integers ---
+вывод: 125
+\ => 125
+вывод: -7
+\ => -7
+
+\ --- reals ---
+вывод: 530.84
+\ => 530.84
+вывод: 1.9е-8
+\ => 1.9е-8
+
+\ --- texts (printed WITHOUT quotes) ---
+вывод: "hello"
+\ => hello
+вывод: ""
+\ => (empty line)
+вывод: "В одном сказочном городе жили коротышки"
+\ => В одном сказочном городе жили коротышки
+
+\ ---- is how you embed a quote character inside a text literal
+вывод: "он сказал: """"привет"""" ей"
+\ => он сказал: "привет" ей
+
+\ --- tuples (printed WITH brackets and commas) ---
+вывод: <* 2, 3, 5, 7, 11 *>
+\ => <* 2, 3, 5, 7, 11 *>
+вывод: <* "а", "е", "и", "о" *>
+\ => <* а, е, и, о *>
+вывод: <* *>
+\ => <* *>
+
+\ --- multiple expressions in one вывод (concatenated, no separator) ---
+вывод: "x = ", 42
+\ => x = 42
+вывод: да, " и ", нет
+\ => да и нет
+вывод: "длина: ", #"огурец"
+\ => длина: 6
+
+\ --- вывод бпс: does not print a newline after ---
+вывод бпс: "abc"
+вывод: "def"
+\ => abcdef
+
+\ --- нс is the newline character constant ---
+вывод: "строка1", нс, "строка2"
+\ => строка1
+\ => строка2
