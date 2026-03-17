@@ -743,42 +743,21 @@ impl Codegen {
 
     fn emit_binary_op(&mut self, op: &BinaryOperator, left: &str, right: &str) -> String {
         let temp = self.fresh_temp();
-        // Phase 1: integer-only arithmetic. TODO: add runtime polymorphic
-        // helpers (RAP_add, RAP_subtract, etc.) that dispatch on tag for
-        // mixed int/float/text operations.
         let rhs = match op {
-            BinaryOperator::Add => format!(
-                "RAP_create_int_obj(RAP_get_int_val({}) + RAP_get_int_val({}))",
-                left, right
-            ),
-            BinaryOperator::Subtract => format!(
-                "RAP_create_int_obj(RAP_get_int_val({}) - RAP_get_int_val({}))",
-                left, right
-            ),
-            BinaryOperator::Multiply => format!(
-                "RAP_create_int_obj(RAP_get_int_val({}) * RAP_get_int_val({}))",
-                left, right
-            ),
-            BinaryOperator::Divide => format!(
-                "RAP_create_float_obj((double)RAP_get_int_val({}) / (double)RAP_get_int_val({}))",
-                left, right
-            ),
-            BinaryOperator::IntegerDivide => format!(
-                "RAP_create_int_obj(RAP_get_int_val({}) / RAP_get_int_val({}))",
-                left, right
-            ),
+            BinaryOperator::Add => format!("RAP_add({}, {})", left, right),
+            BinaryOperator::Subtract => format!("RAP_subtract({}, {})", left, right),
+            BinaryOperator::Multiply => format!("RAP_multiply({}, {})", left, right),
+            BinaryOperator::Divide => format!("RAP_divide({}, {})", left, right),
+            BinaryOperator::IntegerDivide => format!("RAP_integer_divide({}, {})", left, right),
             BinaryOperator::Remainder => {
                 format!("RAP_integer_modulo({}, {})", left, right)
             }
-            BinaryOperator::Power => format!(
-                "RAP_create_float_obj(pow((double)RAP_get_int_val({}), (double)RAP_get_int_val({})))",
-                left, right
-            ),
+            BinaryOperator::Power => format!("RAP_power({}, {})", left, right),
             BinaryOperator::Less => {
-                format!("RAP_integer_less_than({}, {})", left, right)
+                format!("RAP_less_than({}, {})", left, right)
             }
             BinaryOperator::Greater => {
-                format!("RAP_integer_greater_than({}, {})", left, right)
+                format!("RAP_greater_than({}, {})", left, right)
             }
             BinaryOperator::LessOrEqual => format!(
                 "RAP_create_logical_obj(RAP_get_int_val({}) <= RAP_get_int_val({}))",
@@ -789,12 +768,9 @@ impl Codegen {
                 left, right
             ),
             BinaryOperator::Equal => {
-                format!("RAP_integer_equal({}, {})", left, right)
+                format!("RAP_equal({}, {})", left, right)
             }
-            BinaryOperator::NotEqual => format!(
-                "RAP_create_logical_obj(RAP_get_int_val({}) != RAP_get_int_val({}))",
-                left, right
-            ),
+            BinaryOperator::NotEqual => format!("RAP_not_equal({}, {})", left, right),
             BinaryOperator::And => format!(
                 "RAP_create_logical_obj({}->logical_val && {}->logical_val)",
                 left, right
@@ -811,7 +787,7 @@ impl Codegen {
     fn emit_unary_op(&mut self, op: &UnaryOperator, operand: &str) -> String {
         let temp = self.fresh_temp();
         let rhs = match op {
-            UnaryOperator::Negate => format!("RAP_create_int_obj(-RAP_get_int_val({}))", operand),
+            UnaryOperator::Negate => format!("RAP_negate({})", operand),
             UnaryOperator::Plus => {
                 // No-op: just alias the operand
                 return operand.to_string();
@@ -820,9 +796,7 @@ impl Codegen {
             UnaryOperator::Length => format!(
                 // # operator — works on text (strlen) and tuples (count)
                 // TODO: runtime helper RAP_length(obj)
-                "RAP_create_int_obj(({0}->tag == RAP_OBJECT_TAG_TEXT) \
-                 ? (int64_t)strlen(RAP_get_text_val({0})) \
-                 : (int64_t){0}->tuple_val->count)",
+                "RAP_length({})",
                 operand
             ),
         };
@@ -876,7 +850,7 @@ impl Codegen {
     /// Try to emit a built-in function call. Returns Some(temp_name) if handled.
     fn try_emit_builtin(&mut self, name: &str, arguments: &[Box<Expr>]) -> Option<String> {
         match name {
-            "корень" => {
+            "корень" | "sqrt" => {
                 // sqrt — single argument, returns float
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
@@ -889,7 +863,7 @@ impl Codegen {
                 ));
                 Some(temp)
             }
-            "абс" => {
+            "абс" | "abs" => {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(

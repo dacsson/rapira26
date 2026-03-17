@@ -30,7 +30,39 @@ RAP_Object *RAP_set_tuple_item(RAP_Object *tuple, uint32_t index,
 RAP_Object *RAP_integer_less_than(RAP_Object *a, RAP_Object *b);
 RAP_Object *RAP_integer_greater_than(RAP_Object *a, RAP_Object *b);
 RAP_Object *RAP_integer_equal(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_integer_not_equal(RAP_Object *a, RAP_Object *b);
 RAP_Object *RAP_integer_modulo(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_integer_add(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_integer_subtract(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_integer_multiply(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_integer_divide(RAP_Object *a, RAP_Object *b);
+
+// FLOAT OPERATIONS
+
+RAP_Object *RAP_float_less_than(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_float_greater_than(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_float_equal(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_float_not_equal(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_float_modulo(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_float_add(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_float_subtract(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_float_multiply(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_float_divide(RAP_Object *a, RAP_Object *b);
+
+// GENERIC OPERATIONS
+
+RAP_Object *RAP_less_than(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_greater_than(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_equal(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_not_equal(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_modulo(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_add(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_subtract(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_multiply(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_divide(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_length(RAP_Object *a);
+RAP_Object *RAP_negate(RAP_Object *a);
+RAP_Object *RAP_power(RAP_Object *a, RAP_Object *b);
 
 // FRAME UTILITIES
 

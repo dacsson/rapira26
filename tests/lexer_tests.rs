@@ -13,34 +13,61 @@ fn tokenize(source: &str) -> Vec<Token> {
 #[test]
 fn lex_control_flow_keywords() {
     let tokens = tokenize("если то иначе все");
-    assert_eq!(tokens, vec![Token::KwЕсли, Token::KwТо, Token::KwИначе, Token::KwВсе]);
+    assert_eq!(
+        tokens,
+        vec![Token::KwЕсли, Token::KwТо, Token::KwИначе, Token::KwВсе]
+    );
 }
 
 #[test]
 fn lex_loop_keywords() {
     let tokens = tokenize("для от до шаг пока повтор цикл кц по выход");
-    assert_eq!(tokens, vec![
-        Token::KwДля, Token::KwОт, Token::KwДо, Token::KwШаг,
-        Token::KwПока, Token::KwПовтор, Token::KwЦикл, Token::KwКц,
-        Token::KwПо, Token::KwВыход,
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::KwДля,
+            Token::KwОт,
+            Token::KwДо,
+            Token::KwШаг,
+            Token::KwПока,
+            Token::KwПовтор,
+            Token::KwЦикл,
+            Token::KwКц,
+            Token::KwПо,
+            Token::KwВыход,
+        ]
+    );
 }
 
 #[test]
 fn lex_definition_keywords() {
     let tokens = tokenize("проц функ конец возврат чужие свои");
-    assert_eq!(tokens, vec![
-        Token::KwПроц, Token::KwФунк, Token::KwКонец,
-        Token::KwВозврат, Token::KwЧужие, Token::KwСвои,
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::KwПроц,
+            Token::KwФунк,
+            Token::KwКонец,
+            Token::KwВозврат,
+            Token::KwЧужие,
+            Token::KwСвои,
+        ]
+    );
 }
 
 #[test]
 fn lex_io_keywords() {
     let tokens = tokenize("вывод ввод бпс текста вызов");
-    assert_eq!(tokens, vec![
-        Token::KwВывод, Token::KwВвод, Token::KwБпс, Token::KwТекста, Token::KwВызов,
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::KwВывод,
+            Token::KwВвод,
+            Token::KwБпс,
+            Token::KwТекста,
+            Token::KwВызов,
+        ]
+    );
 }
 
 #[test]
@@ -52,10 +79,17 @@ fn lex_logical_keywords() {
 #[test]
 fn lex_constant_keywords() {
     let tokens = tokenize("пусто да нет нс пи pi");
-    assert_eq!(tokens, vec![
-        Token::KwПусто, Token::KwДа, Token::KwНет,
-        Token::KwНс, Token::KwПи, Token::KwPi,
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::KwПусто,
+            Token::KwДа,
+            Token::KwНет,
+            Token::KwНс,
+            Token::KwПи,
+            Token::KwPi,
+        ]
+    );
 }
 
 #[test]
@@ -82,11 +116,14 @@ fn lex_latin_identifier() {
 #[test]
 fn lex_identifier_with_digits_and_underscore() {
     let tokens = tokenize("X1 ЧИСЛО_2 _foo");
-    assert_eq!(tokens, vec![
-        Token::Ident("X1".to_string()),
-        Token::Ident("ЧИСЛО_2".to_string()),
-        Token::Ident("_foo".to_string()),
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Ident("X1".to_string()),
+            Token::Ident("ЧИСЛО_2".to_string()),
+            Token::Ident("_foo".to_string()),
+        ]
+    );
 }
 
 #[test]
@@ -107,7 +144,10 @@ fn lex_integer_zero() {
 #[test]
 fn lex_integer_simple() {
     let tokens = tokenize("42 125 999");
-    assert_eq!(tokens, vec![Token::Integer(42), Token::Integer(125), Token::Integer(999)]);
+    assert_eq!(
+        tokens,
+        vec![Token::Integer(42), Token::Integer(125), Token::Integer(999)]
+    );
 }
 
 // ── Real literals ───────────────────────────────────────────────────────────
@@ -167,7 +207,10 @@ fn lex_text_cyrillic() {
 fn lex_text_with_escaped_quote() {
     // Spec §2.2.2: """" (four quotes) represents a single " in the text
     let tokens = tokenize("\"он сказал: \"\"\"\"привет\"\"\"\" ей\"");
-    assert_eq!(tokens, vec![Token::Text("он сказал: \"привет\" ей".to_string())]);
+    assert_eq!(
+        tokens,
+        vec![Token::Text("он сказал: \"привет\" ей".to_string())]
+    );
 }
 
 // ── Operators ───────────────────────────────────────────────────────────────
@@ -175,20 +218,34 @@ fn lex_text_with_escaped_quote() {
 #[test]
 fn lex_arithmetic_operators() {
     let tokens = tokenize("+ - * / // /% **");
-    assert_eq!(tokens, vec![
-        Token::Plus, Token::Minus, Token::Star, Token::Slash,
-        Token::SlashSlash, Token::SlashPercent, Token::StarStar,
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Plus,
+            Token::Minus,
+            Token::Star,
+            Token::Slash,
+            Token::SlashSlash,
+            Token::SlashPercent,
+            Token::StarStar,
+        ]
+    );
 }
 
 #[test]
 fn lex_comparison_operators() {
     let tokens = tokenize("= /= < > <= >=");
-    assert_eq!(tokens, vec![
-        Token::Equal, Token::NotEqual,
-        Token::Less, Token::Greater,
-        Token::LessOrEqual, Token::GreaterOrEqual,
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Equal,
+            Token::NotEqual,
+            Token::Less,
+            Token::Greater,
+            Token::LessOrEqual,
+            Token::GreaterOrEqual,
+        ]
+    );
 }
 
 #[test]
@@ -215,11 +272,17 @@ fn lex_arrows() {
 #[test]
 fn lex_punctuation() {
     let tokens = tokenize("( ) [ ] , :");
-    assert_eq!(tokens, vec![
-        Token::LParen, Token::RParen,
-        Token::LBracket, Token::RBracket,
-        Token::Comma, Token::Colon,
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::LParen,
+            Token::RParen,
+            Token::LBracket,
+            Token::RBracket,
+            Token::Comma,
+            Token::Colon,
+        ]
+    );
 }
 
 #[test]
@@ -270,11 +333,9 @@ fn lex_only_whitespace_and_comments() {
 
 #[test]
 fn lex_spans_are_correct_for_ascii() {
-    let triples: Vec<_> = Lexer::new("42 + X")
-        .map(|r| r.unwrap())
-        .collect();
+    let triples: Vec<_> = Lexer::new("42 + X").map(|r| r.unwrap()).collect();
     // Lexer end position is the byte offset of the NEXT token's start (or source len)
-    assert_eq!(triples[0].0, 0);  // "42" starts at 0
+    assert_eq!(triples[0].0, 0); // "42" starts at 0
     assert_eq!(triples[0].1, Token::Integer(42));
     assert_eq!(triples[1].1, Token::Plus);
     assert_eq!(triples[2].1, Token::Ident("X".to_string()));
@@ -285,63 +346,90 @@ fn lex_spans_are_correct_for_ascii() {
 #[test]
 fn lex_assignment_statement() {
     let tokens = tokenize("X := 5");
-    assert_eq!(tokens, vec![
-        Token::Ident("X".to_string()),
-        Token::Assign,
-        Token::Integer(5),
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Ident("X".to_string()),
+            Token::Assign,
+            Token::Integer(5),
+        ]
+    );
 }
 
 #[test]
 fn lex_output_statement() {
     let tokens = tokenize("вывод: \"hello\", 42");
-    assert_eq!(tokens, vec![
-        Token::KwВывод, Token::Colon,
-        Token::Text("hello".to_string()), Token::Comma,
-        Token::Integer(42),
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::KwВывод,
+            Token::Colon,
+            Token::Text("hello".to_string()),
+            Token::Comma,
+            Token::Integer(42),
+        ]
+    );
 }
 
 #[test]
 fn lex_procedure_definition_header() {
     let tokens = tokenize("проц РАМКА (N)");
-    assert_eq!(tokens, vec![
-        Token::KwПроц, Token::Ident("РАМКА".to_string()),
-        Token::LParen, Token::Ident("N".to_string()), Token::RParen,
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::KwПроц,
+            Token::Ident("РАМКА".to_string()),
+            Token::LParen,
+            Token::Ident("N".to_string()),
+            Token::RParen,
+        ]
+    );
 }
 
 #[test]
 fn lex_function_call() {
     let tokens = tokenize("КВАДРАТ(7)");
-    assert_eq!(tokens, vec![
-        Token::Ident("КВАДРАТ".to_string()),
-        Token::LParen, Token::Integer(7), Token::RParen,
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Ident("КВАДРАТ".to_string()),
+            Token::LParen,
+            Token::Integer(7),
+            Token::RParen,
+        ]
+    );
 }
 
 #[test]
 fn lex_tuple_literal() {
     let tokens = tokenize("<* 1, 2, 3 *>");
-    assert_eq!(tokens, vec![
-        Token::TupleOpen,
-        Token::Integer(1), Token::Comma,
-        Token::Integer(2), Token::Comma,
-        Token::Integer(3),
-        Token::TupleClose,
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::TupleOpen,
+            Token::Integer(1),
+            Token::Comma,
+            Token::Integer(2),
+            Token::Comma,
+            Token::Integer(3),
+            Token::TupleClose,
+        ]
+    );
 }
 
 #[test]
 fn lex_complex_expression() {
     let tokens = tokenize("N /% M = 0");
-    assert_eq!(tokens, vec![
-        Token::Ident("N".to_string()),
-        Token::SlashPercent,
-        Token::Ident("M".to_string()),
-        Token::Equal,
-        Token::Integer(0),
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Ident("N".to_string()),
+            Token::SlashPercent,
+            Token::Ident("M".to_string()),
+            Token::Equal,
+            Token::Integer(0),
+        ]
+    );
 }
 
 // ── Error cases ─────────────────────────────────────────────────────────────

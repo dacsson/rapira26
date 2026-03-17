@@ -5,7 +5,7 @@ use std::process::Command;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "rapira26", about = "Rapira language compiler (Препринт 767)")]
+#[command(name = "rapira26", about = "Rapira language compiler")]
 struct Cli {
     /// Source file (.rap)
     source: PathBuf,
@@ -21,10 +21,42 @@ struct Cli {
     /// Compile and run the program
     #[arg(long)]
     run: bool,
+
+    /// Run in REPL mode
+    #[arg(long)]
+    repl: bool,
 }
+
+// TODO:
+/// Repl mode works like this:
+/// - Reads a line of input from the user
+/// - Parses and compiles the input
+/// - Executes the compiled code
+/// - The next line user has entered is added to the program and compiled again
+///     Therefore we need to save all input as a single program
+/// - Loops until the user exits
+// fn repl_mode() {
+//     let mut source = String::new();
+//     loop {
+//         let mut input = String::new();
+//         std::io::stdin().read_line(&mut input).unwrap();
+//         // source.push_str(&input);
+
+//         let token_stream = rapira26::lexer::Lexer::new(&input);
+//         let parser = rapira26::parser::Parser::new(token_stream);
+
+//         let
+//     }
+// }
 
 fn main() {
     let cli = Cli::parse();
+
+    if cli.repl {
+        // repl_mode();
+        println!("До новых встреч!");
+        return;
+    }
 
     let source = std::fs::read_to_string(&cli.source).unwrap_or_else(|error| {
         eprintln!("error reading {:?}: {error}", cli.source);
@@ -63,7 +95,7 @@ fn main() {
     let c_path = env::current_dir()
         .unwrap()
         .join(PathBuf::from(file_name).with_extension("c"));
-    println!("{c_path:?}");
+
     let binary_path = env::current_dir()
         .unwrap()
         .join(PathBuf::from(file_name).with_extension(""));
