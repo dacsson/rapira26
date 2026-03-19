@@ -36,8 +36,12 @@ RAP_Object *RAP_create_float_obj(double value) {
 RAP_Object *RAP_create_text_obj(const char *value) {
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_TEXT;
-  obj->text_val = malloc(strlen(value) + 1);
-  strcpy(obj->text_val, value);
+  obj->text_val = malloc(sizeof(struct RAP_Tuple));
+  obj->text_val->count = strlen(value);
+  obj->text_val->items = malloc(obj->text_val->count * sizeof(RAP_Object *));
+  for (uint32_t i = 0; i < obj->text_val->count; i++) {
+    obj->text_val->items[i] = RAP_create_int_obj(value[i]);
+  }
   return obj;
 }
 
@@ -164,9 +168,17 @@ char *RAP_stringify_object(RAP_Object *obj) {
     return str;
   }
   case RAP_OBJECT_TAG_TEXT: {
-    char *str = malloc(strlen(RAP_get_text_val(obj)) + 1);
-    strcpy(str, RAP_get_text_val(obj));
-    return str;
+    size_t len = 0, cap = 0;
+    char *buf = NULL;
+    for (uint32_t i = 0; i < RAP_get_text_val(obj)->count; i++) {
+      char el = (char)RAP_get_int_val(RAP_get_text_val(obj)->items[i]);
+      char *item_str = malloc(2);
+      item_str[0] = el;
+      item_str[1] = '\0';
+      buf = strbuf_append(buf, &len, &cap, item_str);
+      free(item_str);
+    }
+    return buf;
   }
   case RAP_OBJECT_TAG_TUPLE: {
     size_t len = 0, cap = 0;
@@ -315,6 +327,15 @@ RAP_Object *RAP_less_than(RAP_Object *a, RAP_Object *b) {
   RAP_fatal_error("Неподдерживаемые типы для сравнения");
 }
 
+RAP_Object *RAP_less_or_equal(RAP_Object *a, RAP_Object *b) {
+  if (a->tag == RAP_OBJECT_TAG_INT && b->tag == RAP_OBJECT_TAG_INT) {
+    return RAP_create_logical_obj(a->int_val <= b->int_val);
+  } else if (a->tag == RAP_OBJECT_TAG_FLOAT && b->tag == RAP_OBJECT_TAG_FLOAT) {
+    return RAP_create_logical_obj(a->float_val <= b->float_val);
+  }
+  RAP_fatal_error("Неподдерживаемые типы для сравнения");
+}
+
 RAP_Object *RAP_greater_than(RAP_Object *a, RAP_Object *b) {
   if (a->tag == RAP_OBJECT_TAG_INT && b->tag == RAP_OBJECT_TAG_INT) {
     return RAP_integer_greater_than(a, b);
@@ -324,11 +345,26 @@ RAP_Object *RAP_greater_than(RAP_Object *a, RAP_Object *b) {
   RAP_fatal_error("Неподдерживаемые типы для сравнения");
 }
 
+RAP_Object *RAP_greater_or_equal(RAP_Object *a, RAP_Object *b) {
+  if (a->tag == RAP_OBJECT_TAG_INT && b->tag == RAP_OBJECT_TAG_INT) {
+    return RAP_create_logical_obj(a->int_val >= b->int_val);
+  } else if (a->tag == RAP_OBJECT_TAG_FLOAT && b->tag == RAP_OBJECT_TAG_FLOAT) {
+    return RAP_create_logical_obj(a->float_val >= b->float_val);
+  }
+  RAP_fatal_error("Неподдерживаемые типы для сравнения");
+}
+
 RAP_Object *RAP_equal(RAP_Object *a, RAP_Object *b) {
   if (a->tag == RAP_OBJECT_TAG_INT && b->tag == RAP_OBJECT_TAG_INT) {
     return RAP_integer_equal(a, b);
   } else if (a->tag == RAP_OBJECT_TAG_FLOAT && b->tag == RAP_OBJECT_TAG_FLOAT) {
     return RAP_float_equal(a, b);
+  } else if (a->tag == RAP_OBJECT_TAG_TEXT && b->tag == RAP_OBJECT_TAG_TEXT) {
+    return RAP_create_logical_obj(strcmp(RAP_stringify_object(a), RAP_stringify_object(b)) == 0);
+  } else if (a->tag == RAP_OBJECT_TAG_NULL && b->tag == RAP_OBJECT_TAG_NULL) {
+    return RAP_create_logical_obj(true);
+  } else if (a->tag == RAP_OBJECT_TAG_LOGICAL && b->tag == RAP_OBJECT_TAG_LOGICAL) {
+    return RAP_create_logical_obj(a->logical_val == b->logical_val);
   }
   RAP_fatal_error("Неподдерживаемые типы для сравнения");
 }
@@ -338,6 +374,12 @@ RAP_Object *RAP_not_equal(RAP_Object *a, RAP_Object *b) {
     return RAP_integer_not_equal(a, b);
   } else if (a->tag == RAP_OBJECT_TAG_FLOAT && b->tag == RAP_OBJECT_TAG_FLOAT) {
     return RAP_float_not_equal(a, b);
+  } else if (a->tag == RAP_OBJECT_TAG_TEXT && b->tag == RAP_OBJECT_TAG_TEXT) {
+    return RAP_create_logical_obj(strcmp(RAP_stringify_object(a), RAP_stringify_object(b)) != 0);
+  } else if (a->tag == RAP_OBJECT_TAG_NULL && b->tag == RAP_OBJECT_TAG_NULL) {
+    return RAP_create_logical_obj(false);
+  } else if (a->tag == RAP_OBJECT_TAG_LOGICAL && b->tag == RAP_OBJECT_TAG_LOGICAL) {
+    return RAP_create_logical_obj(a->logical_val != b->logical_val);
   }
   RAP_fatal_error("Неподдерживаемые типы для сравнения");
 }
@@ -359,11 +401,9 @@ RAP_Object *RAP_negate(RAP_Object *a) {
 }
 
 RAP_Object *RAP_length(RAP_Object *a) {
-  if (a->tag == RAP_OBJECT_TAG_TUPLE) {
+  // Text is represented as a tuple
+  if (a->tag == RAP_OBJECT_TAG_TUPLE || a->tag == RAP_OBJECT_TAG_TEXT) {
     return RAP_create_int_obj(RAP_get_tuple_val(a)->count);
-  }
-  else if (a->tag == RAP_OBJECT_TAG_TEXT) {
-    return RAP_create_int_obj(strlen(RAP_get_text_val(a)));
   }
   RAP_fatal_error("Неподдерживаемые типы для длины");
 }

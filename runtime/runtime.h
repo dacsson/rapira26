@@ -52,7 +52,9 @@ RAP_Object *RAP_float_divide(RAP_Object *a, RAP_Object *b);
 // GENERIC OPERATIONS
 
 RAP_Object *RAP_less_than(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_less_or_equal(RAP_Object *a, RAP_Object *b);
 RAP_Object *RAP_greater_than(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_greater_or_equal(RAP_Object *a, RAP_Object *b);
 RAP_Object *RAP_equal(RAP_Object *a, RAP_Object *b);
 RAP_Object *RAP_not_equal(RAP_Object *a, RAP_Object *b);
 RAP_Object *RAP_modulo(RAP_Object *a, RAP_Object *b);

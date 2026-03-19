@@ -1,6 +1,7 @@
 #ifndef RAPIRA_OBJECT_H
 #define RAPIRA_OBJECT_H
 
+#include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -22,6 +23,7 @@ typedef enum {
   RAP_OBJECT_TAG_FLOAT,
   RAP_OBJECT_TAG_TEXT,
   RAP_OBJECT_TAG_TUPLE,
+  RAP_OBJECT_TAG_SLICE,
 } RAP_ObjectTag;
 
 struct RAP_Tuple;
@@ -34,7 +36,7 @@ typedef struct {
     bool logical_val;
     int64_t int_val;
     double float_val;
-    char *text_val;
+    struct RAP_Tuple *text_val;
     struct RAP_Tuple *tuple_val;
     struct RAP_Callable *callable_val;
   };
@@ -65,19 +67,28 @@ struct RAP_CallFrame {
 /// Funcs and procs are treated as objects.
 struct RAP_Callable {
   char *name;
-  RAP_Object *(*func)(struct RAP_CallFrame *frame, RAP_Object **args, unsigned int arg_count);
+  RAP_Object *(*func)(struct RAP_CallFrame *frame, RAP_Object **args,
+                      unsigned int arg_count);
   struct RAP_CallFrame *frame;
   RAP_Parameter **params;
   uint32_t param_count;
 };
 
-/// Tuple is a fixed-size untyped list of objects.
+/// Tuple is a untyped list of objects.
 struct RAP_Tuple {
   uint32_t count;
   RAP_Object **items;
 };
 
 /// Unified function type
-typedef RAP_Object *(*RAP_FunctionDecl)(struct RAP_CallFrame *frame, RAP_Object **args, uint32_t arg_count);
+typedef RAP_Object *(*RAP_FunctionDecl)(struct RAP_CallFrame *frame,
+                                        RAP_Object **args, uint32_t arg_count);
+
+/// Slices are a view into a tuple or string, allowing access to a subset of its
+/// items.
+struct RAP_Slice {
+  RAP_Object *first_element;
+  size_t length;
+};
 
 #endif // RAPIRA_OBJECT_H
