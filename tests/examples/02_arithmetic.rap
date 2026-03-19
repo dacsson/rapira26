@@ -25,17 +25,20 @@
 вывод: 7 // 2
 \ => 3
 вывод: -7 // 2
-\ => -4        (floor division: spec defines via subtraction loop)
+\ => -4
+\ (floor division: spec defines via subtraction loop)
 вывод: 7 /% 2
 \ => 1
 вывод: -7 /% 2
-\ => 1         (defined as A - A//B*B)
+\ => 1
+\ (defined as A - A//B*B)
 
 \ --- real division ---
 вывод: 7.0 / 2
 \ => 3.5
 вывод: 1.0 / 3.0
-\ => 0.3333333333333333   (implementation-defined precision)
+\ => 0.3333333333333333
+\ (implementation-defined precision)
 
 \ --- int / int: result is integer if exact, real otherwise (spec §2.2.4.2) ---
 вывод: 6 / 2
@@ -73,13 +76,15 @@
 вывод: 2 ** 3 * 4
 \ => 32
 вывод: -2 ** 2
-\ => -4           (unary - same precedence as binary, left-to-right: -(2**2)? or (-2)**2?)
-                  \ spec says unary +/- same level as binary +/-, LOWER than **
-                  \ so: -(2**2) = -4
+\ => -4
+\ (unary - same precedence as binary, left-to-right: -(2**2)? or (-2)**2?)
+\ spec says unary +/- same level as binary +/-, LOWER than **
+\ so: -(2**2) = -4
 вывод: 2 + 3 > 4
 \ => да
 вывод: не 3 > 4
-\ => да            (не has lower precedence than > -- wait, spec says не < =, so: не (3>4) = да)
+\ => да
+\ (не has lower precedence than >)
 
 \ --- standard math functions ---
 вывод: abs(-7)
@@ -106,4 +111,6 @@
 \ => -5
 вывод: окрч(-5.7)
 \ => -6
-\ ТУДУ: добавить другие встроенные функции
+вывод: индекс(2, <* 1, 2, 4 *>)
+\ => 1
+\ (0-based: value 2 is at position 1)

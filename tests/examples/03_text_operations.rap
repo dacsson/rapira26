@@ -1,7 +1,7 @@
 \ Tests: text operations — length, index, concat, repeat, slice, subscript assign
 \ No input required.
 
-Т := "огурец"       \ length 6, 1-indexed
+Т := "огурец"       \ length 6, 0-indexed
 
 \ --- length ---
 вывод: #Т
@@ -9,29 +9,29 @@
 вывод: #""
 \ => 0
 
-\ --- indexing (1-based) ---
-вывод: Т[1]
+\ --- indexing (0-based, see PHASE1_DIFFERENCE.md) ---
+вывод: Т[0]
 \ => о
-вывод: Т[3]
+вывод: Т[2]
 \ => у
-вывод: Т[6]
+вывод: Т[5]
 \ => ц
 
-\ --- slicing ---
-вывод: Т[2:4]
+\ --- slicing (0-based) ---
+вывод: Т[1:4]
 \ => гур
-вывод: Т[4:]
-\ => рец          (from 4 to end)
+вывод: Т[3:]
+\ => рец
 вывод: Т[:3]
-\ => огу          (from 1 to 3)
+\ => огу
 вывод: Т[:]
-\ => огурец       (full copy)
+\ => огурец
 
 \ --- from spec (p.5): "аб вг д"
 АБ := "аб вг д"
-вывод: АБ[4:]
+вывод: АБ[3:]
 \ => вг д
-вывод: АБ[4:5]
+вывод: АБ[3:5]
 \ => вг
 
 \ --- concat ---
@@ -44,14 +44,15 @@
 вывод: "аб" * 3
 \ => абабаб
 вывод: "х" * 0
-\ => (empty string)
+\ => (empty line)
 вывод: 3 * "аб"
-\ => абабаб        (order can be either way per spec)
+\ => абабаб
+\ (order can be either way per spec)
 
 \ --- concat builds reversed string ---
 НАОБОРОТ := ""
 Т2 := "abcd"
-для К от 1 до #Т2 цикл
+для К от 0 до #Т2 - 1 цикл
   НАОБОРОТ := Т2[К] + НАОБОРОТ
 кц
 вывод: НАОБОРОТ
@@ -59,12 +60,12 @@
 
 \ --- subscript assignment ---
 С := "hello"
-С[1] := "H"           \ replace single char (assigned value must be text of length 1)
+С[0] := "H"
 вывод: С
 \ => Hello
 
 \ --- slice assignment (replaces the slice) ---
-С[2:3] := "EL"
+С[1:3] := "EL"
 вывод: С
 \ => HELlo
 
@@ -76,10 +77,10 @@
 вывод: "" = ""
 \ => да
 
-\ --- индекс: first occurrence of substring in text, or 0 ---
+\ --- индекс: first occurrence of substring in text (0-based, -1 if not found) ---
 вывод: индекс("вг", "аб вг д")
-\ => 4
+\ => 3
 вывод: индекс("х", "аб вг д")
-\ => 0
+\ => -1
 вывод: индекс("", "abc")
-\ => 1              (empty string found at position 1)
+\ => 0

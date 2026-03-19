@@ -52,7 +52,7 @@ pub enum Token {
     KwПусто, // пусто
     KwДа,    // да
     KwНет,   // нет
-    KwНс,    // нс  (newline character constant)
+    KwПс,    // пс  (newline character constant, spec §2.3)
     KwПи,    // пи  (π)
     KwPi,    // pi  (π, Latin alias)
 
@@ -214,7 +214,7 @@ impl<'input> Lexer<'input> {
             "пусто" => Token::KwПусто,
             "да" => Token::KwДа,
             "нет" => Token::KwНет,
-            "нс" => Token::KwНс,
+            "пс" => Token::KwПс,
             "пи" => Token::KwПи,
             "pi" => Token::KwPi,
             other => Token::Ident(other.to_string()),

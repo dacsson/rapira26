@@ -147,7 +147,7 @@ impl<'input> Parser<'input> {
                     | Token::KwПусто
                     | Token::KwДа
                     | Token::KwНет
-                    | Token::KwНс
+                    | Token::KwПс
                     | Token::KwПи
                     | Token::KwPi
                     | Token::LParen
@@ -827,7 +827,7 @@ impl<'input> Parser<'input> {
 
     // * / // /% (left-associative)
     fn parse_expr_mul(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_expr_power()?;
+        let mut left = self.parse_expr_unary()?;
         loop {
             let operator = match self.peek() {
                 Some(Token::Star) => BinaryOperator::Multiply,
@@ -849,7 +849,7 @@ impl<'input> Parser<'input> {
 
     // ** (right-associative)
     fn parse_expr_power(&mut self) -> Result<Expr, ParseError> {
-        let base = self.parse_expr_unary()?;
+        let base = self.parse_expr_length()?;
         if self.eat(&Token::StarStar) {
             let exponent = self.parse_expr_power()?; // right-recursive for right-associativity
             Ok(Expr::BinaryOp {
@@ -877,7 +877,7 @@ impl<'input> Parser<'input> {
                 operand: Box::new(operand),
             })
         } else {
-            self.parse_expr_length()
+            self.parse_expr_power()
         }
     }
 
@@ -1013,7 +1013,7 @@ impl<'input> Parser<'input> {
                 self.advance();
                 Ok(Expr::Literal(Literal::Boolean(false)))
             }
-            Some(Token::KwНс) => {
+            Some(Token::KwПс) => {
                 self.advance();
                 Ok(Expr::Literal(Literal::Text("\n".to_string())))
             }

@@ -50,6 +50,8 @@ pub struct Codegen {
     param_counter: usize,
     /// Name of the current call frame variable ("_main_frame" at top level, "_frame" inside funcs)
     current_frame: String,
+    /// Variables declared in current scope (mangled names), to emit `RAP_Object *` only once
+    declared_vars: std::collections::HashSet<String>,
 }
 
 impl Codegen {
@@ -62,6 +64,7 @@ impl Codegen {
             string_counter: 0,
             param_counter: 0,
             current_frame: "_main_frame".to_string(),
+            declared_vars: std::collections::HashSet::new(),
         }
     }
 
@@ -207,14 +210,16 @@ impl Codegen {
         let saved_temp = self.temp_counter;
         let saved_string = self.string_counter;
         let saved_frame = std::mem::replace(&mut self.current_frame, "_frame".to_string());
+        let saved_declared = std::mem::take(&mut self.declared_vars);
 
         self.indent_level = 1;
         self.temp_counter = 0;
         self.string_counter = 0;
 
-        // Unpack parameters from _args array
+        // Unpack parameters from _args array — mark them as declared
         for (i, param_name) in func_def.parameters.iter().enumerate() {
             let mangled = self.mangle_name(param_name);
+            self.declared_vars.insert(mangled.clone());
             self.emit_line(&format!("RAP_Object *{} = _args[{}];", mangled, i));
         }
         if !func_def.parameters.is_empty() {
@@ -246,6 +251,7 @@ impl Codegen {
         self.temp_counter = saved_temp;
         self.string_counter = saved_string;
         self.current_frame = saved_frame;
+        self.declared_vars = saved_declared;
 
         // 2. Emit callable registration at current scope (the enclosing scope "owns" it).
         self.emit_callable_registration(
@@ -269,17 +275,19 @@ impl Codegen {
         let saved_temp = self.temp_counter;
         let saved_string = self.string_counter;
         let saved_frame = std::mem::replace(&mut self.current_frame, "_frame".to_string());
+        let saved_declared = std::mem::take(&mut self.declared_vars);
 
         self.indent_level = 1;
         self.temp_counter = 0;
         self.string_counter = 0;
 
-        // Unpack parameters
+        // Unpack parameters — mark them as declared
         for (i, param) in proc_def.parameters.iter().enumerate() {
             let param_name = match param {
                 ProcParameter::Input(n) | ProcParameter::InOut(n) => n,
             };
             let mangled = self.mangle_name(param_name);
+            self.declared_vars.insert(mangled.clone());
             self.emit_line(&format!("RAP_Object *{} = _args[{}];", mangled, i));
         }
         if !proc_def.parameters.is_empty() {
@@ -308,6 +316,7 @@ impl Codegen {
         self.temp_counter = saved_temp;
         self.string_counter = saved_string;
         self.current_frame = saved_frame;
+        self.declared_vars = saved_declared;
 
         let params: Vec<(&str, &str)> = proc_def
             .parameters
@@ -469,7 +478,11 @@ impl Codegen {
         match target {
             LValue::Name(name) => {
                 let mangled = self.mangle_name(name);
-                self.emit_line(&format!("{} = {};", mangled, value_temp));
+                if self.declared_vars.insert(mangled.clone()) {
+                    self.emit_line(&format!("RAP_Object *{} = {};", mangled, value_temp));
+                } else {
+                    self.emit_line(&format!("{} = {};", mangled, value_temp));
+                }
             }
             LValue::Subscript { collection, index } => {
                 let coll_temp = self.emit_expression(collection);
@@ -479,8 +492,31 @@ impl Codegen {
                     coll_temp, idx_temp, value_temp
                 ));
             }
-            LValue::Slice { .. } => {
-                self.emit_line("// TODO: slice assignment — needs runtime support");
+            LValue::Slice {
+                collection,
+                from,
+                to,
+            } => {
+                let coll_temp = self.emit_expression(collection);
+                let from_val = if let Some(f) = from {
+                    format!("RAP_get_int_val({})", self.emit_expression(f))
+                } else {
+                    "0".to_string()
+                };
+                let to_val = if let Some(t) = to {
+                    format!("RAP_get_int_val({})", self.emit_expression(t))
+                } else {
+                    format!("RAP_get_int_val(RAP_length({c}))", c = coll_temp)
+                };
+                let slice_temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{} = RAP_create_slice({}, {}, {});",
+                    slice_temp, coll_temp, from_val, to_val
+                ));
+                self.emit_line(&format!(
+                    "RAP_slice_assign({}, {});",
+                    slice_temp, value_temp
+                ));
             }
         }
     }
@@ -521,17 +557,25 @@ impl Codegen {
                 cases,
                 else_body,
             } => {
+                // Pre-evaluate selector and all case values before the if-else chain,
+                // so temps are declared in the enclosing scope (not inside a branch).
                 let sel_temp = self.emit_expression(expression);
-                for (i, case) in cases.iter().enumerate() {
-                    // Build OR-chain: if (sel == v1 || sel == v2 || ...)
-                    let mut conditions = Vec::new();
-                    for val_expr in &case.values {
-                        let val_temp = self.emit_expression(val_expr);
-                        conditions.push(format!(
-                            "RAP_integer_equal({}, {})->logical_val",
-                            sel_temp, val_temp
-                        ));
-                    }
+                let case_value_temps: Vec<Vec<String>> = cases
+                    .iter()
+                    .map(|case| {
+                        case.values
+                            .iter()
+                            .map(|val_expr| self.emit_expression(val_expr))
+                            .collect()
+                    })
+                    .collect();
+
+                for (i, (case, val_temps)) in cases.iter().zip(case_value_temps.iter()).enumerate()
+                {
+                    let conditions: Vec<String> = val_temps
+                        .iter()
+                        .map(|vt| format!("RAP_equal({}, {})->logical_val", sel_temp, vt))
+                        .collect();
                     let keyword = if i == 0 { "if" } else { "} else if" };
                     self.emit_line(&format!("{} ({}) {{", keyword, conditions.join(" || ")));
                     self.indent_level += 1;
@@ -548,8 +592,13 @@ impl Codegen {
             }
 
             SelectionStatement::ConditionList { cases, else_body } => {
-                for (i, case) in cases.iter().enumerate() {
-                    let cond_temp = self.emit_expression(&case.condition);
+                // Pre-evaluate all conditions before the if-else chain.
+                let cond_temps: Vec<String> = cases
+                    .iter()
+                    .map(|case| self.emit_expression(&case.condition))
+                    .collect();
+
+                for (i, (case, cond_temp)) in cases.iter().zip(cond_temps.iter()).enumerate() {
                     let keyword = if i == 0 { "if" } else { "} else if" };
                     self.emit_line(&format!("{} ({}->logical_val) {{", keyword, cond_temp));
                     self.indent_level += 1;
@@ -588,6 +637,11 @@ impl Codegen {
 
                 let to_temp = to.as_ref().map(|to_expr| self.emit_expression(to_expr));
 
+                let loop_id = self.temp_counter;
+                self.temp_counter += 1;
+                let iter_var = format!("_iter_{}_{}", Self::transliterate(variable), loop_id);
+                let local_var = self.mangle_name(variable);
+
                 let step_val = if let Some(step_expr) = step {
                     let t = self.emit_expression(step_expr);
                     format!("RAP_get_int_val({})", t)
@@ -595,11 +649,12 @@ impl Codegen {
                     "1".to_string()
                 };
 
-                let iter_var = format!("_iter_{}", Self::transliterate(variable));
-                let local_var = self.mangle_name(variable);
+                // Store step in a variable so we can check direction at runtime
+                let step_var = format!("_step_{}", loop_id);
+                self.emit_line(&format!("int64_t {} = {};", step_var, step_val));
 
                 // Extract upper limit as int64_t, handling both int and float bounds
-                let limit_var = format!("_for_limit_{}", Self::transliterate(variable));
+                let limit_var = format!("_for_limit_{}", loop_id);
                 if let Some(ref to_t) = to_temp {
                     self.emit_line(&format!(
                         "int64_t {} = ({}->tag == RAP_OBJECT_TAG_INT) \
@@ -608,16 +663,21 @@ impl Codegen {
                     ));
                 }
 
+                // step > 0 → iter <= limit; step < 0 → iter >= limit
                 let condition = if to_temp.is_some() {
-                    format!("{} <= {}", iter_var, limit_var)
+                    format!(
+                        "({s} > 0 ? {i} <= {l} : {i} >= {l})",
+                        s = step_var,
+                        i = iter_var,
+                        l = limit_var
+                    )
                 } else {
-                    // для X от 1 (no upper bound — infinite, controlled by выход)
                     "1".to_string()
                 };
 
                 self.emit_line(&format!(
                     "for (int64_t {} = RAP_get_int_val({}); {}; {} += {}) {{",
-                    iter_var, from_temp, condition, iter_var, step_val
+                    iter_var, from_temp, condition, iter_var, step_var
                 ));
                 self.indent_level += 1;
                 self.emit_line(&format!(
@@ -720,9 +780,27 @@ impl Codegen {
                 result
             }
 
-            Expr::Slice { .. } => {
+            Expr::Slice {
+                collection,
+                from,
+                to,
+            } => {
+                let coll_temp = self.emit_expression(collection);
+                let from_val = if let Some(f) = from {
+                    format!("RAP_get_int_val({})", self.emit_expression(f))
+                } else {
+                    "0".to_string()
+                };
+                let to_val = if let Some(t) = to {
+                    format!("RAP_get_int_val({})", self.emit_expression(t))
+                } else {
+                    format!("RAP_get_int_val(RAP_length({c}))", c = coll_temp)
+                };
                 let result = self.fresh_temp();
-                self.emit_line(&format!("RAP_Object *{} = NULL; // TODO: slice", result));
+                self.emit_line(&format!(
+                    "RAP_Object *{} = RAP_create_slice({}, {}, {});",
+                    result, coll_temp, from_val, to_val
+                ));
                 result
             }
         }
@@ -759,14 +837,10 @@ impl Codegen {
             BinaryOperator::Greater => {
                 format!("RAP_greater_than({}, {})", left, right)
             }
-            BinaryOperator::LessOrEqual => format!(
-                "RAP_create_logical_obj(RAP_get_int_val({}) <= RAP_get_int_val({}))",
-                left, right
-            ),
-            BinaryOperator::GreaterOrEqual => format!(
-                "RAP_create_logical_obj(RAP_get_int_val({}) >= RAP_get_int_val({}))",
-                left, right
-            ),
+            BinaryOperator::LessOrEqual => format!("RAP_less_or_equal({}, {})", left, right),
+            BinaryOperator::GreaterOrEqual => {
+                format!("RAP_greater_or_equal({}, {})", left, right)
+            }
             BinaryOperator::Equal => {
                 format!("RAP_equal({}, {})", left, right)
             }
@@ -897,6 +971,68 @@ impl Codegen {
                      : (int64_t){a}->tuple_val->count);",
                     t = temp,
                     a = arg
+                ));
+                Some(temp)
+            }
+            "sign" | "знак" => {
+                let arg = self.emit_expression(&arguments[0]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{t} = RAP_sign({a});",
+                    t = temp,
+                    a = arg
+                ));
+                Some(temp)
+            }
+            "целч" => {
+                let arg = self.emit_expression(&arguments[0]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{t} = RAP_floor({a});",
+                    t = temp,
+                    a = arg
+                ));
+                Some(temp)
+            }
+            "окрч" => {
+                let arg = self.emit_expression(&arguments[0]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{t} = RAP_round({a});",
+                    t = temp,
+                    a = arg
+                ));
+                Some(temp)
+            }
+            "дсч" => {
+                let arg = self.emit_expression(&arguments[0]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{t} = RAP_random({a});",
+                    t = temp,
+                    a = arg
+                ));
+                Some(temp)
+            }
+            "цсч" => {
+                let arg = self.emit_expression(&arguments[0]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{t} = RAP_random_int({a});",
+                    t = temp,
+                    a = arg
+                ));
+                Some(temp)
+            }
+            "индекс" => {
+                let needle = self.emit_expression(&arguments[0]);
+                let haystack = self.emit_expression(&arguments[1]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{t} = RAP_index_of({n}, {h});",
+                    t = temp,
+                    n = needle,
+                    h = haystack
                 ));
                 Some(temp)
             }

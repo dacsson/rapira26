@@ -24,6 +24,15 @@ RAP_Object *RAP_call_callable_obj(RAP_Object *callable, RAP_Object **args,
 RAP_Object *RAP_get_tuple_item(RAP_Object *tuple, uint32_t index);
 RAP_Object *RAP_set_tuple_item(RAP_Object *tuple, uint32_t index,
                                RAP_Object *value);
+// Joins two tuples into a new tuple
+RAP_Object *RAP_append_tuple(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_index_of(RAP_Object *needle, RAP_Object *haystack);
+
+// SLICE OPERATIONS
+
+RAP_Object *RAP_create_slice(RAP_Object *parent, int64_t from, int64_t to);
+RAP_Object *RAP_materialize_slice(RAP_Object *obj);
+void RAP_slice_assign(RAP_Object *slice, RAP_Object *replacement);
 
 // INTEGER OPERATIONS
 
@@ -82,5 +91,18 @@ void RAP_free_call_frame(struct RAP_CallFrame *frame);
 #define RAP_get_callable_val(obj) ((obj)->callable_val)
 
 char *RAP_stringify_object(RAP_Object *obj);
+
+// BUILT-IN MATH FUNCTIONS
+
+RAP_Object *RAP_abs(RAP_Object *a);
+RAP_Object *RAP_sqrt(RAP_Object *a);
+RAP_Object *RAP_floor(RAP_Object *a);
+RAP_Object *RAP_ceil(RAP_Object *a);
+RAP_Object *RAP_round(RAP_Object *a);
+RAP_Object *RAP_min(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_max(RAP_Object *a, RAP_Object *b);
+RAP_Object *RAP_random(RAP_Object *a);
+RAP_Object *RAP_random_int(RAP_Object *a);
+RAP_Object *RAP_sign(RAP_Object *a);
 
 #endif // RAPIRA_RUNTIME_H

@@ -39,6 +39,7 @@ typedef struct {
     struct RAP_Tuple *text_val;
     struct RAP_Tuple *tuple_val;
     struct RAP_Callable *callable_val;
+    struct RAP_Slice *slice_val;
   };
 } RAP_Object;
 
@@ -84,11 +85,13 @@ struct RAP_Tuple {
 typedef RAP_Object *(*RAP_FunctionDecl)(struct RAP_CallFrame *frame,
                                         RAP_Object **args, uint32_t arg_count);
 
-/// Slices are a view into a tuple or string, allowing access to a subset of its
-/// items.
+/// Slice: a view into a tuple (or text).
+/// Holds a pointer to the parent and 0-based [from, to) bounds.
+/// Slices of slices flatten to the root parent (no chaining).
 struct RAP_Slice {
-  RAP_Object *first_element;
-  size_t length;
+  RAP_Object *parent;  // the tuple/text we're viewing
+  int64_t from;        // inclusive start
+  int64_t to;          // exclusive end
 };
 
 #endif // RAPIRA_OBJECT_H

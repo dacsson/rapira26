@@ -78,14 +78,14 @@ fn lex_logical_keywords() {
 
 #[test]
 fn lex_constant_keywords() {
-    let tokens = tokenize("пусто да нет нс пи pi");
+    let tokens = tokenize("пусто да нет пс пи pi");
     assert_eq!(
         tokens,
         vec![
             Token::KwПусто,
             Token::KwДа,
             Token::KwНет,
-            Token::KwНс,
+            Token::KwПс,
             Token::KwПи,
             Token::KwPi,
         ]
