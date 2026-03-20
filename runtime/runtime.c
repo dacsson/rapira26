@@ -14,6 +14,13 @@ void RAP_fatal_error(const char *message) {
 
 // HELPERS
 
+// Get the underlying RAP_Tuple* for both TUPLE and TEXT objects.
+static struct RAP_Tuple *get_items(RAP_Object *obj) {
+  if (obj->tag == RAP_OBJECT_TAG_TEXT) return obj->text_val;
+  return obj->tuple_val;
+}
+
+
 // Decode UTF-8 string into an array of codepoint values.
 // Caller must free *out_codepoints.
 static size_t utf8_decode_all(const char *s, int64_t **out_codepoints) {
@@ -148,6 +155,7 @@ RAP_Object *RAP_append_tuple(RAP_Object *a, RAP_Object *b) {
 // Returns 0-based position, or -1 if not found.
 // Spec uses 1-based and returns 0 for not found; we deviate intentionally (see PHASE1_DIFFERENCE.md).
 RAP_Object *RAP_index_of(RAP_Object *needle, RAP_Object *haystack) {
+  // Default tuple search
   if (haystack->tag == RAP_OBJECT_TAG_TUPLE) {
     for (uint32_t i = 0; i < haystack->tuple_val->count; i++) {
       if (RAP_equal(needle, haystack->tuple_val->items[i])->logical_val) {
@@ -156,6 +164,7 @@ RAP_Object *RAP_index_of(RAP_Object *needle, RAP_Object *haystack) {
     }
     return RAP_create_int_obj(-1);
   }
+  // Special case for strings
   if (haystack->tag == RAP_OBJECT_TAG_TEXT && needle->tag == RAP_OBJECT_TAG_TEXT) {
     struct RAP_Tuple *h = RAP_get_text_val(haystack);
     struct RAP_Tuple *n = RAP_get_text_val(needle);
@@ -173,17 +182,16 @@ RAP_Object *RAP_index_of(RAP_Object *needle, RAP_Object *haystack) {
     }
     return RAP_create_int_obj(-1);
   }
+  // Materialize slices and recurse
+  if (haystack->tag == RAP_OBJECT_TAG_SLICE || needle->tag == RAP_OBJECT_TAG_SLICE) {
+    return RAP_index_of(RAP_materialize_slice(needle), RAP_materialize_slice(haystack));
+  }
+  printf("%s %d %d\n", RAP_stringify_object(needle), needle->tag, haystack->tag);
   RAP_fatal_error("Неподдерживаемые типы для индекс()");
 }
 
 
 // SLICE OPERATIONS
-
-// Get the underlying RAP_Tuple* for both TUPLE and TEXT objects.
-static struct RAP_Tuple *get_items(RAP_Object *obj) {
-  if (obj->tag == RAP_OBJECT_TAG_TEXT) return obj->text_val;
-  return obj->tuple_val;
-}
 
 RAP_Object *RAP_create_slice(RAP_Object *parent, int64_t from, int64_t to) {
   // Flatten: if parent is already a slice, resolve to the root parent
@@ -690,6 +698,7 @@ RAP_Object *RAP_equal(RAP_Object *a, RAP_Object *b) {
     }
     return RAP_create_logical_obj(true);
   }
+  printf("%s %d %d\n", RAP_stringify_object(a), a->tag, b->tag);
   RAP_fatal_error("Неподдерживаемые типы для сравнения");
 }
 

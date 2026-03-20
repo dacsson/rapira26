@@ -34,6 +34,13 @@ fn escape_c_string(s: &str) -> String {
     out
 }
 
+/// Info needed to create a callable object at any call site.
+struct CallableInfo {
+    c_func_name: String,
+    /// (rapira_param_name, c_mode_constant)
+    params: Vec<(String, String)>,
+}
+
 /// Holds codegen state while walking the AST.
 pub struct Codegen {
     /// Current scope output (main body, or function body while emitting a definition)
@@ -52,6 +59,8 @@ pub struct Codegen {
     current_frame: String,
     /// Variables declared in current scope (mangled names), to emit `RAP_Object *` only once
     declared_vars: std::collections::HashSet<String>,
+    /// Rapira name → callable info, so call sites can create callables inline
+    known_callables: std::collections::HashMap<String, CallableInfo>,
 }
 
 impl Codegen {
@@ -63,8 +72,9 @@ impl Codegen {
             temp_counter: 0,
             string_counter: 0,
             param_counter: 0,
-            current_frame: "_main_frame".to_string(),
+            current_frame: "&_main_frame".to_string(),
             declared_vars: std::collections::HashSet::new(),
+            known_callables: std::collections::HashMap::new(),
         }
     }
 
@@ -202,6 +212,17 @@ impl Codegen {
     fn emit_function_def(&mut self, func_def: &FunctionDefinition) {
         let name = func_def.name.as_deref().unwrap_or("_anon");
         let c_func_name = self.mangle_func_name(name);
+        self.known_callables.insert(
+            name.to_string(),
+            CallableInfo {
+                c_func_name: c_func_name.clone(),
+                params: func_def
+                    .parameters
+                    .iter()
+                    .map(|p| (p.clone(), "RAP_PARAMETER_MODE_IN".to_string()))
+                    .collect(),
+            },
+        );
 
         // 1. Emit C function body into forward_decls.
         //    Save current codegen state, emit function body, then restore.
@@ -235,7 +256,6 @@ impl Codegen {
             "RAP_Object *{}(struct RAP_CallFrame *_frame,\n",
             c_func_name
         ));
-        // Align continuation to after the opening paren
         let align = format!("RAP_Object *{}(", c_func_name).len();
         self.forward_decls.push_str(&format!(
             "{:>width$}RAP_Object **_args, unsigned int _argc) {{\n",
@@ -252,22 +272,29 @@ impl Codegen {
         self.string_counter = saved_string;
         self.current_frame = saved_frame;
         self.declared_vars = saved_declared;
-
-        // 2. Emit callable registration at current scope (the enclosing scope "owns" it).
-        self.emit_callable_registration(
-            name,
-            &c_func_name,
-            &func_def
-                .parameters
-                .iter()
-                .map(|p| (p.as_str(), "RAP_PARAMETER_MODE_IN"))
-                .collect::<Vec<_>>(),
-        );
     }
 
     fn emit_procedure_def(&mut self, proc_def: &ProcedureDefinition) {
         let name = proc_def.name.as_deref().unwrap_or("_anon");
         let c_func_name = self.mangle_func_name(name);
+        self.known_callables.insert(
+            name.to_string(),
+            CallableInfo {
+                c_func_name: c_func_name.clone(),
+                params: proc_def
+                    .parameters
+                    .iter()
+                    .map(|p| match p {
+                        ProcParameter::Input(n) => {
+                            (n.clone(), "RAP_PARAMETER_MODE_IN".to_string())
+                        }
+                        ProcParameter::InOut(n) => {
+                            (n.clone(), "RAP_PARAMETER_MODE_OUT".to_string())
+                        }
+                    })
+                    .collect(),
+            },
+        );
 
         // Same two-step as emit_function_def
         let saved_output = std::mem::take(&mut self.output);
@@ -317,34 +344,21 @@ impl Codegen {
         self.string_counter = saved_string;
         self.current_frame = saved_frame;
         self.declared_vars = saved_declared;
-
-        let params: Vec<(&str, &str)> = proc_def
-            .parameters
-            .iter()
-            .map(|p| match p {
-                ProcParameter::Input(n) => (n.as_str(), "RAP_PARAMETER_MODE_IN"),
-                ProcParameter::InOut(n) => (n.as_str(), "RAP_PARAMETER_MODE_OUT"),
-            })
-            .collect();
-        self.emit_callable_registration(name, &c_func_name, &params);
     }
 
-    /// Emit the RAP_Parameter + RAP_create_callable_obj lines to register
-    /// a function/procedure as a callable in the current scope.
-    fn emit_callable_registration(
+    /// Emit inline callable creation, returns the temp variable name.
+    fn emit_inline_callable(
         &mut self,
-        rapira_name: &str,
         c_func_name: &str,
-        params: &[(&str, &str)], // (rapira_param_name, C_mode_constant)
-    ) {
+        params: &[(String, String)],
+    ) -> String {
+        let temp = self.fresh_temp();
         let param_count = params.len();
 
         if param_count == 0 {
             self.emit_line(&format!(
-                "RAP_Object *{} = RAP_create_callable_obj(&{}, &{}, NULL, 0);",
-                self.mangle_name(rapira_name),
-                self.current_frame,
-                c_func_name
+                "RAP_Object *{} = RAP_create_callable_obj({}, &{}, NULL, 0);",
+                temp, self.current_frame, c_func_name
             ));
         } else if param_count == 1 {
             let p = self.fresh_param();
@@ -352,34 +366,32 @@ impl Codegen {
                 "RAP_Parameter *{} = RAP_create_parameter({}, \"{}\");",
                 p, params[0].1, params[0].0
             ));
-            self.emit_line(&format!("RAP_Object *{} =", self.mangle_name(rapira_name)));
             self.emit_line(&format!(
-                "    RAP_create_callable_obj(&{}, &{}, &{}, {});",
-                self.current_frame, c_func_name, p, param_count
+                "RAP_Object *{} = RAP_create_callable_obj({}, &{}, &{}, {});",
+                temp, self.current_frame, c_func_name, p, param_count
             ));
         } else {
             let mut param_var_names = Vec::new();
-            for (rapira_param_name, mode) in params {
+            for (param_name, mode) in params {
                 let p = self.fresh_param();
                 self.emit_line(&format!(
                     "RAP_Parameter *{} = RAP_create_parameter({}, \"{}\");",
-                    p, mode, rapira_param_name
+                    p, mode, param_name
                 ));
                 param_var_names.push(p);
             }
-            let array_name = format!("_params_{}", Self::transliterate(rapira_name));
+            let array_name = format!("_params_{}", self.temp_counter);
             self.emit_line(&format!(
                 "RAP_Parameter *{}[] = {{{}}};",
                 array_name,
                 param_var_names.join(", ")
             ));
-            self.emit_line(&format!("RAP_Object *{} =", self.mangle_name(rapira_name)));
             self.emit_line(&format!(
-                "    RAP_create_callable_obj(&{}, &{}, {}, {});",
-                self.current_frame, c_func_name, array_name, param_count
+                "RAP_Object *{} = RAP_create_callable_obj({}, &{}, {}, {});",
+                temp, self.current_frame, c_func_name, array_name, param_count
             ));
         }
-        self.emit_blank_line();
+        temp
     }
 
     // ── Statements ───────────────────────────────────────────────────────
@@ -743,8 +755,14 @@ impl Codegen {
             Expr::Literal(lit) => self.emit_literal(lit),
 
             Expr::Name(name) => {
-                // No temp needed — just reference the local variable directly
-                self.mangle_name(name)
+                if let Some(info) = self.known_callables.get(name.as_str()) {
+                    // Known function/procedure — create callable inline
+                    let c_func_name = info.c_func_name.clone();
+                    let params = info.params.clone();
+                    self.emit_inline_callable(&c_func_name, &params)
+                } else {
+                    self.mangle_name(name)
+                }
             }
 
             Expr::BinaryOp {
