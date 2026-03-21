@@ -1,3 +1,4 @@
+#include "runtime.h"
 #include "runtime_internal.h"
 
 // Fatal error - print a message and exit.
@@ -145,7 +146,8 @@ char *RAP_stringify_object(RAP_Object *obj) {
     return RAP_stringify_object(materialized);
   }
   case RAP_OBJECT_TAG_CALLABLE: {
-    return strdup("<callable>");
+    char *name = RAP_get_callable_val(obj)->name;
+    return strdup(name ? name : "<callable>");
   }
   default: {
     return strdup("<unknown>");

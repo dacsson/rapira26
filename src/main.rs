@@ -112,7 +112,7 @@ fn main() {
         .arg("-o")
         .arg(&binary_path)
         .arg(format!("-I{}", runtime_dir.display()))
-        .arg(format!("-L{}", runtime_dir.display()))
+        .arg(format!("-L{}", runtime_dir.join("lib").display()))
         .arg("-lrapruntime")
         .arg("-lm")
         .status()
@@ -148,20 +148,20 @@ fn main() {
 fn find_runtime_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("RAPIRA_RUNTIME") {
         let candidate = PathBuf::from(dir);
-        if candidate.join("librapruntime.a").exists() {
+        if candidate.join("lib/librapruntime.a").exists() {
             return candidate;
         }
     }
 
     if let Ok(exe) = std::env::current_exe() {
         let candidate = exe.parent().unwrap().join("runtime");
-        if candidate.join("librapruntime.a").exists() {
+        if candidate.join("lib/librapruntime.a").exists() {
             return candidate;
         }
     }
 
     let candidate = PathBuf::from("runtime");
-    if candidate.join("librapruntime.a").exists() {
+    if candidate.join("lib/librapruntime.a").exists() {
         return candidate;
     }
 

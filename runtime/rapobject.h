@@ -79,6 +79,7 @@ struct RAP_Callable {
   struct RAP_CallFrame *frame;
   RAP_Parameter **params;
   uint32_t param_count;
+  bool is_function; // true for функ, false for проц
 };
 
 /// Tuple is a untyped list of objects.

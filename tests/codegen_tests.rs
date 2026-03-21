@@ -199,13 +199,11 @@ fn e2e_10_return_parameters() {
 }
 
 #[test]
-#[ignore] // needs: тип_* builtins
 fn e2e_11_type_checks() {
     assert_rap_output("11_type_checks.rap");
 }
 
 #[test]
-#[ignore] // needs: text ops, slices, in-out params, индекс, tuple repeat
 fn e2e_12_spec_examples() {
     assert_rap_output("12_spec_examples.rap");
 }

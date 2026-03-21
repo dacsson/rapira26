@@ -3,7 +3,8 @@
 RAP_Object *RAP_create_callable_obj(struct RAP_CallFrame *frame_parent,
                                     RAP_FunctionDecl func,
                                     RAP_Parameter **params,
-                                    uint32_t params_count) {
+                                    uint32_t params_count,
+                                    bool is_function) {
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_CALLABLE;
   obj->callable_val = malloc(sizeof(struct RAP_Callable));
@@ -15,6 +16,7 @@ RAP_Object *RAP_create_callable_obj(struct RAP_CallFrame *frame_parent,
   obj->callable_val->func = func;
   obj->callable_val->params = params;
   obj->callable_val->param_count = params_count;
+  obj->callable_val->is_function = is_function;
   return obj;
 }
 

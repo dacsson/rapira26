@@ -1,3 +1,4 @@
+#include "runtime.h"
 #include "runtime_internal.h"
 
 RAP_Object *RAP_create_tuple_obj(uint32_t count, RAP_Object **items) {
@@ -15,6 +16,8 @@ RAP_Object *RAP_create_tuple_obj(uint32_t count, RAP_Object **items) {
 RAP_Object *RAP_set_tuple_item(RAP_Object *container, uint32_t index,
                                RAP_Object *item) {
   if (container->tag != RAP_OBJECT_TAG_TUPLE && container->tag != RAP_OBJECT_TAG_TEXT) {
+    printf("container tag: %d\n", container->tag);
+    printf("item tag: %d\n", item->tag);
     RAP_fatal_error("Объект не является кортежем или текстом");
     return container;
   }
@@ -33,6 +36,9 @@ RAP_Object *RAP_set_tuple_item(RAP_Object *container, uint32_t index,
 
 RAP_Object *RAP_get_tuple_item(RAP_Object *container, uint32_t index) {
   if (container->tag != RAP_OBJECT_TAG_TUPLE && container->tag != RAP_OBJECT_TAG_TEXT) {
+    printf("%s\n", RAP_stringify_object(container));
+    printf("container tag: %d\n", container->tag);
+    printf("index: %u\n", index);
     RAP_fatal_error("Объект не является кортежем или текстом");
     return container;
   }
@@ -126,7 +132,7 @@ RAP_Object *RAP_create_slice(RAP_Object *parent, int64_t from, int64_t to) {
   if (from > to) from = to;
 
   // For slices that are actually just a single item, expand so we include just the item itself
-  if (from == to) to += 1;
+  if (from == to && to < count) to += 1;
 
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_SLICE;

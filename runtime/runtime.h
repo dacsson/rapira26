@@ -13,7 +13,8 @@ RAP_Object *RAP_create_tuple_obj(uint32_t count, RAP_Object **items);
 RAP_Object *RAP_create_callable_obj(struct RAP_CallFrame *frame_parent,
                                     RAP_FunctionDecl func,
                                     RAP_Parameter **params,
-                                    uint32_t params_count);
+                                    uint32_t params_count,
+                                    bool is_function);
 RAP_Parameter *RAP_create_parameter(RAP_ParameterMode mode, const char *name);
 RAP_Object *RAP_create_logical_obj(bool value);
 

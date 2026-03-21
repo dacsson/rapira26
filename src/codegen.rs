@@ -39,6 +39,7 @@ struct CallableInfo {
     c_func_name: String,
     /// (rapira_param_name, c_mode_constant)
     params: Vec<(String, String)>,
+    is_function: bool,
 }
 
 /// Holds codegen state while walking the AST.
@@ -228,6 +229,7 @@ impl Codegen {
                     .iter()
                     .map(|p| (p.clone(), "RAP_PARAMETER_MODE_IN".to_string()))
                     .collect(),
+                is_function: true,
             },
         );
 
@@ -310,6 +312,7 @@ impl Codegen {
                         }
                     })
                     .collect(),
+                is_function: false,
             },
         );
 
@@ -387,14 +390,15 @@ impl Codegen {
     }
 
     /// Emit inline callable creation, returns the temp variable name.
-    fn emit_inline_callable(&mut self, c_func_name: &str, params: &[(String, String)]) -> String {
+    fn emit_inline_callable(&mut self, c_func_name: &str, params: &[(String, String)], is_function: bool) -> String {
         let temp = self.fresh_temp();
         let param_count = params.len();
+        let is_func_str = if is_function { "true" } else { "false" };
 
         if param_count == 0 {
             self.emit_line(&format!(
-                "RAP_Object *{} = RAP_create_callable_obj({}, &{}, NULL, 0);",
-                temp, self.current_frame, c_func_name
+                "RAP_Object *{} = RAP_create_callable_obj({}, &{}, NULL, 0, {});",
+                temp, self.current_frame, c_func_name, is_func_str
             ));
         } else if param_count == 1 {
             let p = self.fresh_param();
@@ -403,8 +407,8 @@ impl Codegen {
                 p, params[0].1, params[0].0
             ));
             self.emit_line(&format!(
-                "RAP_Object *{} = RAP_create_callable_obj({}, &{}, &{}, {});",
-                temp, self.current_frame, c_func_name, p, param_count
+                "RAP_Object *{} = RAP_create_callable_obj({}, &{}, &{}, {}, {});",
+                temp, self.current_frame, c_func_name, p, param_count, is_func_str
             ));
         } else {
             let mut param_var_names = Vec::new();
@@ -423,8 +427,8 @@ impl Codegen {
                 param_var_names.join(", ")
             ));
             self.emit_line(&format!(
-                "RAP_Object *{} = RAP_create_callable_obj({}, &{}, {}, {});",
-                temp, self.current_frame, c_func_name, array_name, param_count
+                "RAP_Object *{} = RAP_create_callable_obj({}, &{}, {}, {}, {});",
+                temp, self.current_frame, c_func_name, array_name, param_count, is_func_str
             ));
         }
         temp
@@ -856,7 +860,8 @@ impl Codegen {
                     // Known function/procedure — create callable inline
                     let c_func_name = info.c_func_name.clone();
                     let params = info.params.clone();
-                    self.emit_inline_callable(&c_func_name, &params)
+                    let is_function = info.is_function;
+                    self.emit_inline_callable(&c_func_name, &params, is_function)
                 } else if self.declared_vars.contains(&self.mangle_name(name)) {
                     // Parameter — use C local directly
                     self.mangle_name(name)
@@ -1164,6 +1169,78 @@ impl Codegen {
                     t = temp,
                     n = needle,
                     h = haystack
+                ));
+                Some(temp)
+            }
+            "тип_пуст" => {
+                let arg = self.emit_expression(&arguments[0]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_NULL);",
+                    t = temp, a = arg
+                ));
+                Some(temp)
+            }
+            "тип_лог" => {
+                let arg = self.emit_expression(&arguments[0]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_LOGICAL);",
+                    t = temp, a = arg
+                ));
+                Some(temp)
+            }
+            "тип_цел" => {
+                let arg = self.emit_expression(&arguments[0]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_INT);",
+                    t = temp, a = arg
+                ));
+                Some(temp)
+            }
+            "тип_вещ" => {
+                let arg = self.emit_expression(&arguments[0]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_FLOAT);",
+                    t = temp, a = arg
+                ));
+                Some(temp)
+            }
+            "тип_текст" => {
+                let arg = self.emit_expression(&arguments[0]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_TEXT);",
+                    t = temp, a = arg
+                ));
+                Some(temp)
+            }
+            "тип_корт" => {
+                let arg = self.emit_expression(&arguments[0]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_TUPLE);",
+                    t = temp, a = arg
+                ));
+                Some(temp)
+            }
+            "тип_проц" => {
+                let arg = self.emit_expression(&arguments[0]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_CALLABLE && !{a}->callable_val->is_function);",
+                    t = temp, a = arg
+                ));
+                Some(temp)
+            }
+            "тип_функ" => {
+                let arg = self.emit_expression(&arguments[0]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_CALLABLE && {a}->callable_val->is_function);",
+                    t = temp, a = arg
                 ));
                 Some(temp)
             }
