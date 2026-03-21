@@ -261,7 +261,7 @@ fn parse_slice_assignment() {
 
 #[test]
 fn parse_if_then() {
-    let statement = parse_first_statement("если да то вывод: 1 все");
+    let statement = parse_first_statement("если да то вывод: 1");
     match statement {
         Statement::Conditional { else_body, .. } => {
             assert!(else_body.is_none());
@@ -272,7 +272,7 @@ fn parse_if_then() {
 
 #[test]
 fn parse_if_then_else() {
-    let statement = parse_first_statement("если да то вывод: 1 иначе вывод: 2 все");
+    let statement = parse_first_statement("если да то вывод: 1 иначе вывод: 2");
     match statement {
         Statement::Conditional { else_body, .. } => {
             assert!(else_body.is_some());
@@ -286,7 +286,7 @@ fn parse_if_then_else() {
 #[test]
 fn parse_selection_value_match() {
     let statement = parse_first_statement(
-        "выбор X при 1: вывод: \"один\" при 2: вывод: \"два\" иначе вывод: \"другое\" все"
+        "выбор X\n  при 1: вывод: \"один\"\n  при 2: вывод: \"два\"\n  иначе вывод: \"другое\""
     );
     match statement {
         Statement::Selection(SelectionStatement::ValueMatch { cases, else_body, .. }) => {
@@ -300,7 +300,7 @@ fn parse_selection_value_match() {
 #[test]
 fn parse_selection_condition_list() {
     let statement = parse_first_statement(
-        "выбор при да: вывод: 1 при нет: вывод: 2 все"
+        "выбор\n  при да: вывод: 1\n  при нет: вывод: 2"
     );
     match statement {
         Statement::Selection(SelectionStatement::ConditionList { cases, .. }) => {
@@ -314,7 +314,7 @@ fn parse_selection_condition_list() {
 
 #[test]
 fn parse_infinite_loop() {
-    let statement = parse_first_statement("цикл выход кц");
+    let statement = parse_first_statement("цикл выход");
     match statement {
         Statement::Loop(LoopStatement { header: LoopHeader::Infinite, .. }) => {}
         other => panic!("expected Loop(Infinite), got {other:?}"),
@@ -323,7 +323,7 @@ fn parse_infinite_loop() {
 
 #[test]
 fn parse_repeat_loop() {
-    let statement = parse_first_statement("повтор 5 цикл вывод: 1 кц");
+    let statement = parse_first_statement("повтор 5 цикл вывод: 1");
     match statement {
         Statement::Loop(LoopStatement { header: LoopHeader::Repeat(_), .. }) => {}
         other => panic!("expected Loop(Repeat), got {other:?}"),
@@ -332,7 +332,7 @@ fn parse_repeat_loop() {
 
 #[test]
 fn parse_for_loop_full() {
-    let statement = parse_first_statement("для I от 1 до 10 шаг 2 цикл вывод: I кц");
+    let statement = parse_first_statement("для I от 1 до 10 шаг 2 цикл вывод: I");
     match statement {
         Statement::Loop(LoopStatement { header: LoopHeader::For { variable, from, to, step }, .. }) => {
             assert_eq!(variable, "I");
@@ -346,7 +346,7 @@ fn parse_for_loop_full() {
 
 #[test]
 fn parse_for_loop_minimal() {
-    let statement = parse_first_statement("для I до 5 цикл кц");
+    let statement = parse_first_statement("для I до 5 цикл выход");
     match statement {
         Statement::Loop(LoopStatement { header: LoopHeader::For { variable, from, to, step }, .. }) => {
             assert_eq!(variable, "I");
@@ -360,7 +360,7 @@ fn parse_for_loop_minimal() {
 
 #[test]
 fn parse_while_condition() {
-    let statement = parse_first_statement("пока да цикл кц");
+    let statement = parse_first_statement("пока да цикл выход");
     match statement {
         Statement::Loop(LoopStatement { while_condition, .. }) => {
             assert!(while_condition.is_some());
@@ -371,7 +371,7 @@ fn parse_while_condition() {
 
 #[test]
 fn parse_post_condition() {
-    let statement = parse_first_statement("цикл вывод: 1 кц по да");
+    let statement = parse_first_statement("цикл\n  вывод: 1\nпо да");
     match statement {
         Statement::Loop(LoopStatement { post_condition, .. }) => {
             assert!(post_condition.is_some());
@@ -444,7 +444,7 @@ fn parse_input_text_mode() {
 
 #[test]
 fn parse_simple_procedure() {
-    let proc_def = parse_first_procedure("проц ПРИВЕТ () вывод: \"hello\" конец");
+    let proc_def = parse_first_procedure("проц ПРИВЕТ ()\n  вывод: \"hello\"");
     assert_eq!(proc_def.name, Some("ПРИВЕТ".to_string()));
     assert!(proc_def.parameters.is_empty());
     assert_eq!(proc_def.body.len(), 1);
@@ -452,7 +452,7 @@ fn parse_simple_procedure() {
 
 #[test]
 fn parse_procedure_with_params() {
-    let proc_def = parse_first_procedure("проц ТЕСТ (A, =>B, <=C) конец");
+    let proc_def = parse_first_procedure("проц ТЕСТ (A, =>B, <=C)\n  возврат");
     assert_eq!(proc_def.parameters.len(), 3);
     assert!(matches!(&proc_def.parameters[0], ProcParameter::Input(name) if name == "A"));
     assert!(matches!(&proc_def.parameters[1], ProcParameter::Input(name) if name == "B"));
@@ -461,14 +461,14 @@ fn parse_procedure_with_params() {
 
 #[test]
 fn parse_procedure_with_name_declarations() {
-    let proc_def = parse_first_procedure("проц ТЕСТ () свои: X, Y чужие: Z конец");
+    let proc_def = parse_first_procedure("проц ТЕСТ ()\n  свои: X, Y\n  чужие: Z\n  возврат");
     assert_eq!(proc_def.name_declarations.own_names, vec!["X", "Y"]);
     assert_eq!(proc_def.name_declarations.foreign_names, vec!["Z"]);
 }
 
 #[test]
 fn parse_simple_function() {
-    let func_def = parse_first_function("функ ОДИН () возврат 1 конец");
+    let func_def = parse_first_function("функ ОДИН ()\n  возврат 1");
     assert_eq!(func_def.name, Some("ОДИН".to_string()));
     assert!(func_def.parameters.is_empty());
     assert_eq!(func_def.body.len(), 1);
@@ -476,7 +476,7 @@ fn parse_simple_function() {
 
 #[test]
 fn parse_function_with_params() {
-    let func_def = parse_first_function("функ КВАДРАТ (N) возврат N * N конец");
+    let func_def = parse_first_function("функ КВАДРАТ (N)\n  возврат N * N");
     assert_eq!(func_def.parameters, vec!["N"]);
 }
 
@@ -485,7 +485,7 @@ fn parse_function_with_params() {
 #[test]
 fn parse_return_from_procedure() {
     let proc_def = parse_first_procedure(
-        "проц ТЕСТ (N) если N <= 0 то возврат все вывод: N конец"
+        "проц ТЕСТ (N)\n  если N <= 0 то возврат\n  вывод: N"
     );
     // возврат in procedure body should be ReturnFromProcedure
     match &proc_def.body[0] {
@@ -498,7 +498,7 @@ fn parse_return_from_procedure() {
 
 #[test]
 fn parse_return_from_function() {
-    let func_def = parse_first_function("функ ОДИН () возврат 1 конец");
+    let func_def = parse_first_function("функ ОДИН ()\n  возврат 1");
     match &func_def.body[0] {
         Statement::ReturnFromFunction(expr) => {
             assert!(matches!(**expr, Expr::Literal(Literal::Integer(1))));
@@ -573,7 +573,7 @@ fn parse_function_call_expression() {
 
 #[test]
 fn parse_exit_loop() {
-    let statement = parse_first_statement("цикл выход кц");
+    let statement = parse_first_statement("цикл выход");
     match statement {
         Statement::Loop(LoopStatement { body, .. }) => {
             assert!(matches!(&body[0], Statement::ExitLoop));
@@ -592,7 +592,7 @@ fn parse_multiple_statements() {
 
 #[test]
 fn parse_mixed_definitions_and_statements() {
-    let program = parse("функ Ф () возврат 1 конец\nвывод: Ф()");
+    let program = parse("функ Ф ()\n  возврат 1\nвывод: Ф()");
     assert_eq!(program.units.len(), 2);
     assert!(matches!(&program.units[0], ProgramUnit::FunctionDefinition(_)));
     assert!(matches!(&program.units[1], ProgramUnit::Statement(_)));

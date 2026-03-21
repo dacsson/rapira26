@@ -1,11 +1,16 @@
-/// Hand-written lexer for the Rapira language (spec Препринт 767).
+/// Indentation-aware lexer for the Rapira language (spec Препринт 767).
 ///
-/// Produces `(byte_start, Token, byte_end)` triples for LALRPOP.
-/// Whitespace, newlines, semicolons (statement separators), and
-/// `\`-to-end-of-line comments are silently consumed.
+/// Produces `(byte_start, Token, byte_end)` triples.
+/// Emits `Indent`/`Dedent` tokens based on leading whitespace changes
+/// (Python-style significant indentation). Newlines separate statements.
+/// Inside balanced delimiters `()`, `[]`, `<* *>`, newlines and indentation
+/// are suppressed.
 ///
-/// Case-sensitivity: keywords are lowercase per the spec examples.
-/// Identifiers are case-sensitive (variables are conventionally uppercase).
+/// Tabs in leading indentation are rejected; only spaces are allowed.
+/// Comments (`\` to end of line) and blank lines are skipped during
+/// indentation processing and never affect the indent level.
+
+use std::collections::VecDeque;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -14,7 +19,7 @@ pub enum Token {
     KwЕсли,   // если
     KwТо,     // то
     KwИначе,  // иначе
-    KwВсе,    // все
+    KwВсе,    // все     (legacy, kept for error messages)
     KwВыбор,  // выбор
     KwПри,    // при
     KwДля,    // для
@@ -24,14 +29,14 @@ pub enum Token {
     KwПока,   // пока
     KwПовтор, // повтор
     KwЦикл,   // цикл
-    KwКц,     // кц
+    KwКц,     // кц      (legacy, kept for error messages)
     KwПо,     // по
     KwВыход,  // выход
 
     // Definitions
     KwПроц,    // проц
     KwФунк,    // функ
-    KwКонец,   // конец
+    KwКонец,   // конец   (legacy, kept for error messages)
     KwВозврат, // возврат
     KwЧужие,   // чужие
     KwСвои,    // свои
@@ -55,6 +60,11 @@ pub enum Token {
     KwПс,    // пс  (newline character constant, spec §2.3)
     KwПи,    // пи  (π)
     KwPi,    // pi  (π, Latin alias)
+
+    // ── Indentation tokens ───────────────────────────────────────────────
+    Newline, // end of a logical line
+    Indent,  // increase in indentation level
+    Dedent,  // decrease in indentation level
 
     // ── Identifiers & literals ────────────────────────────────────────────
     Ident(String),
@@ -113,6 +123,16 @@ pub struct Lexer<'input> {
     chars: std::iter::Peekable<std::str::CharIndices<'input>>,
     /// Byte offset of the character currently being examined
     current_position: usize,
+    /// Stack of indentation levels (in spaces), starts with [0]
+    indent_stack: Vec<usize>,
+    /// Buffered tokens (multiple Dedents, etc.)
+    pending: VecDeque<Result<(usize, Token, usize), LexerError>>,
+    /// True when the next content should trigger indentation processing
+    at_line_start: bool,
+    /// Nesting depth of `()`, `[]`, `<* *>` — suppresses Newline/Indent/Dedent
+    paren_depth: usize,
+    /// Whether EOF Dedents have already been emitted
+    emitted_eof_dedents: bool,
 }
 
 impl<'input> Lexer<'input> {
@@ -121,6 +141,11 @@ impl<'input> Lexer<'input> {
             source,
             chars: source.char_indices().peekable(),
             current_position: 0,
+            indent_stack: vec![0],
+            pending: VecDeque::new(),
+            at_line_start: true,
+            paren_depth: 0,
+            emitted_eof_dedents: false,
         }
     }
 
@@ -128,6 +153,13 @@ impl<'input> Lexer<'input> {
 
     fn peek_char(&mut self) -> Option<char> {
         self.chars.peek().map(|&(_, character)| character)
+    }
+
+    fn peek_position(&mut self) -> usize {
+        self.chars
+            .peek()
+            .map(|&(position, _)| position)
+            .unwrap_or(self.source.len())
     }
 
     fn advance(&mut self) -> Option<(usize, char)> {
@@ -138,28 +170,137 @@ impl<'input> Lexer<'input> {
         next
     }
 
-    fn skip_whitespace_and_comments(&mut self) {
-        loop {
-            match self.peek_char() {
-                // Spaces, tabs, newlines, carriage returns, semicolons are all
-                // treated as statement separators / insignificant whitespace.
-                Some(' ') | Some('\t') | Some('\n') | Some('\r') | Some(';') => {
-                    self.advance();
-                }
-                // `\` begins a comment that runs to end of line (spec §2.1)
-                Some('\\') => {
-                    self.advance();
-                    while let Some(character) = self.peek_char() {
-                        self.advance();
-                        if character == '\n' {
-                            break;
-                        }
-                    }
-                }
-                _ => break,
+    /// Skip characters until end of line (stops before the newline char).
+    fn skip_to_eol(&mut self) {
+        while let Some(character) = self.peek_char() {
+            if character == '\n' || character == '\r' {
+                break;
             }
+            self.advance();
         }
     }
+
+    /// Consume a newline sequence (\n, \r, or \r\n).
+    fn consume_newline(&mut self) {
+        match self.peek_char() {
+            Some('\r') => {
+                self.advance();
+                if self.peek_char() == Some('\n') {
+                    self.advance();
+                }
+            }
+            Some('\n') => {
+                self.advance();
+            }
+            _ => {}
+        }
+    }
+
+    // ── Indentation processing ───────────────────────────────────────────
+
+    /// Called at the start of each logical line to measure indentation
+    /// and emit Indent/Dedent tokens as needed.
+    fn process_line_start(&mut self) {
+        self.at_line_start = false;
+
+        // Inside delimiters: indentation is not significant
+        if self.paren_depth > 0 {
+            loop {
+                match self.peek_char() {
+                    Some(' ') | Some('\t') | Some('\r') | Some('\n') | Some(';') => {
+                        self.advance();
+                    }
+                    Some('\\') => {
+                        self.advance();
+                        self.skip_to_eol();
+                    }
+                    _ => break,
+                }
+            }
+            return;
+        }
+
+        // Outside delimiters: measure indentation
+        loop {
+            let line_start = self.peek_position();
+            let mut indent: usize = 0;
+
+            // Count leading spaces
+            while self.peek_char() == Some(' ') {
+                self.advance();
+                indent += 1;
+            }
+
+            // Reject tabs in indentation
+            if self.peek_char() == Some('\t') {
+                let tab_position = self.peek_position();
+                self.pending.push_back(Err(LexerError {
+                    position: tab_position,
+                    message: "tabs are not allowed, use spaces for indentation".to_string(),
+                }));
+                return;
+            }
+
+            // Skip blank lines
+            match self.peek_char() {
+                Some('\n') | Some('\r') => {
+                    self.consume_newline();
+                    continue;
+                }
+                None => return, // EOF — handled by emit_eof_dedents
+                _ => {}
+            }
+
+            // Skip comment-only lines
+            if self.peek_char() == Some('\\') {
+                self.advance(); // consume '\'
+                self.skip_to_eol();
+                self.consume_newline();
+                continue;
+            }
+
+            // Content line — compare indent with stack top
+            let current_indent = *self.indent_stack.last().unwrap();
+
+            if indent > current_indent {
+                self.indent_stack.push(indent);
+                self.pending
+                    .push_back(Ok((line_start, Token::Indent, line_start)));
+            } else if indent < current_indent {
+                while *self.indent_stack.last().unwrap() > indent {
+                    self.indent_stack.pop();
+                    self.pending
+                        .push_back(Ok((line_start, Token::Dedent, line_start)));
+                }
+                if *self.indent_stack.last().unwrap() != indent {
+                    self.pending.push_back(Err(LexerError {
+                        position: line_start,
+                        message: "dedent does not match any outer indentation level".to_string(),
+                    }));
+                }
+            }
+
+            break;
+        }
+    }
+
+    /// Emit remaining Dedent tokens at end of file.
+    fn emit_eof_dedents(&mut self) -> Option<Result<(usize, Token, usize), LexerError>> {
+        if self.emitted_eof_dedents {
+            return None;
+        }
+        self.emitted_eof_dedents = true;
+
+        let pos = self.source.len();
+        while self.indent_stack.len() > 1 {
+            self.indent_stack.pop();
+            self.pending.push_back(Ok((pos, Token::Dedent, pos)));
+        }
+
+        self.pending.pop_front()
+    }
+
+    // ── Token lexing ─────────────────────────────────────────────────────
 
     fn lex_identifier_or_keyword(&mut self, start: usize) -> Token {
         // Consume all identifier characters: letters (Cyrillic or Latin), digits, underscore
@@ -313,25 +454,8 @@ impl<'input> Lexer<'input> {
                                 self.advance(); // fourth "
                                 text_content.push('"');
                             } else {
-                                // Three quotes: end of string + something
-                                // Actually, spec says '""' in text = literal '"'.
-                                // Re-reading: `""""` in a text literal = one `"`.
-                                // Two quotes `""` outside a literal = empty string (spec §1.2).
-                                // Inside a text: `""""` = `"`.
-                                // So `""` inside text = empty, closing `"` + opening `"` of next?
-                                // The spec §2.2.2 says: 'Последовательность """" в обозначении
-                                // текста представляет литеру """ в тексте.'
-                                // That is exactly four quotes = one quote.
-                                // Two quotes `""` = end of string (empty string).
-                                // So `""` always ends the text. """"  means end+start with a "?
-                                // Most natural: `""` = empty string, `""""` = one `"` inside.
-                                // Three `"""` = empty string followed by opening of next string.
-                                // Put the two consumed quotes back as just closing the string:
                                 text_content.push('"');
                                 text_content.push('"');
-                                // We consumed 3 quotes. The last state: peeked non-".
-                                // Treat as if we found "}}" in the string, not a proper escape.
-                                // This is an edge case; return what we have.
                                 return Ok(Token::Text(text_content));
                             }
                         } else {
@@ -351,8 +475,80 @@ impl<'input> Lexer<'input> {
     }
 
     fn next_token(&mut self) -> Option<Result<(usize, Token, usize), LexerError>> {
-        self.skip_whitespace_and_comments();
+        // 1. Return pending tokens first
+        if let Some(token) = self.pending.pop_front() {
+            return Some(token);
+        }
 
+        // 2. Handle line start (indentation processing)
+        if self.at_line_start {
+            self.process_line_start();
+            if let Some(token) = self.pending.pop_front() {
+                return Some(token);
+            }
+            // If process_line_start didn't produce tokens and we're at EOF
+            if self.peek_char().is_none() {
+                return self.emit_eof_dedents();
+            }
+        }
+
+        // 3. Skip inline whitespace (spaces, tabs within a line, semicolons)
+        loop {
+            match self.peek_char() {
+                Some(' ') | Some('\t') | Some(';') => {
+                    self.advance();
+                }
+                _ => break,
+            }
+        }
+
+        // 4. Check for newline
+        match self.peek_char() {
+            Some('\n') | Some('\r') => {
+                let (pos, ch) = self.advance().unwrap();
+                if ch == '\r' && self.peek_char() == Some('\n') {
+                    self.advance();
+                }
+                if self.paren_depth > 0 {
+                    // Inside delimiters: newlines are ignored
+                    return self.next_token();
+                }
+                self.at_line_start = true;
+                return Some(Ok((pos, Token::Newline, pos + 1)));
+            }
+            _ => {}
+        }
+
+        // 5. Check for comment
+        if self.peek_char() == Some('\\') {
+            self.advance(); // consume '\'
+            self.skip_to_eol();
+            // Handle the newline (or EOF) at end of comment
+            match self.peek_char() {
+                Some('\n') | Some('\r') => {
+                    let (newline_pos, ch) = self.advance().unwrap();
+                    if ch == '\r' && self.peek_char() == Some('\n') {
+                        self.advance();
+                    }
+                    if self.paren_depth > 0 {
+                        return self.next_token();
+                    }
+                    self.at_line_start = true;
+                    return Some(Ok((newline_pos, Token::Newline, newline_pos + 1)));
+                }
+                None => {
+                    return self.emit_eof_dedents();
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        // 6. EOF
+        if self.peek_char().is_none() {
+            return self.emit_eof_dedents();
+        }
+
+        // 7. Lex the next token
         let (token_start, first_char) = self.advance()?;
 
         let token_result = match first_char {
@@ -445,6 +641,21 @@ impl<'input> Lexer<'input> {
                 message: format!("unexpected character: {unknown:?}"),
             }),
         };
+
+        // Track paren depth for delimiter nesting
+        if let Ok(ref token) = token_result {
+            match token {
+                Token::LParen | Token::LBracket | Token::TupleOpen => {
+                    self.paren_depth += 1;
+                }
+                Token::RParen | Token::RBracket | Token::TupleClose => {
+                    if self.paren_depth > 0 {
+                        self.paren_depth -= 1;
+                    }
+                }
+                _ => {}
+            }
+        }
 
         let token_end = self
             .chars

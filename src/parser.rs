@@ -1,5 +1,8 @@
 //! Recursive descent parser for the Rapira language (spec Препринт 767).
 //!
+//! Uses indentation-based block structure: Indent/Dedent tokens from the lexer
+//! replace the old block terminators (конец, все, кц).
+//!
 //! Operator precedence (spec §2.2.3, lowest → highest):
 //!   или → и → не → = /= → > < >= <= → + - → * / // /% → ** → unary(- +) → # → postfix
 //!
@@ -135,6 +138,11 @@ impl<'input> Parser<'input> {
         }
     }
 
+    /// Skip any number of Newline tokens.
+    fn skip_newlines(&mut self) {
+        while self.eat(&Token::Newline) {}
+    }
+
     /// Check if the current token can start an expression.
     fn can_start_expression(&self) -> bool {
         matches!(
@@ -181,11 +189,37 @@ impl<'input> Parser<'input> {
         )
     }
 
+    // ── Block parsing ────────────────────────────────────────────────────────
+
+    /// Parse an indented block: Newline Indent stmt* Dedent
+    fn parse_block(&mut self) -> Result<Vec<Statement>, ParseError> {
+        self.expect(&Token::Newline)?;
+        self.expect(&Token::Indent)?;
+        let statements = self.parse_statement_list_until(&Token::Dedent)?;
+        self.expect(&Token::Dedent)?;
+        Ok(statements)
+    }
+
+    /// Parse either a block (Newline + Indent...Dedent) or a single statement
+    /// on the same line. Used after block openers like `то`, `цикл`, `иначе`.
+    fn parse_block_or_single_statement(&mut self) -> Result<Vec<Statement>, ParseError> {
+        if self.peek() == Some(&Token::Newline) {
+            self.parse_block()
+        } else {
+            let statement = self.parse_statement()?;
+            Ok(vec![statement])
+        }
+    }
+
     // ── Program ─────────────────────────────────────────────────────────────
 
     pub fn parse_program(mut self) -> Result<Program, ParseError> {
         let mut units = Vec::new();
-        while self.peek().is_some() {
+        loop {
+            self.skip_newlines();
+            if self.peek().is_none() {
+                break;
+            }
             units.push(self.parse_program_unit()?);
         }
         Ok(Program { units })
@@ -218,9 +252,13 @@ impl<'input> Parser<'input> {
         let parameters = self.parse_proc_parameter_list()?;
         self.expect(&Token::RParen)?;
 
+        // Body is an indented block
+        self.expect(&Token::Newline)?;
+        self.expect(&Token::Indent)?;
+
         let name_declarations = self.parse_name_declarations()?;
-        let body = self.parse_statement_list_until(&Token::KwКонец)?;
-        self.expect(&Token::KwКонец)?;
+        let body = self.parse_statement_list_until(&Token::Dedent)?;
+        self.expect(&Token::Dedent)?;
 
         Ok(ProcedureDefinition {
             name,
@@ -243,9 +281,13 @@ impl<'input> Parser<'input> {
         let parameters = self.parse_func_parameter_list()?;
         self.expect(&Token::RParen)?;
 
+        // Body is an indented block
+        self.expect(&Token::Newline)?;
+        self.expect(&Token::Indent)?;
+
         let name_declarations = self.parse_name_declarations()?;
-        let body = self.parse_statement_list_until(&Token::KwКонец)?;
-        self.expect(&Token::KwКонец)?;
+        let body = self.parse_statement_list_until(&Token::Dedent)?;
+        self.expect(&Token::Dedent)?;
 
         Ok(FunctionDefinition {
             name,
@@ -300,6 +342,7 @@ impl<'input> Parser<'input> {
 
         // Both чужие and свои can appear in any order
         for _ in 0..2 {
+            self.skip_newlines();
             if self.eat(&Token::KwЧужие) {
                 self.expect(&Token::Colon)?;
                 foreign_names = self.parse_ident_list()?;
@@ -326,24 +369,20 @@ impl<'input> Parser<'input> {
     // ── Statements ──────────────────────────────────────────────────────────
 
     /// Parse statements until we see `terminator` token (without consuming it).
+    /// Newlines between statements are consumed.
     fn parse_statement_list_until(
         &mut self,
         terminator: &Token,
     ) -> Result<Vec<Statement>, ParseError> {
         let mut statements = Vec::new();
-        while self.peek() != Some(terminator) && self.can_start_statement() {
-            statements.push(self.parse_statement()?);
-        }
-        Ok(statements)
-    }
-
-    /// Parse statements until we see any of the given terminators.
-    fn parse_statement_list_until_any(
-        &mut self,
-        terminators: &[Token],
-    ) -> Result<Vec<Statement>, ParseError> {
-        let mut statements = Vec::new();
-        while !terminators.iter().any(|t| self.peek() == Some(t)) && self.can_start_statement() {
+        loop {
+            self.skip_newlines();
+            if self.peek() == Some(terminator) {
+                break;
+            }
+            if !self.can_start_statement() {
+                break;
+            }
             statements.push(self.parse_statement()?);
         }
         Ok(statements)
@@ -523,16 +562,19 @@ impl<'input> Parser<'input> {
         let condition = Box::new(self.parse_expression()?);
         self.expect(&Token::KwТо)?;
 
-        let then_body = self.parse_statement_list_until_any(&[Token::KwИначе, Token::KwВсе])?;
+        // Block or single-line then-body
+        let then_body = self.parse_block_or_single_statement()?;
 
+        // Skip newlines before checking for иначе (handles single-line then on separate line from иначе)
+        self.skip_newlines();
+
+        // Optional else branch — comes after the Dedent (at same indent as если)
         let else_body = if self.eat(&Token::KwИначе) {
-            let body = self.parse_statement_list_until(&Token::KwВсе)?;
-            Some(body)
+            Some(self.parse_block_or_single_statement()?)
         } else {
             None
         };
 
-        self.expect(&Token::KwВсе)?;
         Ok(Statement::Conditional {
             condition,
             then_body,
@@ -543,32 +585,53 @@ impl<'input> Parser<'input> {
     fn parse_selection(&mut self) -> Result<Statement, ParseError> {
         self.expect(&Token::KwВыбор)?;
 
-        // Form 2: выбор при ... — no expression before при
-        if self.peek() == Some(&Token::KwПри) {
-            return self.parse_selection_condition_list();
+        // Check if this is form 2 (condition list): выбор followed by Newline+Indent+при
+        // vs form 1 (value match): выбор EXPR ...
+        if self.peek() == Some(&Token::Newline) {
+            // Could be either form — need to look inside the block
+            self.expect(&Token::Newline)?;
+            self.expect(&Token::Indent)?;
+            self.skip_newlines();
+
+            if self.peek() == Some(&Token::KwПри) {
+                // Form 2: condition list (no expression before при)
+                return self.parse_selection_condition_list_in_block();
+            }
+
+            // Shouldn't happen — выбор block should start with при
+            return Err(ParseError::UnexpectedToken {
+                position: self.position(),
+                found: self.peek().cloned().unwrap_or(Token::Newline),
+                expected: "при".to_string(),
+            });
         }
 
-        // Form 1: выбор expr при ... — expression before при
+        // Form 1: выбор EXPR — expression before при
         let expression = Box::new(self.parse_expression()?);
-        self.parse_selection_value_match(expression)
+        self.expect(&Token::Newline)?;
+        self.expect(&Token::Indent)?;
+        self.skip_newlines();
+        self.parse_selection_value_match_in_block(expression)
     }
 
-    fn parse_selection_value_match(
+    fn parse_selection_value_match_in_block(
         &mut self,
         expression: Box<Expr>,
     ) -> Result<Statement, ParseError> {
         let mut cases = Vec::new();
         while self.peek() == Some(&Token::KwПри) {
             cases.push(self.parse_value_match_case()?);
+            self.skip_newlines();
         }
 
         let else_body = if self.eat(&Token::KwИначе) {
-            Some(self.parse_statement_list_until(&Token::KwВсе)?)
+            Some(self.parse_block_or_single_statement()?)
         } else {
             None
         };
 
-        self.expect(&Token::KwВсе)?;
+        self.skip_newlines();
+        self.expect(&Token::Dedent)?;
         Ok(Statement::Selection(SelectionStatement::ValueMatch {
             expression,
             cases,
@@ -583,29 +646,32 @@ impl<'input> Parser<'input> {
             values.push(Box::new(self.parse_expression()?));
         }
         self.expect(&Token::Colon)?;
-        let body =
-            self.parse_statement_list_until_any(&[Token::KwПри, Token::KwИначе, Token::KwВсе])?;
+
+        let body = self.parse_block_or_single_statement()?;
+
         Ok(ValueMatchCase { values, body })
     }
 
-    fn parse_selection_condition_list(&mut self) -> Result<Statement, ParseError> {
+    fn parse_selection_condition_list_in_block(&mut self) -> Result<Statement, ParseError> {
         let mut cases = Vec::new();
         while self.peek() == Some(&Token::KwПри) {
             self.advance(); // consume при
             let condition = Box::new(self.parse_expression()?);
             self.expect(&Token::Colon)?;
-            let body =
-                self.parse_statement_list_until_any(&[Token::KwПри, Token::KwИначе, Token::KwВсе])?;
+
+            let body = self.parse_block_or_single_statement()?;
             cases.push(ConditionCase { condition, body });
+            self.skip_newlines();
         }
 
         let else_body = if self.eat(&Token::KwИначе) {
-            Some(self.parse_statement_list_until(&Token::KwВсе)?)
+            Some(self.parse_block_or_single_statement()?)
         } else {
             None
         };
 
-        self.expect(&Token::KwВсе)?;
+        self.skip_newlines();
+        self.expect(&Token::Dedent)?;
         Ok(Statement::Selection(SelectionStatement::ConditionList {
             cases,
             else_body,
@@ -622,9 +688,14 @@ impl<'input> Parser<'input> {
         };
 
         self.expect(&Token::KwЦикл)?;
-        let body = self.parse_statement_list_until(&Token::KwКц)?;
-        self.expect(&Token::KwКц)?;
 
+        // Block or single-line loop body
+        let body = self.parse_block_or_single_statement()?;
+
+        // Skip newlines before checking for post-condition
+        self.skip_newlines();
+
+        // Post-condition (at same indent as loop header, after Dedent)
         let post_condition = if self.eat(&Token::KwПо) {
             Some(Box::new(self.parse_expression()?))
         } else {

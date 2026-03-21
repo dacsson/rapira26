@@ -46,4 +46,36 @@ Runtime split into modules (`runtime/`):
 
 ## Phase 2 — Modernization
 
-After Phase 1 is complete, revisit and extend the language with modern features. The spec will be rewritten to reflect these additions.
+Revisit and extend the language with modern features. The spec will be rewritten to reflect these additions.
+
+### Step 0 — Indentation-based syntax ✓
+TODO: Replace `конец`/`все`/`кц` block terminators with indentation-based scoping (Python-style). Requires reworking the lexer to emit indent/dedent tokens and updating the parser accordingly.
+RESULT: Lexer emits `Indent`/`Dedent`/`Newline` tokens; parser uses `parse_block_or_single_statement` for all block constructs. Single-line forms (e.g. `если X то выход`) supported. Multi-line expressions require balanced delimiters `()`, `[]`, `<* *>`. All 13 test files rewritten. Keywords `конец`/`все`/`кц` kept in lexer for error messages but unused by parser.
+
+### Step 1 — Easy optimizations
+- **Constant folding:** evaluate constant expressions at compile time (e.g. `2 + 3` → `5`)
+- **No redundant wrapping:** keep for-loop counters as C `int64_t`, only wrap into `RAP_Object` when used as values. Avoid allocating intermediate objects for known-type operations.
+
+### Step 2 — Reference counting
+Add `refcount` field to `RAP_Object`. Increment on assignment/parameter pass, decrement on scope exit/reassignment, free at zero. No circular references in Rapira, so refcounting is sufficient.
+
+### Step 3 — SMI pointer tagging
+Replace `RAP_Object*` with a tagged `uintptr_t` (V8-style). Lowest bit distinguishes SMI (Small Integer, bit 0 = 0, value = word >> 1) from heap pointer (bit 0 = 1, pointer = word & ~1). Integers — the most common type in loops, indexing, arithmetic — never touch the heap. Floats, text, tuples, callables remain heap-allocated with a type tag. Gives 63-bit integers, single-instruction type checks (`v & 1`), and free add/subtract without untagging.
+
+### Step 4 - Errors tied to file source instead of C
+If an error hapens emit source file line, not C error
+
+### Step 5 — Optional type hints with flow typing
+Leverage `тип_*` checks for static type narrowing. When the compiler can prove a variable's type from a guard (`если тип_цел(X) то ...`), emit direct typed operations instead of polymorphic dispatch. Optional type annotations on parameters and variables.
+
+### Step 6 — Module system
+Import/export mechanism for splitting programs across files. Spec §1.6 sketches modules and devices — design a modern take that supports namespacing and selective imports.
+
+### Step 7 — OOP / Object system
+User-defined object types with fields and methods. Design TBD — could be prototype-based (like Lua) or class-based.
+
+### Step 8 — Build system
+Project-level build tool: dependency resolution, multi-file compilation, incremental builds. Replaces manual `cargo run -- file.rap` workflow.
+
+### Step 9 — REPL mode
+Interactive line-by-line execution. Compile each input to a shared library, dlopen into a persistent process with a live frame. Accumulate definitions across inputs.
