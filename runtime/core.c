@@ -51,32 +51,52 @@ char *rap_strbuf_append(char *buf, size_t *len, size_t *cap,
   return buf;
 }
 
+// ALLOCATION TRACKING (test-only, compile with -DRAP_TEST_LEAKS)
+
+#ifdef RAP_TEST_LEAKS
+int rap_alloc_count = 0;
+
+void RAP_check_leaks(void) {
+  if (rap_alloc_count != 0) {
+    fprintf(stderr, "LEAK: %d object(s) not freed\n", rap_alloc_count);
+  }
+}
+#endif
+
 // CONSTRUCTORS
 
 RAP_Object *RAP_create_null_obj(void) {
+  RAP_TRACK_ALLOC();
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_NULL;
+  obj->refcount = 1;
   return obj;
 }
 
 RAP_Object *RAP_create_int_obj(int64_t value) {
+  RAP_TRACK_ALLOC();
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_INT;
   obj->int_val = value;
+  obj->refcount = 1;
   return obj;
 }
 
 RAP_Object *RAP_create_float_obj(double value) {
+  RAP_TRACK_ALLOC();
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_FLOAT;
   obj->float_val = value;
+  obj->refcount = 1;
   return obj;
 }
 
 RAP_Object *RAP_create_logical_obj(bool value) {
+  RAP_TRACK_ALLOC();
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_LOGICAL;
   obj->logical_val = value;
+  obj->refcount = 1;
   return obj;
 }
 
@@ -153,4 +173,55 @@ char *RAP_stringify_object(RAP_Object *obj) {
     return strdup("<unknown>");
   }
   }
+}
+
+// REFERENCE COUNTING
+
+void RAP_dec_ref(RAP_Object *obj) {
+  if (obj == NULL) return;
+  obj->refcount--;
+  if (obj->refcount <= 0) RAP_free_object(obj);
+}
+
+// OBJECT DESTRUCTOR
+
+void RAP_free_object(RAP_Object *obj) {
+  if (obj == NULL) return;
+  RAP_TRACK_FREE();
+
+  switch (obj->tag) {
+    case RAP_OBJECT_TAG_TEXT: {
+      for (uint32_t i = 0; i < obj->text_val->count; i++) {
+        RAP_dec_ref(obj->text_val->items[i]);
+      }
+      free(RAP_get_text_val(obj)->items);
+      free(RAP_get_text_val(obj));
+      break;
+    }
+    case RAP_OBJECT_TAG_TUPLE: {
+      for (uint32_t i = 0; i < obj->tuple_val->count; i++) {
+        RAP_dec_ref(obj->tuple_val->items[i]);
+      }
+      free(RAP_get_tuple_val(obj)->items);
+      free(RAP_get_tuple_val(obj));
+      break;
+    }
+    // IMPORTANT: slice destructor must not free parent!!!
+    case RAP_OBJECT_TAG_SLICE: {
+      RAP_dec_ref(RAP_get_slice_val(obj)->parent);
+      free(obj->slice_val);
+      break;
+    }
+    case RAP_OBJECT_TAG_CALLABLE: {
+      free(RAP_get_callable_val(obj)->name);
+      free(RAP_get_callable_val(obj)->params);
+      free(RAP_get_callable_val(obj)->frame);
+      free(RAP_get_callable_val(obj));
+      break;
+    }
+    default: {
+      break;
+    }
+  }
+  free(obj);
 }

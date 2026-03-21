@@ -12,6 +12,16 @@
 // Fatal error - print a message and exit.
 void RAP_fatal_error(const char *message);
 
+// ALLOCATION TRACKING (test-only, compile with -DRAP_TEST_LEAKS)
+#ifdef RAP_TEST_LEAKS
+extern int rap_alloc_count;
+#define RAP_TRACK_ALLOC() rap_alloc_count++
+#define RAP_TRACK_FREE()  rap_alloc_count--
+#else
+#define RAP_TRACK_ALLOC()
+#define RAP_TRACK_FREE()
+#endif
+
 // Get the underlying RAP_Tuple* for both TUPLE and TEXT objects.
 struct RAP_Tuple *rap_get_items(RAP_Object *obj);
 

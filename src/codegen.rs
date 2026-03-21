@@ -28,6 +28,7 @@ fn escape_c_string(s: &str) -> String {
                     out.push_str(&format!("\\{:03o}", byte));
                 }
             }
+            c if c.is_ascii_whitespace() => out.push(' '),
             c => out.push(c),
         }
     }
@@ -67,6 +68,8 @@ pub struct Codegen {
     foreign_vars: std::collections::HashSet<String>,
     /// True when emitting inside a function/procedure body (use frame-based access for non-param locals)
     inside_function: bool,
+    /// Emit RAP_check_leaks() call and #define RAP_TEST_LEAKS
+    check_leaks: bool,
 }
 
 impl Codegen {
@@ -83,7 +86,14 @@ impl Codegen {
             known_callables: std::collections::HashMap::new(),
             foreign_vars: std::collections::HashSet::new(),
             inside_function: false,
+            check_leaks: false,
         }
+    }
+
+    /// Enable leak checking: emits `#define RAP_TEST_LEAKS` and `RAP_check_leaks()` before exit.
+    pub fn with_check_leaks(mut self, enabled: bool) -> Self {
+        self.check_leaks = enabled;
+        self
     }
 
     /// Main entry point: walk the whole program, return generated C source.
@@ -94,6 +104,9 @@ impl Codegen {
 
         // Assemble: prelude → forward decls → main() { body }
         let mut result = String::new();
+        if self.check_leaks {
+            result.push_str("#define RAP_TEST_LEAKS\n");
+        }
         result.push_str("#include \"runtime.h\"\n");
         result.push_str("#include <math.h>\n");
         result.push_str("#include <stdio.h>\n");
@@ -105,6 +118,13 @@ impl Codegen {
         result.push_str("  struct RAP_CallFrame _main_frame = {NULL, NULL, 0};\n");
         result.push('\n');
         result.push_str(&self.output);
+        if self.check_leaks {
+            // Decref all locals declared in main scope
+            for var in &self.declared_vars {
+                result.push_str(&format!("  RAP_dec_ref({});\n", var));
+            }
+            result.push_str("  RAP_check_leaks();\n");
+        }
         result.push_str("  return 0;\n");
         result.push_str("}\n");
         result
@@ -256,11 +276,13 @@ impl Codegen {
         self.temp_counter = 0;
         self.string_counter = 0;
 
-        // Unpack parameters from _args array — mark them as declared
+        // Unpack parameters from _args array — mark them as declared.
+        // Incref each param so the function owns its reference.
         for (i, param_name) in func_def.parameters.iter().enumerate() {
             let mangled = self.mangle_name(param_name);
             self.declared_vars.insert(mangled.clone());
             self.emit_line(&format!("RAP_Object *{} = _args[{}];", mangled, i));
+            self.emit_line(&format!("RAP_inc_ref({});", mangled));
         }
         if !func_def.parameters.is_empty() {
             self.emit_blank_line();
@@ -282,7 +304,14 @@ impl Codegen {
             width = align
         ));
         self.forward_decls.push_str(&func_body);
-        self.forward_decls.push_str("}\n\n");
+
+        // // Decrement references of all local variables
+        // for var in &self.declared_vars {
+        //     self.forward_decls
+        //         .push_str(&format!("RAP_dec_ref({});\n", var));
+        // }
+
+        self.forward_decls.push_str("  return NULL;\n}\n\n");
 
         // Restore state
         self.output = saved_output;
@@ -351,6 +380,7 @@ impl Codegen {
                     let mangled = self.mangle_name(n);
                     self.declared_vars.insert(mangled.clone());
                     self.emit_line(&format!("RAP_Object *{} = _args[{}];", mangled, arg_index));
+                    self.emit_line(&format!("RAP_inc_ref({});", mangled));
                     arg_index += 1;
                 }
                 ProcParameter::InOut(_) => {
@@ -377,6 +407,13 @@ impl Codegen {
             width = align
         ));
         self.forward_decls.push_str(&func_body);
+
+        // // Decrement references of all local variables
+        // for var in &self.declared_vars {
+        //     self.forward_decls
+        //         .push_str(&format!("RAP_dec_ref({});\n", var));
+        // }
+
         self.forward_decls.push_str("  return NULL;\n}\n\n");
 
         self.output = saved_output;
@@ -390,7 +427,12 @@ impl Codegen {
     }
 
     /// Emit inline callable creation, returns the temp variable name.
-    fn emit_inline_callable(&mut self, c_func_name: &str, params: &[(String, String)], is_function: bool) -> String {
+    fn emit_inline_callable(
+        &mut self,
+        c_func_name: &str,
+        params: &[(String, String)],
+        is_function: bool,
+    ) -> String {
         let temp = self.fresh_temp();
         let param_count = params.len();
         let is_func_str = if is_function { "true" } else { "false" };
@@ -442,6 +484,20 @@ impl Codegen {
 
             Statement::Assignment { target, value } => {
                 let value_temp = self.emit_expression(value);
+
+                // Decrement refcount of old value in target (if reassigning a known variable)
+                if let LValue::Name(name) = target {
+                    let mangled = self.mangle_name(name);
+                    if self.declared_vars.contains(&mangled) {
+                        self.emit_line(&format!("RAP_dec_ref({});", mangled));
+                    }
+                }
+
+                // Increment refcount when assigning from another variable (shared reference)
+                if let Expr::Name(_) = value.as_ref() {
+                    self.emit_line(&format!("RAP_inc_ref({});", value_temp));
+                }
+
                 self.emit_lvalue_assignment(target, &value_temp);
             }
 
@@ -450,31 +506,31 @@ impl Codegen {
                 arguments,
             } => {
                 // Collect in-out param info: (proc_param_name, caller_var_name)
-                let inout_pairs: Vec<(String, String)> =
-                    if let Expr::Name(proc_name) = procedure.as_ref() {
-                        if let Some(info) = self.known_callables.get(proc_name.as_str()) {
-                            info.params
-                                .iter()
-                                .zip(arguments.iter())
-                                .filter_map(|((param_name, mode), arg)| {
-                                    if mode == "RAP_PARAMETER_MODE_OUT" {
-                                        if let CallArgument::InOut(LValue::Name(caller_name)) = arg
-                                        {
-                                            Some((param_name.clone(), caller_name.clone()))
-                                        } else {
-                                            None
-                                        }
+                let inout_pairs: Vec<(String, String)> = if let Expr::Name(proc_name) =
+                    procedure.as_ref()
+                {
+                    if let Some(info) = self.known_callables.get(proc_name.as_str()) {
+                        info.params
+                            .iter()
+                            .zip(arguments.iter())
+                            .filter_map(|((param_name, mode), arg)| {
+                                if mode == "RAP_PARAMETER_MODE_OUT" {
+                                    if let CallArgument::InOut(LValue::Name(caller_name)) = arg {
+                                        Some((param_name.clone(), caller_name.clone()))
                                     } else {
                                         None
                                     }
-                                })
-                                .collect()
-                        } else {
-                            vec![]
-                        }
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect()
                     } else {
                         vec![]
-                    };
+                    }
+                } else {
+                    vec![]
+                };
 
                 // Before call: copy caller's variables into frame under proc's param names
                 for (param_name, caller_name) in &inout_pairs {
@@ -559,13 +615,9 @@ impl Codegen {
                 for var in variables {
                     let temp = self.fresh_temp();
                     if *text_mode {
-                        self.emit_line(&format!(
-                            "RAP_Object *{} = RAP_input_text();", temp
-                        ));
+                        self.emit_line(&format!("RAP_Object *{} = RAP_input_text();", temp));
                     } else {
-                        self.emit_line(&format!(
-                            "RAP_Object *{} = RAP_input_value();", temp
-                        ));
+                        self.emit_line(&format!("RAP_Object *{} = RAP_input_value();", temp));
                     }
                     self.emit_lvalue_assignment(var, &temp);
                 }
@@ -818,6 +870,7 @@ impl Codegen {
                 self.emit_post_condition(&loop_stmt.post_condition);
                 self.indent_level -= 1;
                 self.emit_line("}");
+                self.declared_vars.remove(&local_var);
             }
 
             LoopHeader::Repeat(count_expr) => {
@@ -1018,10 +1071,7 @@ impl Codegen {
                 return operand.to_string();
             }
             UnaryOperator::Not => format!("RAP_create_logical_obj(!{}->logical_val)", operand),
-            UnaryOperator::Length => format!(
-                "RAP_length({})",
-                operand
-            ),
+            UnaryOperator::Length => format!("RAP_length({})", operand),
         };
         self.emit_line(&format!("RAP_Object *{} = {};", temp, rhs));
         temp
@@ -1190,7 +1240,8 @@ impl Codegen {
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
                     "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_NULL);",
-                    t = temp, a = arg
+                    t = temp,
+                    a = arg
                 ));
                 Some(temp)
             }
@@ -1199,7 +1250,8 @@ impl Codegen {
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
                     "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_LOGICAL);",
-                    t = temp, a = arg
+                    t = temp,
+                    a = arg
                 ));
                 Some(temp)
             }
@@ -1208,7 +1260,8 @@ impl Codegen {
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
                     "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_INT);",
-                    t = temp, a = arg
+                    t = temp,
+                    a = arg
                 ));
                 Some(temp)
             }
@@ -1217,7 +1270,8 @@ impl Codegen {
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
                     "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_FLOAT);",
-                    t = temp, a = arg
+                    t = temp,
+                    a = arg
                 ));
                 Some(temp)
             }
@@ -1226,7 +1280,8 @@ impl Codegen {
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
                     "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_TEXT);",
-                    t = temp, a = arg
+                    t = temp,
+                    a = arg
                 ));
                 Some(temp)
             }
@@ -1235,7 +1290,8 @@ impl Codegen {
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
                     "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_TUPLE);",
-                    t = temp, a = arg
+                    t = temp,
+                    a = arg
                 ));
                 Some(temp)
             }

@@ -2,10 +2,12 @@
 #include "runtime_internal.h"
 
 RAP_Object *RAP_create_tuple_obj(uint32_t count, RAP_Object **items) {
+  RAP_TRACK_ALLOC();
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_TUPLE;
   obj->tuple_val = malloc(sizeof(struct RAP_Tuple));
   obj->tuple_val->count = count;
+  obj->refcount = 1;
   obj->tuple_val->items = malloc(count * sizeof(RAP_Object *));
   for (uint32_t i = 0; i < count; i++) {
     obj->tuple_val->items[i] = items[i];
@@ -27,8 +29,10 @@ RAP_Object *RAP_set_tuple_item(RAP_Object *container, uint32_t index,
     if (item->tag == RAP_OBJECT_TAG_TEXT && RAP_get_text_val(item)->count == 1) {
       item = RAP_get_text_val(item)->items[0];
     }
+    RAP_dec_ref(container->text_val->items[index]);
     container->text_val->items[index] = item;
   } else {
+    RAP_dec_ref(container->tuple_val->items[index]);
     container->tuple_val->items[index] = item;
   }
   return container;
@@ -45,6 +49,7 @@ RAP_Object *RAP_get_tuple_item(RAP_Object *container, uint32_t index) {
 
   if (container->tag == RAP_OBJECT_TAG_TEXT) {
     // Return a single-character TEXT wrapping the codepoint
+    RAP_TRACK_ALLOC();
     RAP_Object *result = malloc(sizeof(RAP_Object));
     result->tag = RAP_OBJECT_TAG_TEXT;
     result->text_val = malloc(sizeof(struct RAP_Tuple));
@@ -62,6 +67,7 @@ RAP_Object *RAP_append_tuple(RAP_Object *a, RAP_Object *b) {
     return a;
   }
 
+  RAP_TRACK_ALLOC();
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_TUPLE;
   obj->tuple_val = malloc(sizeof(struct RAP_Tuple));
@@ -69,10 +75,13 @@ RAP_Object *RAP_append_tuple(RAP_Object *a, RAP_Object *b) {
   obj->tuple_val->items = malloc(obj->tuple_val->count * sizeof(RAP_Object *));
   for (uint32_t i = 0; i < a->tuple_val->count; i++) {
     obj->tuple_val->items[i] = a->tuple_val->items[i];
+    RAP_inc_ref(a->tuple_val->items[i]);
   }
   for (uint32_t i = 0; i < b->tuple_val->count; i++) {
     obj->tuple_val->items[a->tuple_val->count + i] = b->tuple_val->items[i];
+    RAP_inc_ref(b->tuple_val->items[i]);
   }
+  obj->refcount = 1;
   return obj;
 }
 
@@ -134,12 +143,15 @@ RAP_Object *RAP_create_slice(RAP_Object *parent, int64_t from, int64_t to) {
   // For slices that are actually just a single item, expand so we include just the item itself
   if (from == to && to < count) to += 1;
 
+  RAP_TRACK_ALLOC();
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_SLICE;
+  obj->refcount = 1;
   obj->slice_val = malloc(sizeof(struct RAP_Slice));
   obj->slice_val->parent = parent;
   obj->slice_val->from = from;
   obj->slice_val->to = to;
+  RAP_inc_ref(parent);  // slice keeps parent alive
   return obj;
 }
 
@@ -165,6 +177,7 @@ RAP_Object *RAP_materialize_slice(RAP_Object *obj) {
   }
 
   if (is_text) {
+    RAP_TRACK_ALLOC();
     RAP_Object *result = malloc(sizeof(RAP_Object));
     result->tag = RAP_OBJECT_TAG_TEXT;
     result->text_val = malloc(sizeof(struct RAP_Tuple));

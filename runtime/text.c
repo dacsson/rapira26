@@ -1,9 +1,11 @@
 #include "runtime_internal.h"
 
 RAP_Object *RAP_create_text_obj(const char *value) {
+  RAP_TRACK_ALLOC();
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_TEXT;
   obj->text_val = malloc(sizeof(struct RAP_Tuple));
+  obj->refcount = 1;
   // Decode UTF-8 into codepoints — one codepoint per tuple item
   int64_t *codepoints;
   size_t count = rap_utf8_decode_all(value, &codepoints);

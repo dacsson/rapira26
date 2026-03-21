@@ -94,6 +94,7 @@ void RAP_frame_set_foreign(struct RAP_CallFrame *frame, const char *name, RAP_Ob
 #define RAP_get_text_val(obj) ((obj)->text_val)
 #define RAP_get_tuple_val(obj) ((obj)->tuple_val)
 #define RAP_get_callable_val(obj) ((obj)->callable_val)
+#define RAP_get_slice_val(obj) ((obj)->slice_val)
 
 char *RAP_stringify_object(RAP_Object *obj);
 
@@ -116,5 +117,17 @@ RAP_Object *RAP_sign(RAP_Object *a);
 RAP_Object *RAP_input_text(void);
 /// Read a line from stdin, parse as int/float/text. Returns typed object.
 RAP_Object *RAP_input_value(void);
+
+// REFERENCE COUNTING
+
+#define RAP_inc_ref(obj) do { if (obj) (obj)->refcount++; } while(0)
+void RAP_dec_ref(RAP_Object *obj);
+
+void RAP_free_object(RAP_Object *obj);
+
+// ALLOCATION TRACKING (test-only, compile with -DRAP_TEST_LEAKS)
+#ifdef RAP_TEST_LEAKS
+void RAP_check_leaks(void);
+#endif
 
 #endif // RAPIRA_RUNTIME_H

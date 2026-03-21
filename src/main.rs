@@ -25,6 +25,10 @@ struct Cli {
     /// Run in REPL mode
     #[arg(long)]
     repl: bool,
+
+    /// Enable leak checking (compile with RAP_TEST_LEAKS)
+    #[arg(long)]
+    check_leaks: bool,
 }
 
 // TODO:
@@ -79,7 +83,7 @@ fn main() {
         return;
     }
 
-    let codegen = rapira26::codegen::Codegen::new();
+    let codegen = rapira26::codegen::Codegen::new().with_check_leaks(cli.check_leaks);
     let c_code = codegen.generate(&program);
 
     if cli.emit_c {

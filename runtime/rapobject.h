@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdatomic.h>
 
 /// From spec 2.2.2:
 /// Объекты:
@@ -32,6 +33,7 @@ struct RAP_Callable;
 /// possible values for that type.
 typedef struct {
   RAP_ObjectTag tag;
+  atomic_int refcount;
   union {
     bool logical_val;
     int64_t int_val;
