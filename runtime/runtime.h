@@ -110,4 +110,11 @@ RAP_Object *RAP_random(RAP_Object *a);
 RAP_Object *RAP_random_int(RAP_Object *a);
 RAP_Object *RAP_sign(RAP_Object *a);
 
+// INPUT
+
+/// Read a line from stdin, return as text object.
+RAP_Object *RAP_input_text(void);
+/// Read a line from stdin, parse as int/float/text. Returns typed object.
+RAP_Object *RAP_input_value(void);
+
 #endif // RAPIRA_RUNTIME_H

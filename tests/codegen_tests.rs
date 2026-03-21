@@ -6,8 +6,9 @@
 //!   `\ => (empty line)` — an empty line is expected
 //!   `\ => (empty string)` — same as empty line
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// Parse expected output from `\ => ...` comments in a Rapira source file.
 fn parse_expected_output(source: &str) -> String {
@@ -34,6 +35,19 @@ fn parse_expected_output(source: &str) -> String {
         result.push('\n');
     }
     result
+}
+
+/// Parse stdin input from `\ <= ...` comments in a Rapira source file.
+fn parse_stdin_input(source: &str) -> String {
+    let mut lines = Vec::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("\\ <=") {
+            let rest = rest.strip_prefix(' ').unwrap_or(rest);
+            lines.push(rest.to_string());
+        }
+    }
+    lines.join("\n") + if lines.is_empty() { "" } else { "\n" }
 }
 
 /// Locate the runtime/ directory (relative to project root).
@@ -88,10 +102,25 @@ fn run_rap_file(rap_path: &Path) -> Result<String, String> {
         ));
     }
 
-    // Run
-    let run_output = Command::new(&bin_path)
-        .output()
+    // Run with stdin piped if needed
+    let stdin_input = parse_stdin_input(&source);
+    let mut child = Command::new(&bin_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| format!("run: {e}"))?;
+
+    if !stdin_input.is_empty() {
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(stdin_input.as_bytes())
+            .map_err(|e| format!("write stdin: {e}"))?;
+    }
+
+    let run_output = child.wait_with_output().map_err(|e| format!("wait: {e}"))?;
 
     if !run_output.status.success() {
         let stderr = String::from_utf8_lossy(&run_output.stderr);
@@ -206,6 +235,11 @@ fn e2e_11_type_checks() {
 #[test]
 fn e2e_12_spec_examples() {
     assert_rap_output("12_spec_examples.rap");
+}
+
+#[test]
+fn e2e_13_input() {
+    assert_rap_output("13_input.rap");
 }
 
 // ── Unit tests for the expected-output parser ──────────────────

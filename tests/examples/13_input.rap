@@ -1,0 +1,33 @@
+\ Tests: ввод (input) and ввод текста (text input)
+\ Stdin lines are provided via `\ <= ...` markers.
+
+\ --- ввод: reads and parses a value ---
+\ <= 42
+ввод: X
+вывод: X
+\ => 42
+вывод: тип_цел(X)
+\ => да
+
+\ --- ввод: reads a float ---
+\ <= 3.14
+ввод: Y
+вывод: Y
+\ => 3.14
+вывод: тип_вещ(Y)
+\ => да
+
+\ --- ввод текста: reads raw text ---
+\ <= hello world
+ввод текста: T
+вывод: T
+\ => hello world
+вывод: тип_текст(T)
+\ => да
+
+\ --- ввод: multiple variables on one statement ---
+\ <= 10
+\ <= 20
+ввод: A, B
+вывод: A + B
+\ => 30

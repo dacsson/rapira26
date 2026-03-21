@@ -136,6 +136,12 @@ fn main() {
             eprintln!("failed to run {:?}: {error}", binary_path);
             std::process::exit(1);
         });
+
+        // Clean up generated binary
+        if let Err(error) = std::fs::remove_file(&binary_path) {
+            eprintln!("failed to remove {:?}: {error}", binary_path);
+        }
+
         std::process::exit(status.code().unwrap_or(1));
     }
 }

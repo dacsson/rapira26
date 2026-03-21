@@ -552,8 +552,23 @@ impl Codegen {
                 }
             }
 
-            Statement::Input { .. } => {
-                self.emit_line("// TODO: ввод (input) — needs runtime support");
+            Statement::Input {
+                text_mode,
+                variables,
+            } => {
+                for var in variables {
+                    let temp = self.fresh_temp();
+                    if *text_mode {
+                        self.emit_line(&format!(
+                            "RAP_Object *{} = RAP_input_text();", temp
+                        ));
+                    } else {
+                        self.emit_line(&format!(
+                            "RAP_Object *{} = RAP_input_value();", temp
+                        ));
+                    }
+                    self.emit_lvalue_assignment(var, &temp);
+                }
             }
 
             Statement::ExitLoop => {
@@ -1004,8 +1019,6 @@ impl Codegen {
             }
             UnaryOperator::Not => format!("RAP_create_logical_obj(!{}->logical_val)", operand),
             UnaryOperator::Length => format!(
-                // # operator — works on text (strlen) and tuples (count)
-                // TODO: runtime helper RAP_length(obj)
                 "RAP_length({})",
                 operand
             ),
