@@ -1,0 +1,104 @@
+#include "runtime_internal.h"
+
+RAP_Object *RAP_create_callable_obj(struct RAP_CallFrame *frame_parent,
+                                    RAP_FunctionDecl func,
+                                    RAP_Parameter **params,
+                                    uint32_t params_count) {
+  RAP_Object *obj = malloc(sizeof(RAP_Object));
+  obj->tag = RAP_OBJECT_TAG_CALLABLE;
+  obj->callable_val = malloc(sizeof(struct RAP_Callable));
+
+  // Setup frame, initially it only has a pointer to the parent frame,
+  // so we can walk up the call stack to find the enclosing scope variables
+  obj->callable_val->frame = RAP_create_call_frame(frame_parent);
+
+  obj->callable_val->func = func;
+  obj->callable_val->params = params;
+  obj->callable_val->param_count = params_count;
+  return obj;
+}
+
+RAP_Parameter *RAP_create_parameter(RAP_ParameterMode mode, const char *name) {
+  RAP_Parameter *param = malloc(sizeof(RAP_Parameter));
+  param->mode = mode;
+  param->name = malloc(strlen(name) + 1);
+  strcpy(param->name, name);
+  return param;
+}
+
+RAP_Object *RAP_call_callable_obj(RAP_Object *callable, RAP_Object **args,
+                                  uint32_t arg_count) {
+  return callable->callable_val->func(callable->callable_val->frame, args,
+                                      arg_count);
+}
+
+// FRAME UTILITIES
+
+struct RAP_CallFrame *RAP_create_call_frame(struct RAP_CallFrame *parent) {
+  struct RAP_CallFrame *frame = malloc(sizeof(struct RAP_CallFrame));
+  frame->parent = parent;
+  frame->slots = NULL;
+  frame->slot_count = 0;
+  return frame;
+}
+
+void RAP_free_call_frame(struct RAP_CallFrame *frame) { free(frame); }
+
+// Find slot index by name in a single frame. Returns -1 if not found.
+static int frame_find_slot(struct RAP_CallFrame *frame, const char *name) {
+  for (uint32_t i = 0; i < frame->slot_count; i++) {
+    if (strcmp(frame->slots[i].name, name) == 0) return (int)i;
+  }
+  return -1;
+}
+
+// Get variable from current frame only (свои / implicit locals).
+// Returns пусто if not found.
+RAP_Object *RAP_frame_get(struct RAP_CallFrame *frame, const char *name) {
+  int idx = frame_find_slot(frame, name);
+  if (idx >= 0) return frame->slots[idx].value;
+  return RAP_create_null_obj();
+}
+
+// Set variable in current frame (creates slot if not found).
+void RAP_frame_set(struct RAP_CallFrame *frame, const char *name, RAP_Object *value) {
+  int idx = frame_find_slot(frame, name);
+  if (idx >= 0) {
+    frame->slots[idx].value = value;
+    return;
+  }
+  frame->slot_count++;
+  frame->slots = realloc(frame->slots, frame->slot_count * sizeof(struct RAP_FrameSlot));
+  frame->slots[frame->slot_count - 1].name = name;
+  frame->slots[frame->slot_count - 1].value = value;
+}
+
+// Get variable by walking up the parent chain (чужие).
+// Returns пусто if not found in any frame.
+RAP_Object *RAP_frame_get_foreign(struct RAP_CallFrame *frame, const char *name) {
+  struct RAP_CallFrame *current = frame->parent;
+  while (current) {
+    int idx = frame_find_slot(current, name);
+    if (idx >= 0) return current->slots[idx].value;
+    current = current->parent;
+  }
+  return RAP_create_null_obj();
+}
+
+// Set variable by walking up the parent chain (чужие).
+// If found in a parent, updates it there. Otherwise creates in the immediate parent.
+void RAP_frame_set_foreign(struct RAP_CallFrame *frame, const char *name, RAP_Object *value) {
+  struct RAP_CallFrame *current = frame->parent;
+  while (current) {
+    int idx = frame_find_slot(current, name);
+    if (idx >= 0) {
+      current->slots[idx].value = value;
+      return;
+    }
+    current = current->parent;
+  }
+  // Not found anywhere — create in immediate parent
+  if (frame->parent) {
+    RAP_frame_set(frame->parent, name, value);
+  }
+}

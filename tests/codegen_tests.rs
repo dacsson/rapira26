@@ -74,7 +74,7 @@ fn run_rap_file(rap_path: &Path) -> Result<String, String> {
         .arg("-o")
         .arg(&bin_path)
         .arg(format!("-I{}", rt.display()))
-        .arg(format!("-L{}", rt.display()))
+        .arg(format!("-L{}", rt.join("lib").display()))
         .arg("-lrapruntime")
         .arg("-lm")
         .output()

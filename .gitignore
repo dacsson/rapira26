@@ -1,1 +1,7 @@
 /target
+/runtime/translated
+/*.o
+/*.a
+/example
+/runtime/build
+/runtime/lib
