@@ -78,9 +78,13 @@ RAP_Object *RAP_power(RAP_Object *a, RAP_Object *b);
 // FRAME UTILITIES
 
 struct RAP_CallFrame *RAP_create_call_frame(struct RAP_CallFrame *parent);
-void RAP_add_local(struct RAP_CallFrame *frame, const char *name,
-                   RAP_Object *value);
 void RAP_free_call_frame(struct RAP_CallFrame *frame);
+// Get/set a variable in the current frame only (свои / implicit locals)
+RAP_Object *RAP_frame_get(struct RAP_CallFrame *frame, const char *name);
+void RAP_frame_set(struct RAP_CallFrame *frame, const char *name, RAP_Object *value);
+// Get/set by walking up the parent chain (чужие)
+RAP_Object *RAP_frame_get_foreign(struct RAP_CallFrame *frame, const char *name);
+void RAP_frame_set_foreign(struct RAP_CallFrame *frame, const char *name, RAP_Object *value);
 
 // EXTRACTORS
 

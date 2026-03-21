@@ -57,12 +57,18 @@ typedef struct {
   char *name;
 } RAP_Parameter;
 
-/// Each functions keeps some context about 'чужие' and 'свои' scoped variables.
+/// Named variable slot in a call frame.
+struct RAP_FrameSlot {
+  const char *name;
+  RAP_Object *value;
+};
+
+/// Each function keeps some context about 'чужие' and 'свои' scoped variables.
 /// Variables have dynamic scope and are looked up in the call frame chain.
 struct RAP_CallFrame {
   struct RAP_CallFrame *parent;
-  RAP_Object **locals;
-  uint32_t locals_count;
+  struct RAP_FrameSlot *slots;
+  uint32_t slot_count;
 };
 
 /// Funcs and procs are treated as objects.

@@ -61,6 +61,11 @@ pub struct Codegen {
     declared_vars: std::collections::HashSet<String>,
     /// Rapira name → callable info, so call sites can create callables inline
     known_callables: std::collections::HashMap<String, CallableInfo>,
+    /// Variables declared as чужие in current function scope (original Rapira names).
+    /// Empty at top level and inside functions without чужие.
+    foreign_vars: std::collections::HashSet<String>,
+    /// True when emitting inside a function/procedure body (use frame-based access for non-param locals)
+    inside_function: bool,
 }
 
 impl Codegen {
@@ -75,6 +80,8 @@ impl Codegen {
             current_frame: "&_main_frame".to_string(),
             declared_vars: std::collections::HashSet::new(),
             known_callables: std::collections::HashMap::new(),
+            foreign_vars: std::collections::HashSet::new(),
+            inside_function: false,
         }
     }
 
@@ -232,6 +239,16 @@ impl Codegen {
         let saved_string = self.string_counter;
         let saved_frame = std::mem::replace(&mut self.current_frame, "_frame".to_string());
         let saved_declared = std::mem::take(&mut self.declared_vars);
+        let saved_foreign = std::mem::replace(
+            &mut self.foreign_vars,
+            func_def
+                .name_declarations
+                .foreign_names
+                .iter()
+                .cloned()
+                .collect(),
+        );
+        let saved_inside = std::mem::replace(&mut self.inside_function, true);
 
         self.indent_level = 1;
         self.temp_counter = 0;
@@ -272,6 +289,8 @@ impl Codegen {
         self.string_counter = saved_string;
         self.current_frame = saved_frame;
         self.declared_vars = saved_declared;
+        self.foreign_vars = saved_foreign;
+        self.inside_function = saved_inside;
     }
 
     fn emit_procedure_def(&mut self, proc_def: &ProcedureDefinition) {
@@ -285,9 +304,7 @@ impl Codegen {
                     .parameters
                     .iter()
                     .map(|p| match p {
-                        ProcParameter::Input(n) => {
-                            (n.clone(), "RAP_PARAMETER_MODE_IN".to_string())
-                        }
+                        ProcParameter::Input(n) => (n.clone(), "RAP_PARAMETER_MODE_IN".to_string()),
                         ProcParameter::InOut(n) => {
                             (n.clone(), "RAP_PARAMETER_MODE_OUT".to_string())
                         }
@@ -303,21 +320,42 @@ impl Codegen {
         let saved_string = self.string_counter;
         let saved_frame = std::mem::replace(&mut self.current_frame, "_frame".to_string());
         let saved_declared = std::mem::take(&mut self.declared_vars);
+        // In-out params are treated as чужие — they read/write the caller's frame
+        // They act exactly the same as foreign variables!
+        let mut foreign: std::collections::HashSet<String> = proc_def
+            .name_declarations
+            .foreign_names
+            .iter()
+            .cloned()
+            .collect();
+        for param in &proc_def.parameters {
+            if let ProcParameter::InOut(n) = param {
+                foreign.insert(n.clone());
+            }
+        }
+        let saved_foreign = std::mem::replace(&mut self.foreign_vars, foreign);
+        let saved_inside = std::mem::replace(&mut self.inside_function, true);
 
         self.indent_level = 1;
         self.temp_counter = 0;
         self.string_counter = 0;
 
-        // Unpack parameters — mark them as declared
-        for (i, param) in proc_def.parameters.iter().enumerate() {
-            let param_name = match param {
-                ProcParameter::Input(n) | ProcParameter::InOut(n) => n,
-            };
-            let mangled = self.mangle_name(param_name);
-            self.declared_vars.insert(mangled.clone());
-            self.emit_line(&format!("RAP_Object *{} = _args[{}];", mangled, i));
+        // Unpack only input parameters — in-out params use frame lookup
+        let mut arg_index = 0;
+        for param in &proc_def.parameters {
+            match param {
+                ProcParameter::Input(n) => {
+                    let mangled = self.mangle_name(n);
+                    self.declared_vars.insert(mangled.clone());
+                    self.emit_line(&format!("RAP_Object *{} = _args[{}];", mangled, arg_index));
+                    arg_index += 1;
+                }
+                ProcParameter::InOut(_) => {
+                    // Skipped — accessed via frame_get_foreign/frame_set_foreign
+                }
+            }
         }
-        if !proc_def.parameters.is_empty() {
+        if arg_index > 0 {
             self.emit_blank_line();
         }
 
@@ -336,7 +374,7 @@ impl Codegen {
             width = align
         ));
         self.forward_decls.push_str(&func_body);
-        self.forward_decls.push_str("}\n\n");
+        self.forward_decls.push_str("  return NULL;\n}\n\n");
 
         self.output = saved_output;
         self.indent_level = saved_indent;
@@ -344,14 +382,12 @@ impl Codegen {
         self.string_counter = saved_string;
         self.current_frame = saved_frame;
         self.declared_vars = saved_declared;
+        self.foreign_vars = saved_foreign;
+        self.inside_function = saved_inside;
     }
 
     /// Emit inline callable creation, returns the temp variable name.
-    fn emit_inline_callable(
-        &mut self,
-        c_func_name: &str,
-        params: &[(String, String)],
-    ) -> String {
+    fn emit_inline_callable(&mut self, c_func_name: &str, params: &[(String, String)]) -> String {
         let temp = self.fresh_temp();
         let param_count = params.len();
 
@@ -409,24 +445,69 @@ impl Codegen {
                 procedure,
                 arguments,
             } => {
+                // Collect in-out param info: (proc_param_name, caller_var_name)
+                let inout_pairs: Vec<(String, String)> =
+                    if let Expr::Name(proc_name) = procedure.as_ref() {
+                        if let Some(info) = self.known_callables.get(proc_name.as_str()) {
+                            info.params
+                                .iter()
+                                .zip(arguments.iter())
+                                .filter_map(|((param_name, mode), arg)| {
+                                    if mode == "RAP_PARAMETER_MODE_OUT" {
+                                        if let CallArgument::InOut(LValue::Name(caller_name)) = arg
+                                        {
+                                            Some((param_name.clone(), caller_name.clone()))
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect()
+                        } else {
+                            vec![]
+                        }
+                    } else {
+                        vec![]
+                    };
+
+                // Before call: copy caller's variables into frame under proc's param names
+                for (param_name, caller_name) in &inout_pairs {
+                    let val_temp = self.fresh_temp();
+                    self.emit_line(&format!(
+                        "RAP_Object *{} = RAP_frame_get({}, \"{}\");",
+                        val_temp, self.current_frame, caller_name
+                    ));
+                    self.emit_line(&format!(
+                        "RAP_frame_set({}, \"{}\", {});",
+                        self.current_frame, param_name, val_temp
+                    ));
+                }
+
                 let proc_temp = self.emit_expression(procedure);
+                // Only pass input args; in-out params use frame lookup
                 let arg_temps: Vec<String> = arguments
                     .iter()
-                    .map(|arg| match arg {
-                        CallArgument::Input(expr) => self.emit_expression(expr),
-                        CallArgument::InOut(lvalue) => {
-                            // For in-out params, pass the variable itself
-                            match lvalue {
-                                LValue::Name(n) => self.mangle_name(n),
-                                _ => {
-                                    // TODO: subscript/slice in-out params
-                                    "_NULL_TODO".to_string()
-                                }
-                            }
-                        }
+                    .filter_map(|arg| match arg {
+                        CallArgument::Input(expr) => Some(self.emit_expression(expr)),
+                        CallArgument::InOut(_) => None,
                     })
                     .collect();
                 self.emit_call_discard(&proc_temp, &arg_temps);
+
+                // After call: copy back proc's param names to caller's variable names
+                for (param_name, caller_name) in &inout_pairs {
+                    let val_temp = self.fresh_temp();
+                    self.emit_line(&format!(
+                        "RAP_Object *{} = RAP_frame_get({}, \"{}\");",
+                        val_temp, self.current_frame, param_name
+                    ));
+                    self.emit_line(&format!(
+                        "RAP_frame_set({}, \"{}\", {});",
+                        self.current_frame, caller_name, val_temp
+                    ));
+                }
             }
 
             Statement::Conditional {
@@ -490,10 +571,25 @@ impl Codegen {
         match target {
             LValue::Name(name) => {
                 let mangled = self.mangle_name(name);
-                if self.declared_vars.insert(mangled.clone()) {
-                    self.emit_line(&format!("RAP_Object *{} = {};", mangled, value_temp));
-                } else {
+                if self.declared_vars.contains(&mangled) {
+                    // Parameter — update C local and frame
                     self.emit_line(&format!("{} = {};", mangled, value_temp));
+                    self.emit_line(&format!(
+                        "RAP_frame_set({}, \"{}\", {});",
+                        self.current_frame, name, mangled
+                    ));
+                } else if self.foreign_vars.contains(name.as_str()) {
+                    // чужие — write to parent frame
+                    self.emit_line(&format!(
+                        "RAP_frame_set_foreign({}, \"{}\", {});",
+                        self.current_frame, name, value_temp
+                    ));
+                } else {
+                    // Local variable (свои or implicit) — write to current frame
+                    self.emit_line(&format!(
+                        "RAP_frame_set({}, \"{}\", {});",
+                        self.current_frame, name, value_temp
+                    ));
                 }
             }
             LValue::Subscript { collection, index } => {
@@ -692,6 +788,7 @@ impl Codegen {
                     iter_var, from_temp, condition, iter_var, step_var
                 ));
                 self.indent_level += 1;
+                self.declared_vars.insert(local_var.clone());
                 self.emit_line(&format!(
                     "RAP_Object *{} = RAP_create_int_obj({});",
                     local_var, iter_var
@@ -760,8 +857,24 @@ impl Codegen {
                     let c_func_name = info.c_func_name.clone();
                     let params = info.params.clone();
                     self.emit_inline_callable(&c_func_name, &params)
-                } else {
+                } else if self.declared_vars.contains(&self.mangle_name(name)) {
+                    // Parameter — use C local directly
                     self.mangle_name(name)
+                } else {
+                    // Variable — use frame lookup
+                    let temp = self.fresh_temp();
+                    if self.foreign_vars.contains(name.as_str()) {
+                        self.emit_line(&format!(
+                            "RAP_Object *{} = RAP_frame_get_foreign({}, \"{}\");",
+                            temp, self.current_frame, name
+                        ));
+                    } else {
+                        self.emit_line(&format!(
+                            "RAP_Object *{} = RAP_frame_get({}, \"{}\");",
+                            temp, self.current_frame, name
+                        ));
+                    }
+                    temp
                 }
             }
 

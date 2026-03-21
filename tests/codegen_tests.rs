@@ -184,19 +184,16 @@ fn e2e_07_procedures() {
 }
 
 #[test]
-#[ignore] // needs: recursive self-reference (ФАКТ calls itself)
 fn e2e_08_functions() {
     assert_rap_output("08_functions.rap");
 }
 
 #[test]
-#[ignore] // needs: dynamic scoping (чужие/свои)
 fn e2e_09_scoping() {
     assert_rap_output("09_scoping.rap");
 }
 
 #[test]
-#[ignore] // needs: in-out parameters (<=), slices, индекс
 fn e2e_10_return_parameters() {
     assert_rap_output("10_return_parameters.rap");
 }

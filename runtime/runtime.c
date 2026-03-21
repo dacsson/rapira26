@@ -110,6 +110,11 @@ RAP_Object *RAP_create_tuple_obj(uint32_t count, RAP_Object **items) {
 
 RAP_Object *RAP_set_tuple_item(RAP_Object *container, uint32_t index,
                                RAP_Object *item) {
+  if (container->tag != RAP_OBJECT_TAG_TUPLE && container->tag != RAP_OBJECT_TAG_TEXT) {
+    RAP_fatal_error("Объект не является кортежем или текстом");
+    return container;
+  }
+
   if (container->tag == RAP_OBJECT_TAG_TEXT) {
     // When assigning to a text element, unwrap single-char TEXT to its codepoint int
     if (item->tag == RAP_OBJECT_TAG_TEXT && RAP_get_text_val(item)->count == 1) {
@@ -123,6 +128,11 @@ RAP_Object *RAP_set_tuple_item(RAP_Object *container, uint32_t index,
 }
 
 RAP_Object *RAP_get_tuple_item(RAP_Object *container, uint32_t index) {
+  if (container->tag != RAP_OBJECT_TAG_TUPLE && container->tag != RAP_OBJECT_TAG_TEXT) {
+    RAP_fatal_error("Объект не является кортежем или текстом");
+    return container;
+  }
+
   if (container->tag == RAP_OBJECT_TAG_TEXT) {
     // Return a single-character TEXT wrapping the codepoint
     RAP_Object *result = malloc(sizeof(RAP_Object));
@@ -137,6 +147,11 @@ RAP_Object *RAP_get_tuple_item(RAP_Object *container, uint32_t index) {
 }
 
 RAP_Object *RAP_append_tuple(RAP_Object *a, RAP_Object *b) {
+  if (a->tag != RAP_OBJECT_TAG_TUPLE || b->tag != RAP_OBJECT_TAG_TUPLE) {
+    RAP_fatal_error("Оба объекта должны быть кортежами");
+    return a;
+  }
+
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_TUPLE;
   obj->tuple_val = malloc(sizeof(struct RAP_Tuple));
@@ -206,6 +221,9 @@ RAP_Object *RAP_create_slice(RAP_Object *parent, int64_t from, int64_t to) {
   if (from < 0) from = 0;
   if (to > count) to = count;
   if (from > to) from = to;
+
+  // For slices that are actually just a single item, expand so we include just the item itself
+  if (from == to) to += 1;
 
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_SLICE;
@@ -318,23 +336,68 @@ RAP_Parameter *RAP_create_parameter(RAP_ParameterMode mode, const char *name) {
 struct RAP_CallFrame *RAP_create_call_frame(struct RAP_CallFrame *parent) {
   struct RAP_CallFrame *frame = malloc(sizeof(struct RAP_CallFrame));
   frame->parent = parent;
-  frame->locals = NULL;
-  frame->locals_count = 0;
+  frame->slots = NULL;
+  frame->slot_count = 0;
   return frame;
 }
 
-void RAP_add_local(struct RAP_CallFrame *frame, const char *name,
-                   RAP_Object *value) {
-  if (frame->locals == NULL) {
-    frame->locals = malloc(sizeof(RAP_Object *));
-    frame->locals_count = 1;
-  } else {
-    frame->locals_count++;
-    frame->locals =
-        realloc(frame->locals, frame->locals_count * sizeof(RAP_Object *));
+// Find slot index by name in a single frame. Returns -1 if not found.
+static int frame_find_slot(struct RAP_CallFrame *frame, const char *name) {
+  for (uint32_t i = 0; i < frame->slot_count; i++) {
+    if (strcmp(frame->slots[i].name, name) == 0) return (int)i;
   }
+  return -1;
+}
 
-  frame->locals[frame->locals_count - 1] = value;
+// Get variable from current frame only (свои / implicit locals).
+// Returns пусто if not found.
+RAP_Object *RAP_frame_get(struct RAP_CallFrame *frame, const char *name) {
+  int idx = frame_find_slot(frame, name);
+  if (idx >= 0) return frame->slots[idx].value;
+  return RAP_create_null_obj();
+}
+
+// Set variable in current frame (creates slot if not found).
+void RAP_frame_set(struct RAP_CallFrame *frame, const char *name, RAP_Object *value) {
+  int idx = frame_find_slot(frame, name);
+  if (idx >= 0) {
+    frame->slots[idx].value = value;
+    return;
+  }
+  frame->slot_count++;
+  frame->slots = realloc(frame->slots, frame->slot_count * sizeof(struct RAP_FrameSlot));
+  frame->slots[frame->slot_count - 1].name = name;
+  frame->slots[frame->slot_count - 1].value = value;
+}
+
+// Get variable by walking up the parent chain (чужие).
+// Returns пусто if not found in any frame.
+RAP_Object *RAP_frame_get_foreign(struct RAP_CallFrame *frame, const char *name) {
+  struct RAP_CallFrame *current = frame->parent;
+  while (current) {
+    int idx = frame_find_slot(current, name);
+    if (idx >= 0) return current->slots[idx].value;
+    current = current->parent;
+  }
+  return RAP_create_null_obj();
+}
+
+// Set variable by walking up the parent chain (чужие).
+// If found in a parent, updates it there. Otherwise creates in the immediate parent.
+void RAP_frame_set_foreign(struct RAP_CallFrame *frame, const char *name, RAP_Object *value) {
+  struct RAP_CallFrame *current = frame->parent;
+  while (current) {
+    int idx = frame_find_slot(current, name);
+    if (idx >= 0) {
+      current->slots[idx].value = value;
+      return;
+    }
+    current = current->parent;
+  }
+  // Not found anywhere — create in immediate parent
+  if (frame->parent) {
+    RAP_frame_set(frame->parent, name, value);
+  }
 }
 
 RAP_Object *RAP_call_callable_obj(RAP_Object *callable, RAP_Object **args,
@@ -605,6 +668,7 @@ RAP_Object *RAP_multiply(RAP_Object *a, RAP_Object *b) {
     result->text_val->items = items;
     return result;
   }
+  printf("%d %d\n", a->tag, b->tag);
   RAP_fatal_error("Неподдерживаемые типы для умножения");
 }
 
