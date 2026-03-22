@@ -1,13 +1,6 @@
 //! AST → C code generator.
 //!
 //! Walks the AST and emits C code that uses the runtime library (runtime.h).
-//!
-//! Key conventions (matching runtime/translated/prime.c):
-//!   - Every expression emits into a temp: `RAP_Object *_tN = ...;`
-//!   - Locals are `_local_NAME` (Cyrillic transliterated to Latin)
-//!   - Function defs become `RAP_Object *RAP_FUNC_NAME(struct RAP_CallFrame *_frame, ...)`
-//!   - No `free()` calls — future GC will handle memory
-//!   - All values are `RAP_Object *`, created via `RAP_create_*_obj()`
 
 use crate::ast::*;
 
@@ -130,8 +123,6 @@ impl Codegen {
         result
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────
-
     fn fresh_temp(&mut self) -> String {
         let name = format!("_t{}", self.temp_counter);
         self.temp_counter += 1;
@@ -162,7 +153,7 @@ impl Codegen {
         self.output.push('\n');
     }
 
-    /// Transliterate Cyrillic identifier to Latin (loosely based on GOST 7.79).
+    /// Transliterate Cyrillic identifier to Latin
     fn transliterate(rapira_name: &str) -> String {
         let mut result = String::new();
         for ch in rapira_name.chars() {
@@ -225,8 +216,6 @@ impl Codegen {
         }
     }
 
-    // ── Program Units ────────────────────────────────────────────────────
-
     fn emit_program_unit(&mut self, unit: &ProgramUnit) {
         match unit {
             ProgramUnit::FunctionDefinition(func_def) => self.emit_function_def(func_def),
@@ -234,8 +223,6 @@ impl Codegen {
             ProgramUnit::Statement(stmt) => self.emit_statement(stmt),
         }
     }
-
-    // ── Definitions ──────────────────────────────────────────────────────
 
     fn emit_function_def(&mut self, func_def: &FunctionDefinition) {
         let name = func_def.name.as_deref().unwrap_or("_anon");
@@ -304,12 +291,6 @@ impl Codegen {
             width = align
         ));
         self.forward_decls.push_str(&func_body);
-
-        // // Decrement references of all local variables
-        // for var in &self.declared_vars {
-        //     self.forward_decls
-        //         .push_str(&format!("RAP_dec_ref({});\n", var));
-        // }
 
         self.forward_decls.push_str("  return NULL;\n}\n\n");
 
@@ -408,12 +389,6 @@ impl Codegen {
         ));
         self.forward_decls.push_str(&func_body);
 
-        // // Decrement references of all local variables
-        // for var in &self.declared_vars {
-        //     self.forward_decls
-        //         .push_str(&format!("RAP_dec_ref({});\n", var));
-        // }
-
         self.forward_decls.push_str("  return NULL;\n}\n\n");
 
         self.output = saved_output;
@@ -475,8 +450,6 @@ impl Codegen {
         }
         temp
     }
-
-    // ── Statements ───────────────────────────────────────────────────────
 
     fn emit_statement(&mut self, stmt: &Statement) {
         match stmt {
@@ -643,20 +616,20 @@ impl Codegen {
             LValue::Name(name) => {
                 let mangled = self.mangle_name(name);
                 if self.declared_vars.contains(&mangled) {
-                    // Parameter — update C local and frame
+                    // Parameter updates BOTH C local and frame
                     self.emit_line(&format!("{} = {};", mangled, value_temp));
                     self.emit_line(&format!(
                         "RAP_frame_set({}, \"{}\", {});",
                         self.current_frame, name, mangled
                     ));
                 } else if self.foreign_vars.contains(name.as_str()) {
-                    // чужие — write to parent frame
+                    // чужие - here we walk up the frame chain and try to find the variable
                     self.emit_line(&format!(
                         "RAP_frame_set_foreign({}, \"{}\", {});",
                         self.current_frame, name, value_temp
                     ));
                 } else {
-                    // Local variable (свои or implicit) — write to current frame
+                    // Locals saved to frame, to allow access from nested scopes
                     self.emit_line(&format!(
                         "RAP_frame_set({}, \"{}\", {});",
                         self.current_frame, name, value_temp
@@ -727,8 +700,6 @@ impl Codegen {
         }
     }
 
-    // ── Selection ────────────────────────────────────────────────────────
-
     fn emit_selection(&mut self, sel: &SelectionStatement) {
         match sel {
             SelectionStatement::ValueMatch {
@@ -794,8 +765,6 @@ impl Codegen {
             }
         }
     }
-
-    // ── Loops ────────────────────────────────────────────────────────────
 
     fn emit_loop(&mut self, loop_stmt: &LoopStatement) {
         match &loop_stmt.header {
@@ -916,8 +885,6 @@ impl Codegen {
         }
     }
 
-    // ── Expressions ──────────────────────────────────────────────────────
-
     /// Emit code for an expression. Returns the temp variable name holding the result.
     fn emit_expression(&mut self, expr: &Expr) -> String {
         match expr {
@@ -925,16 +892,17 @@ impl Codegen {
 
             Expr::Name(name) => {
                 if let Some(info) = self.known_callables.get(name.as_str()) {
-                    // Known function/procedure — create callable inline
+                    // TODO: we can detect name collisions here
+                    // Known function/procedure - callable objects created, they are treated as objects too
                     let c_func_name = info.c_func_name.clone();
                     let params = info.params.clone();
                     let is_function = info.is_function;
                     self.emit_inline_callable(&c_func_name, &params, is_function)
                 } else if self.declared_vars.contains(&self.mangle_name(name)) {
-                    // Parameter — use C local directly
+                    // Parameter is local
                     self.mangle_name(name)
                 } else {
-                    // Variable — use frame lookup
+                    // Variable lookup
                     let temp = self.fresh_temp();
                     if self.foreign_vars.contains(name.as_str()) {
                         self.emit_line(&format!(
@@ -1124,7 +1092,6 @@ impl Codegen {
     fn try_emit_builtin(&mut self, name: &str, arguments: &[Box<Expr>]) -> Option<String> {
         match name {
             "корень" | "sqrt" => {
-                // sqrt — single argument, returns float
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(

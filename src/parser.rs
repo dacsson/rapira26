@@ -57,8 +57,6 @@ impl<'input> Parser<'input> {
         Self { lexer, current }
     }
 
-    // ── Token helpers ───────────────────────────────────────────────────────
-
     fn advance_lexer(lexer: &mut Lexer<'input>) -> Option<(usize, Token, usize)> {
         loop {
             match lexer.next() {
@@ -86,7 +84,6 @@ impl<'input> Parser<'input> {
             .unwrap_or(0)
     }
 
-    /// Consume the current token if it matches, returning true. Otherwise do nothing.
     fn eat(&mut self, expected: &Token) -> bool {
         if self.peek() == Some(expected) {
             self.advance();
@@ -96,7 +93,6 @@ impl<'input> Parser<'input> {
         }
     }
 
-    /// Consume the current token if it matches, or return an error.
     fn expect(&mut self, expected: &Token) -> Result<(usize, Token, usize), ParseError> {
         if self.peek() == Some(expected) {
             Ok(self.advance().unwrap())
@@ -114,7 +110,6 @@ impl<'input> Parser<'input> {
         }
     }
 
-    /// Consume and return an identifier, or error.
     fn expect_ident(&mut self) -> Result<String, ParseError> {
         match self.peek() {
             Some(Token::Ident(_)) => {
@@ -138,12 +133,10 @@ impl<'input> Parser<'input> {
         }
     }
 
-    /// Skip any number of Newline tokens.
     fn skip_newlines(&mut self) {
         while self.eat(&Token::Newline) {}
     }
 
-    /// Check if the current token can start an expression.
     fn can_start_expression(&self) -> bool {
         matches!(
             self.peek(),
@@ -168,7 +161,6 @@ impl<'input> Parser<'input> {
         )
     }
 
-    /// Check if the current token can start a statement.
     fn can_start_statement(&self) -> bool {
         matches!(
             self.peek(),
@@ -189,8 +181,6 @@ impl<'input> Parser<'input> {
         )
     }
 
-    // ── Block parsing ────────────────────────────────────────────────────────
-
     /// Parse an indented block: Newline Indent stmt* Dedent
     fn parse_block(&mut self) -> Result<Vec<Statement>, ParseError> {
         self.expect(&Token::Newline)?;
@@ -210,8 +200,6 @@ impl<'input> Parser<'input> {
             Ok(vec![statement])
         }
     }
-
-    // ── Program ─────────────────────────────────────────────────────────────
 
     pub fn parse_program(mut self) -> Result<Program, ParseError> {
         let mut units = Vec::new();
@@ -236,8 +224,6 @@ impl<'input> Parser<'input> {
             _ => Ok(ProgramUnit::Statement(self.parse_statement()?)),
         }
     }
-
-    // ── Definitions ─────────────────────────────────────────────────────────
 
     fn parse_procedure_definition(&mut self) -> Result<ProcedureDefinition, ParseError> {
         self.expect(&Token::KwПроц)?;
@@ -365,8 +351,6 @@ impl<'input> Parser<'input> {
         }
         Ok(names)
     }
-
-    // ── Statements ──────────────────────────────────────────────────────────
 
     /// Parse statements until we see `terminator` token (without consuming it).
     /// Newlines between statements are consumed.
@@ -792,8 +776,6 @@ impl<'input> Parser<'input> {
             Ok(CallArgument::Input(Box::new(value)))
         }
     }
-
-    // ── Expressions (precedence climbing) ───────────────────────────────────
 
     fn parse_expression(&mut self) -> Result<Expr, ParseError> {
         self.parse_expr_or()
