@@ -295,20 +295,32 @@ fn lex_tuple_brackets() {
 
 #[test]
 fn lex_skips_whitespace() {
+    // Leading spaces on the first line produce an Indent; trailing spaces are inline whitespace
     let tokens = tokenize("  42   да  ");
-    assert_eq!(tokens, vec![Token::Integer(42), Token::KwДа]);
+    assert_eq!(
+        tokens,
+        vec![Token::Indent, Token::Integer(42), Token::KwДа, Token::Dedent]
+    );
 }
 
 #[test]
-fn lex_skips_newlines_and_semicolons() {
+fn lex_newlines_produce_tokens() {
+    // Newlines are now significant — they produce Newline tokens
     let tokens = tokenize("42\n;\nда");
-    assert_eq!(tokens, vec![Token::Integer(42), Token::KwДа]);
+    assert_eq!(
+        tokens,
+        vec![Token::Integer(42), Token::Newline, Token::Newline, Token::KwДа]
+    );
 }
 
 #[test]
-fn lex_skips_backslash_comments() {
+fn lex_comments_produce_newline() {
+    // A comment ending with newline produces a Newline token
     let tokens = tokenize("42 \\ this is a comment\nда");
-    assert_eq!(tokens, vec![Token::Integer(42), Token::KwДа]);
+    assert_eq!(
+        tokens,
+        vec![Token::Integer(42), Token::Newline, Token::KwДа]
+    );
 }
 
 #[test]
@@ -325,7 +337,8 @@ fn lex_empty_input() {
 
 #[test]
 fn lex_only_whitespace_and_comments() {
-    let tokens = tokenize("  \n ; \\ comment\n  ");
+    // Blank lines and comment-only lines produce no content tokens
+    let tokens = tokenize("  \n \\ comment\n  ");
     assert!(tokens.is_empty());
 }
 

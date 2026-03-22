@@ -98,8 +98,9 @@ RAP_Object *RAP_add(RAP_Object *a, RAP_Object *b) {
     struct RAP_Tuple *bt = RAP_get_text_val(b);
     uint32_t new_count = at->count + bt->count;
     RAP_Object **items = malloc(new_count * sizeof(RAP_Object *));
-    for (uint32_t i = 0; i < at->count; i++) items[i] = at->items[i];
-    for (uint32_t i = 0; i < bt->count; i++) items[at->count + i] = bt->items[i];
+    for (uint32_t i = 0; i < at->count; i++) { items[i] = at->items[i]; RAP_inc_ref(at->items[i]); }
+    for (uint32_t i = 0; i < bt->count; i++) { items[at->count + i] = bt->items[i]; RAP_inc_ref(bt->items[i]); }
+    RAP_TRACK_ALLOC();
     RAP_Object *result = malloc(sizeof(RAP_Object));
     result->tag = RAP_OBJECT_TAG_TEXT;
     result->text_val = malloc(sizeof(struct RAP_Tuple));
@@ -135,6 +136,7 @@ RAP_Object *RAP_multiply(RAP_Object *a, RAP_Object *b) {
     for (int64_t rep = 0; rep < n; rep++) {
       for (uint32_t i = 0; i < src_count; i++) {
         items[rep * src_count + i] = a->tuple_val->items[i];
+        RAP_inc_ref(a->tuple_val->items[i]);
       }
     }
     RAP_Object *result = RAP_create_tuple_obj(new_count, items);
@@ -159,8 +161,10 @@ RAP_Object *RAP_multiply(RAP_Object *a, RAP_Object *b) {
     for (int64_t rep = 0; rep < repeat_n; rep++) {
       for (uint32_t i = 0; i < src->count; i++) {
         items[rep * src->count + i] = src->items[i];
+        RAP_inc_ref(src->items[i]);
       }
     }
+    RAP_TRACK_ALLOC();
     RAP_Object *result = malloc(sizeof(RAP_Object));
     result->tag = RAP_OBJECT_TAG_TEXT;
     result->text_val = malloc(sizeof(struct RAP_Tuple));
