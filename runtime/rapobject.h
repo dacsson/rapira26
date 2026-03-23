@@ -1,10 +1,11 @@
 #ifndef RAPIRA_OBJECT_H
 #define RAPIRA_OBJECT_H
 
-#include <stddef.h>
-#include <stdbool.h>
-#include <stdint.h>
+#include "rapvalue.h"
 #include <stdatomic.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 /// From spec 2.2.2:
 /// Объекты:
@@ -62,7 +63,7 @@ typedef struct {
 /// Named variable slot in a call frame.
 struct RAP_FrameSlot {
   const char *name;
-  RAP_Object *value;
+  RAP_Value value;
 };
 
 /// Each function keeps some context about 'чужие' and 'свои' scoped variables.
@@ -76,7 +77,7 @@ struct RAP_CallFrame {
 /// Funcs and procs are treated as objects.
 struct RAP_Callable {
   char *name;
-  RAP_Object *(*func)(struct RAP_CallFrame *frame, RAP_Object **args,
+  RAP_Value (*func)(struct RAP_CallFrame *frame, RAP_Value *args,
                       unsigned int arg_count);
   struct RAP_CallFrame *frame;
   RAP_Parameter **params;
@@ -87,20 +88,20 @@ struct RAP_Callable {
 /// Tuple is a untyped list of objects.
 struct RAP_Tuple {
   uint32_t count;
-  RAP_Object **items;
+  RAP_Value *items;
 };
 
 /// Unified function type
-typedef RAP_Object *(*RAP_FunctionDecl)(struct RAP_CallFrame *frame,
-                                        RAP_Object **args, uint32_t arg_count);
+typedef RAP_Value (*RAP_FunctionDecl)(struct RAP_CallFrame *frame,
+                                        RAP_Value *args, uint32_t arg_count);
 
 /// Slice: a view into a tuple (or text).
 /// Holds a pointer to the parent and 0-based [from, to) bounds.
 /// Slices of slices flatten to the root parent (no chaining).
 struct RAP_Slice {
-  RAP_Object *parent;  // the tuple/text we're viewing
-  int64_t from;        // inclusive start
-  int64_t to;          // exclusive end
+  RAP_Object *parent; // the tuple/text we're viewing
+  int64_t from;       // inclusive start
+  int64_t to;         // exclusive end
 };
 
 #endif // RAPIRA_OBJECT_H

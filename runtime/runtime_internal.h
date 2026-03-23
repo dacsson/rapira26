@@ -3,6 +3,8 @@
 
 #include "runtime.h"
 #include "rapobject.h"
+#include "rapvalue.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

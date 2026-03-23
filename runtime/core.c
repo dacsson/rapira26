@@ -1,3 +1,4 @@
+#include "rapvalue.h"
 #include "runtime.h"
 #include "runtime_internal.h"
 
@@ -65,96 +66,109 @@ void RAP_check_leaks(void) {
 
 // CONSTRUCTORS
 
-RAP_Object *RAP_create_null_obj(void) {
+RAP_Value RAP_create_null_obj(void) {
   RAP_TRACK_ALLOC();
-  RAP_Object *obj = malloc(sizeof(RAP_Object));
+  RAP_Object* obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_NULL;
   obj->refcount = 1;
+  return RAP_CREATE_PTR(obj);
+}
+
+RAP_Value RAP_create_int_obj(int64_t value) {
+  // TODO: BigInts check
+  if (value > INT32_MAX) {
+    // Heap allocate 64 bit ints
+    RAP_TRACK_ALLOC();
+    RAP_Object *obj = malloc(sizeof(RAP_Object));
+    obj->tag = RAP_OBJECT_TAG_INT;
+    obj->int_val = value;
+    obj->refcount = 1;
+    return RAP_CREATE_PTR(obj);
+  }
+  // SMI tagged
+  RAP_Value obj = RAP_CREATE_SMI(value);
   return obj;
 }
 
-RAP_Object *RAP_create_int_obj(int64_t value) {
-  RAP_TRACK_ALLOC();
-  RAP_Object *obj = malloc(sizeof(RAP_Object));
-  obj->tag = RAP_OBJECT_TAG_INT;
-  obj->int_val = value;
-  obj->refcount = 1;
-  return obj;
-}
-
-RAP_Object *RAP_create_float_obj(double value) {
+RAP_Value RAP_create_float_obj(double value) {
   RAP_TRACK_ALLOC();
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_FLOAT;
   obj->float_val = value;
   obj->refcount = 1;
-  return obj;
+  return RAP_CREATE_PTR(obj);
 }
 
-RAP_Object *RAP_create_logical_obj(bool value) {
-  RAP_TRACK_ALLOC();
-  RAP_Object *obj = malloc(sizeof(RAP_Object));
-  obj->tag = RAP_OBJECT_TAG_LOGICAL;
-  obj->logical_val = value;
-  obj->refcount = 1;
-  return obj;
+RAP_Value RAP_create_logical_obj(bool value) {
+  return RAP_CREATE_BOOL(value);
 }
 
 // STRINGIFY
 
-char *RAP_stringify_object(RAP_Object *obj) {
-  switch (obj->tag) {
+char *RAP_stringify_object(RAP_Value obj) {
+  if (RAP_IS_BOOL(obj)) {
+    return strdup(RAP_BOOL_VALUE(obj) ? "да" : "нет");
+  } else if (RAP_IS_SMI(obj)) {
+    size_t needed_size = snprintf(NULL, 0, "%ld", (long)RAP_SMI_VALUE(obj));
+    char *str = malloc(needed_size + 1);
+    snprintf(str, needed_size + 1, "%ld", (long)RAP_SMI_VALUE(obj));
+    return str;
+  }
+
+  RAP_Object *obj_ptr = RAP_PTR_VALUE(obj);
+
+  switch (obj_ptr->tag) {
   case RAP_OBJECT_TAG_NULL: {
     return strdup("пусто");
   }
   case RAP_OBJECT_TAG_LOGICAL: {
-    return strdup(obj->logical_val ? "да" : "нет");
+    return strdup(obj_ptr->logical_val ? "да" : "нет");
   }
   case RAP_OBJECT_TAG_INT: {
-    size_t needed_size = snprintf(NULL, 0, "%ld", (long)RAP_get_int_val(obj));
+    size_t needed_size = snprintf(NULL, 0, "%ld", (long)RAP_get_int_val(obj_ptr));
     char *str = malloc(needed_size + 1);
-    snprintf(str, needed_size + 1, "%ld", (long)RAP_get_int_val(obj));
+    snprintf(str, needed_size + 1, "%ld", (long)RAP_get_int_val(obj_ptr));
     return str;
   }
   case RAP_OBJECT_TAG_FLOAT: {
     double integral_part;
-    double fractional_part = modf(RAP_get_float_val(obj), &integral_part);
+    double fractional_part = modf(RAP_get_float_val(obj_ptr), &integral_part);
     double abs_fractional_part = fabs(fractional_part);
     bool has_only_zeros = abs_fractional_part < DBL_EPSILON;
     if (has_only_zeros) {
-      size_t needed_size = snprintf(NULL, 0, "%.1f", RAP_get_float_val(obj));
+      size_t needed_size = snprintf(NULL, 0, "%.1f", RAP_get_float_val(obj_ptr));
       char *str = malloc(needed_size + 1);
-      snprintf(str, needed_size + 1, "%.1f", RAP_get_float_val(obj));
+      snprintf(str, needed_size + 1, "%.1f", RAP_get_float_val(obj_ptr));
       return str;
     }
     char tmp[64];
-    snprintf(tmp, sizeof(tmp), "%.16g", RAP_get_float_val(obj));
+    snprintf(tmp, sizeof(tmp), "%.16g", RAP_get_float_val(obj_ptr));
     return strdup(tmp);
   }
   case RAP_OBJECT_TAG_TEXT: {
-    uint32_t count = RAP_get_text_val(obj)->count;
+    uint32_t count = RAP_get_text_val(obj_ptr)->count;
     if (count == 0) return strdup("");
     char *buf = malloc(count * 4 + 1);
     size_t pos = 0;
     for (uint32_t i = 0; i < count; i++) {
-      int64_t cp = RAP_get_int_val(RAP_get_text_val(obj)->items[i]);
+      int64_t cp = RAP_SMI_VALUE(RAP_get_text_val(obj_ptr)->items[i]);
       pos = rap_utf8_encode_one(cp, buf, pos);
     }
     buf[pos] = '\0';
     return buf;
   }
   case RAP_OBJECT_TAG_TUPLE: {
-    if (obj->tuple_val->count == 0) {
+    if (obj_ptr->tuple_val->count == 0) {
       return strdup("<* *>");
     }
     size_t len = 0, cap = 0;
     char *buf = NULL;
     buf = rap_strbuf_append(buf, &len, &cap, "<* ");
-    for (uint32_t i = 0; i < obj->tuple_val->count; i++) {
+    for (uint32_t i = 0; i < obj_ptr->tuple_val->count; i++) {
       if (i > 0) {
         buf = rap_strbuf_append(buf, &len, &cap, ", ");
       }
-      char *item_str = RAP_stringify_object(obj->tuple_val->items[i]);
+      char *item_str = RAP_stringify_object(obj_ptr->tuple_val->items[i]);
       buf = rap_strbuf_append(buf, &len, &cap, item_str);
       free(item_str);
     }
@@ -162,11 +176,11 @@ char *RAP_stringify_object(RAP_Object *obj) {
     return buf;
   }
   case RAP_OBJECT_TAG_SLICE: {
-    RAP_Object *materialized = RAP_materialize_slice(obj);
+    RAP_Value materialized = RAP_materialize_slice(obj_ptr);
     return RAP_stringify_object(materialized);
   }
   case RAP_OBJECT_TAG_CALLABLE: {
-    char *name = RAP_get_callable_val(obj)->name;
+    char *name = RAP_get_callable_val(obj_ptr)->name;
     return strdup(name ? name : "<callable>");
   }
   default: {
@@ -177,10 +191,13 @@ char *RAP_stringify_object(RAP_Object *obj) {
 
 // REFERENCE COUNTING
 
-void RAP_dec_ref(RAP_Object *obj) {
-  if (obj == NULL) return;
-  obj->refcount--;
-  if (obj->refcount <= 0) RAP_free_object(obj);
+void RAP_dec_ref(RAP_Value obj) {
+  if (!RAP_IS_PTR(obj)) return;
+
+  RAP_Object *obj_ptr = RAP_PTR_VALUE(obj);
+  if (obj_ptr == NULL) return;
+  obj_ptr->refcount--;
+  if (obj_ptr->refcount <= 0) RAP_free_object(obj_ptr);
 }
 
 // OBJECT DESTRUCTOR
@@ -208,7 +225,7 @@ void RAP_free_object(RAP_Object *obj) {
     }
     // IMPORTANT: slice destructor must not free parent!!!
     case RAP_OBJECT_TAG_SLICE: {
-      RAP_dec_ref(RAP_get_slice_val(obj)->parent);
+      RAP_dec_ref(RAP_CREATE_PTR(obj->slice_val->parent));
       free(obj->slice_val);
       break;
     }

@@ -52,7 +52,7 @@ pub struct Codegen {
     param_counter: usize,
     /// Name of the current call frame variable ("_main_frame" at top level, "_frame" inside funcs)
     current_frame: String,
-    /// Variables declared in current scope (mangled names), to emit `RAP_Object *` only once
+    /// Variables declared in current scope (mangled names), to emit `RAP_Value ` only once
     declared_vars: std::collections::HashSet<String>,
     /// Rapira name → callable info, so call sites can create callables inline
     known_callables: std::collections::HashMap<String, CallableInfo>,
@@ -268,7 +268,7 @@ impl Codegen {
         for (i, param_name) in func_def.parameters.iter().enumerate() {
             let mangled = self.mangle_name(param_name);
             self.declared_vars.insert(mangled.clone());
-            self.emit_line(&format!("RAP_Object *{} = _args[{}];", mangled, i));
+            self.emit_line(&format!("RAP_Value {} = _args[{}];", mangled, i));
             self.emit_line(&format!("RAP_inc_ref({});", mangled));
         }
         if !func_def.parameters.is_empty() {
@@ -281,18 +281,19 @@ impl Codegen {
         let func_body = std::mem::take(&mut self.output);
         self.forward_decls.push_str(&format!("// функ {}\n", name));
         self.forward_decls.push_str(&format!(
-            "RAP_Object *{}(struct RAP_CallFrame *_frame,\n",
+            "RAP_Value {}(struct RAP_CallFrame *_frame,\n",
             c_func_name
         ));
-        let align = format!("RAP_Object *{}(", c_func_name).len();
+        let align = format!("RAP_Value {}(", c_func_name).len();
         self.forward_decls.push_str(&format!(
-            "{:>width$}RAP_Object **_args, unsigned int _argc) {{\n",
+            "{:>width$}RAP_Value *_args, unsigned int _argc) {{\n",
             "",
             width = align
         ));
         self.forward_decls.push_str(&func_body);
 
-        self.forward_decls.push_str("  return NULL;\n}\n\n");
+        self.forward_decls
+            .push_str("  return RAP_create_null_obj();\n}\n\n");
 
         // Restore state
         self.output = saved_output;
@@ -360,7 +361,7 @@ impl Codegen {
                 ProcParameter::Input(n) => {
                     let mangled = self.mangle_name(n);
                     self.declared_vars.insert(mangled.clone());
-                    self.emit_line(&format!("RAP_Object *{} = _args[{}];", mangled, arg_index));
+                    self.emit_line(&format!("RAP_Value {} = _args[{}];", mangled, arg_index));
                     self.emit_line(&format!("RAP_inc_ref({});", mangled));
                     arg_index += 1;
                 }
@@ -378,18 +379,19 @@ impl Codegen {
         let func_body = std::mem::take(&mut self.output);
         self.forward_decls.push_str(&format!("// проц {}\n", name));
         self.forward_decls.push_str(&format!(
-            "RAP_Object *{}(struct RAP_CallFrame *_frame,\n",
+            "RAP_Value {}(struct RAP_CallFrame *_frame,\n",
             c_func_name
         ));
-        let align = format!("RAP_Object *{}(", c_func_name).len();
+        let align = format!("RAP_Value {}(", c_func_name).len();
         self.forward_decls.push_str(&format!(
-            "{:>width$}RAP_Object **_args, unsigned int _argc) {{\n",
+            "{:>width$}RAP_Value *_args, unsigned int _argc) {{\n",
             "",
             width = align
         ));
         self.forward_decls.push_str(&func_body);
 
-        self.forward_decls.push_str("  return NULL;\n}\n\n");
+        self.forward_decls
+            .push_str("  return RAP_create_null_obj();\n}\n\n");
 
         self.output = saved_output;
         self.indent_level = saved_indent;
@@ -414,7 +416,7 @@ impl Codegen {
 
         if param_count == 0 {
             self.emit_line(&format!(
-                "RAP_Object *{} = RAP_create_callable_obj({}, &{}, NULL, 0, {});",
+                "RAP_Value {} = RAP_create_callable_obj({}, &{}, NULL, 0, {});",
                 temp, self.current_frame, c_func_name, is_func_str
             ));
         } else if param_count == 1 {
@@ -424,7 +426,7 @@ impl Codegen {
                 p, params[0].1, params[0].0
             ));
             self.emit_line(&format!(
-                "RAP_Object *{} = RAP_create_callable_obj({}, &{}, &{}, {}, {});",
+                "RAP_Value {} = RAP_create_callable_obj({}, &{}, &{}, {}, {});",
                 temp, self.current_frame, c_func_name, p, param_count, is_func_str
             ));
         } else {
@@ -444,7 +446,7 @@ impl Codegen {
                 param_var_names.join(", ")
             ));
             self.emit_line(&format!(
-                "RAP_Object *{} = RAP_create_callable_obj({}, &{}, {}, {}, {});",
+                "RAP_Value {} = RAP_create_callable_obj({}, &{}, {}, {}, {});",
                 temp, self.current_frame, c_func_name, array_name, param_count, is_func_str
             ));
         }
@@ -509,7 +511,7 @@ impl Codegen {
                 for (param_name, caller_name) in &inout_pairs {
                     let val_temp = self.fresh_temp();
                     self.emit_line(&format!(
-                        "RAP_Object *{} = RAP_frame_get({}, \"{}\");",
+                        "RAP_Value {} = RAP_frame_get({}, \"{}\");",
                         val_temp, self.current_frame, caller_name
                     ));
                     self.emit_line(&format!(
@@ -533,7 +535,7 @@ impl Codegen {
                 for (param_name, caller_name) in &inout_pairs {
                     let val_temp = self.fresh_temp();
                     self.emit_line(&format!(
-                        "RAP_Object *{} = RAP_frame_get({}, \"{}\");",
+                        "RAP_Value {} = RAP_frame_get({}, \"{}\");",
                         val_temp, self.current_frame, param_name
                     ));
                     self.emit_line(&format!(
@@ -549,7 +551,7 @@ impl Codegen {
                 else_body,
             } => {
                 let cond_temp = self.emit_expression(condition);
-                self.emit_line(&format!("if ({}->logical_val) {{", cond_temp));
+                self.emit_line(&format!("if (RAP_BOOL_VALUE({})) {{", cond_temp));
                 self.indent_level += 1;
                 self.emit_statement_list(then_body);
                 self.indent_level -= 1;
@@ -588,9 +590,9 @@ impl Codegen {
                 for var in variables {
                     let temp = self.fresh_temp();
                     if *text_mode {
-                        self.emit_line(&format!("RAP_Object *{} = RAP_input_text();", temp));
+                        self.emit_line(&format!("RAP_Value {} = RAP_input_text();", temp));
                     } else {
-                        self.emit_line(&format!("RAP_Object *{} = RAP_input_value();", temp));
+                        self.emit_line(&format!("RAP_Value {} = RAP_input_value();", temp));
                     }
                     self.emit_lvalue_assignment(var, &temp);
                 }
@@ -601,7 +603,7 @@ impl Codegen {
             }
 
             Statement::ReturnFromProcedure => {
-                self.emit_line("return NULL;");
+                self.emit_line("return RAP_create_null_obj();");
             }
 
             Statement::ReturnFromFunction(expr) => {
@@ -640,7 +642,7 @@ impl Codegen {
                 let coll_temp = self.emit_expression(collection);
                 let idx_temp = self.emit_expression(index);
                 self.emit_line(&format!(
-                    "RAP_set_tuple_item({}, (uint32_t)RAP_get_int_val({}), {});",
+                    "RAP_set_tuple_item({}, (uint32_t)RAP_SMI_VALUE({}), {});",
                     coll_temp, idx_temp, value_temp
                 ));
             }
@@ -651,18 +653,18 @@ impl Codegen {
             } => {
                 let coll_temp = self.emit_expression(collection);
                 let from_val = if let Some(f) = from {
-                    format!("RAP_get_int_val({})", self.emit_expression(f))
+                    format!("RAP_SMI_VALUE({})", self.emit_expression(f))
                 } else {
                     "0".to_string()
                 };
                 let to_val = if let Some(t) = to {
-                    format!("RAP_get_int_val({})", self.emit_expression(t))
+                    format!("RAP_SMI_VALUE({})", self.emit_expression(t))
                 } else {
-                    format!("RAP_get_int_val(RAP_length({c}))", c = coll_temp)
+                    format!("RAP_SMI_VALUE(RAP_length({c}))", c = coll_temp)
                 };
                 let slice_temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{} = RAP_create_slice({}, {}, {});",
+                    "RAP_Value {} = RAP_create_slice({}, {}, {});",
                     slice_temp, coll_temp, from_val, to_val
                 ));
                 self.emit_line(&format!(
@@ -689,7 +691,7 @@ impl Codegen {
         } else {
             let args_array = format!("_call_args_{}", self.temp_counter);
             self.emit_line(&format!(
-                "RAP_Object *{}[] = {{{}}};",
+                "RAP_Value {}[] = {{{}}};",
                 args_array,
                 arg_temps.join(", ")
             ));
@@ -724,7 +726,7 @@ impl Codegen {
                 {
                     let conditions: Vec<String> = val_temps
                         .iter()
-                        .map(|vt| format!("RAP_equal({}, {})->logical_val", sel_temp, vt))
+                        .map(|vt| format!("RAP_BOOL_VALUE(RAP_equal({}, {}))", sel_temp, vt))
                         .collect();
                     let keyword = if i == 0 { "if" } else { "} else if" };
                     self.emit_line(&format!("{} ({}) {{", keyword, conditions.join(" || ")));
@@ -750,7 +752,7 @@ impl Codegen {
 
                 for (i, (case, cond_temp)) in cases.iter().zip(cond_temps.iter()).enumerate() {
                     let keyword = if i == 0 { "if" } else { "} else if" };
-                    self.emit_line(&format!("{} ({}->logical_val) {{", keyword, cond_temp));
+                    self.emit_line(&format!("{} (RAP_BOOL_VALUE({})) {{", keyword, cond_temp));
                     self.indent_level += 1;
                     self.emit_statement_list(&case.body);
                     self.indent_level -= 1;
@@ -779,7 +781,7 @@ impl Codegen {
                     self.emit_expression(from_expr)
                 } else {
                     let t = self.fresh_temp();
-                    self.emit_line(&format!("RAP_Object *{} = RAP_create_int_obj(1);", t));
+                    self.emit_line(&format!("RAP_Value {} = RAP_create_int_obj(1);", t));
                     t
                 };
 
@@ -792,7 +794,7 @@ impl Codegen {
 
                 let step_val = if let Some(step_expr) = step {
                     let t = self.emit_expression(step_expr);
-                    format!("RAP_get_int_val({})", t)
+                    format!("RAP_SMI_VALUE({})", t)
                 } else {
                     "1".to_string()
                 };
@@ -805,8 +807,8 @@ impl Codegen {
                 let limit_var = format!("_for_limit_{}", loop_id);
                 if let Some(ref to_t) = to_temp {
                     self.emit_line(&format!(
-                        "int64_t {} = ({}->tag == RAP_OBJECT_TAG_INT) \
-                         ? RAP_get_int_val({}) : (int64_t)RAP_get_float_val({});",
+                        "int64_t {} = RAP_IS_SMI({}) \
+                         ? RAP_SMI_VALUE({}) : (int64_t)RAP_DOUBLE_VALUE({});",
                         limit_var, to_t, to_t, to_t
                     ));
                 }
@@ -824,13 +826,13 @@ impl Codegen {
                 };
 
                 self.emit_line(&format!(
-                    "for (int64_t {} = RAP_get_int_val({}); {}; {} += {}) {{",
+                    "for (int64_t {} = RAP_SMI_VALUE({}); {}; {} += {}) {{",
                     iter_var, from_temp, condition, iter_var, step_var
                 ));
                 self.indent_level += 1;
                 self.declared_vars.insert(local_var.clone());
                 self.emit_line(&format!(
-                    "RAP_Object *{} = RAP_create_int_obj({});",
+                    "RAP_Value {} = RAP_create_int_obj({});",
                     local_var, iter_var
                 ));
                 self.emit_blank_line();
@@ -846,7 +848,7 @@ impl Codegen {
                 let count_temp = self.emit_expression(count_expr);
                 let rep_var = format!("_rep_{}", self.temp_counter);
                 self.emit_line(&format!(
-                    "for (int64_t {} = 0; {} < RAP_get_int_val({}); {}++) {{",
+                    "for (int64_t {} = 0; {} < RAP_SMI_VALUE({}); {}++) {{",
                     rep_var, rep_var, count_temp, rep_var
                 ));
                 self.indent_level += 1;
@@ -873,7 +875,7 @@ impl Codegen {
     fn emit_while_condition(&mut self, while_cond: &Option<Box<Expr>>) {
         if let Some(cond_expr) = while_cond {
             let cond_temp = self.emit_expression(cond_expr);
-            self.emit_line(&format!("if (!{}->logical_val) break;", cond_temp));
+            self.emit_line(&format!("if (!RAP_BOOL_VALUE({})) break;", cond_temp));
         }
     }
 
@@ -881,7 +883,7 @@ impl Codegen {
     fn emit_post_condition(&mut self, post_cond: &Option<Box<Expr>>) {
         if let Some(cond_expr) = post_cond {
             let cond_temp = self.emit_expression(cond_expr);
-            self.emit_line(&format!("if ({}->logical_val) break;", cond_temp));
+            self.emit_line(&format!("if (RAP_BOOL_VALUE({})) break;", cond_temp));
         }
     }
 
@@ -906,12 +908,12 @@ impl Codegen {
                     let temp = self.fresh_temp();
                     if self.foreign_vars.contains(name.as_str()) {
                         self.emit_line(&format!(
-                            "RAP_Object *{} = RAP_frame_get_foreign({}, \"{}\");",
+                            "RAP_Value {} = RAP_frame_get_foreign({}, \"{}\");",
                             temp, self.current_frame, name
                         ));
                     } else {
                         self.emit_line(&format!(
-                            "RAP_Object *{} = RAP_frame_get({}, \"{}\");",
+                            "RAP_Value {} = RAP_frame_get({}, \"{}\");",
                             temp, self.current_frame, name
                         ));
                     }
@@ -946,7 +948,7 @@ impl Codegen {
                 let idx_temp = self.emit_expression(index);
                 let result = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{} = RAP_get_tuple_item({}, (uint32_t)RAP_get_int_val({}));",
+                    "RAP_Value {} = RAP_get_tuple_item({}, (uint32_t)RAP_SMI_VALUE({}));",
                     result, coll_temp, idx_temp
                 ));
                 result
@@ -959,18 +961,18 @@ impl Codegen {
             } => {
                 let coll_temp = self.emit_expression(collection);
                 let from_val = if let Some(f) = from {
-                    format!("RAP_get_int_val({})", self.emit_expression(f))
+                    format!("RAP_SMI_VALUE({})", self.emit_expression(f))
                 } else {
                     "0".to_string()
                 };
                 let to_val = if let Some(t) = to {
-                    format!("RAP_get_int_val({})", self.emit_expression(t))
+                    format!("RAP_SMI_VALUE({})", self.emit_expression(t))
                 } else {
-                    format!("RAP_get_int_val(RAP_length({c}))", c = coll_temp)
+                    format!("RAP_SMI_VALUE(RAP_length({c}))", c = coll_temp)
                 };
                 let result = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{} = RAP_create_slice({}, {}, {});",
+                    "RAP_Value {} = RAP_create_slice({}, {}, {});",
                     result, coll_temp, from_val, to_val
                 ));
                 result
@@ -987,7 +989,7 @@ impl Codegen {
             Literal::Real(f) => format!("RAP_create_float_obj({:?})", f),
             Literal::Text(s) => format!("RAP_create_text_obj(\"{}\")", escape_c_string(s)),
         };
-        self.emit_line(&format!("RAP_Object *{} = {};", temp, rhs));
+        self.emit_line(&format!("RAP_Value {} = {};", temp, rhs));
         temp
     }
 
@@ -1018,15 +1020,15 @@ impl Codegen {
             }
             BinaryOperator::NotEqual => format!("RAP_not_equal({}, {})", left, right),
             BinaryOperator::And => format!(
-                "RAP_create_logical_obj({}->logical_val && {}->logical_val)",
+                "RAP_create_logical_obj(RAP_BOOL_VALUE({}) && RAP_BOOL_VALUE({}))",
                 left, right
             ),
             BinaryOperator::Or => format!(
-                "RAP_create_logical_obj({}->logical_val || {}->logical_val)",
+                "RAP_create_logical_obj(RAP_BOOL_VALUE({}) || RAP_BOOL_VALUE({}))",
                 left, right
             ),
         };
-        self.emit_line(&format!("RAP_Object *{} = {};", temp, rhs));
+        self.emit_line(&format!("RAP_Value {} = {};", temp, rhs));
         temp
     }
 
@@ -1038,10 +1040,10 @@ impl Codegen {
                 // No-op: just alias the operand
                 return operand.to_string();
             }
-            UnaryOperator::Not => format!("RAP_create_logical_obj(!{}->logical_val)", operand),
+            UnaryOperator::Not => format!("RAP_create_logical_obj(!RAP_BOOL_VALUE({}))", operand),
             UnaryOperator::Length => format!("RAP_length({})", operand),
         };
-        self.emit_line(&format!("RAP_Object *{} = {};", temp, rhs));
+        self.emit_line(&format!("RAP_Value {} = {};", temp, rhs));
         temp
     }
 
@@ -1065,23 +1067,23 @@ impl Codegen {
 
         if arg_count == 0 {
             self.emit_line(&format!(
-                "RAP_Object *{} = RAP_call_callable_obj({}, NULL, 0);",
+                "RAP_Value {} = RAP_call_callable_obj({}, NULL, 0);",
                 result, func_temp
             ));
         } else if arg_count == 1 {
             self.emit_line(&format!(
-                "RAP_Object *{} = RAP_call_callable_obj({}, &{}, 1);",
+                "RAP_Value {} = RAP_call_callable_obj({}, &{}, 1);",
                 result, func_temp, arg_temps[0]
             ));
         } else {
             let args_array = format!("_call_args_{}", self.temp_counter);
             self.emit_line(&format!(
-                "RAP_Object *{}[] = {{{}}};",
+                "RAP_Value {}[] = {{{}}};",
                 args_array,
                 arg_temps.join(", ")
             ));
             self.emit_line(&format!(
-                "RAP_Object *{} = RAP_call_callable_obj({}, {}, {});",
+                "RAP_Value {} = RAP_call_callable_obj({}, {}, {});",
                 result, func_temp, args_array, arg_count
             ));
         }
@@ -1095,9 +1097,9 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_create_float_obj(\
-                     sqrt(({a}->tag == RAP_OBJECT_TAG_INT) \
-                     ? (double)RAP_get_int_val({a}) : RAP_get_float_val({a})));",
+                    "RAP_Value {t} = RAP_create_float_obj(\
+                     sqrt(RAP_IS_SMI({a}) \
+                     ? (double)RAP_SMI_VALUE({a}) : RAP_DOUBLE_VALUE({a})));",
                     t = temp,
                     a = arg
                 ));
@@ -1107,9 +1109,9 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = ({a}->tag == RAP_OBJECT_TAG_INT) \
-                     ? RAP_create_int_obj(llabs(RAP_get_int_val({a}))) \
-                     : RAP_create_float_obj(fabs(RAP_get_float_val({a})));",
+                    "RAP_Value {t} = RAP_IS_SMI({a}) \
+                     ? RAP_create_int_obj(llabs(RAP_SMI_VALUE({a}))) \
+                     : RAP_create_float_obj(fabs(RAP_DOUBLE_VALUE({a})));",
                     t = temp,
                     a = arg
                 ));
@@ -1120,8 +1122,8 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{} = RAP_create_int_obj(\
-                     (int64_t)RAP_get_float_val({}));",
+                    "RAP_Value {} = RAP_create_int_obj(\
+                     (int64_t)RAP_DOUBLE_VALUE({}));",
                     temp, arg
                 ));
                 Some(temp)
@@ -1131,10 +1133,7 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_create_int_obj(\
-                     ({a}->tag == RAP_OBJECT_TAG_TEXT) \
-                     ? (int64_t)strlen(RAP_get_text_val({a})) \
-                     : (int64_t){a}->tuple_val->count);",
+                    "RAP_Value {t} = RAP_length({a});",
                     t = temp,
                     a = arg
                 ));
@@ -1144,7 +1143,7 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_sign({a});",
+                    "RAP_Value {t} = RAP_sign({a});",
                     t = temp,
                     a = arg
                 ));
@@ -1154,7 +1153,7 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_floor({a});",
+                    "RAP_Value {t} = RAP_floor({a});",
                     t = temp,
                     a = arg
                 ));
@@ -1164,7 +1163,7 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_round({a});",
+                    "RAP_Value {t} = RAP_round({a});",
                     t = temp,
                     a = arg
                 ));
@@ -1174,7 +1173,7 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_random({a});",
+                    "RAP_Value {t} = RAP_random({a});",
                     t = temp,
                     a = arg
                 ));
@@ -1184,7 +1183,7 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_random_int({a});",
+                    "RAP_Value {t} = RAP_random_int({a});",
                     t = temp,
                     a = arg
                 ));
@@ -1195,7 +1194,7 @@ impl Codegen {
                 let haystack = self.emit_expression(&arguments[1]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_index_of({n}, {h});",
+                    "RAP_Value {t} = RAP_index_of({n}, {h});",
                     t = temp,
                     n = needle,
                     h = haystack
@@ -1206,9 +1205,8 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_NULL);",
-                    t = temp,
-                    a = arg
+                    "RAP_Value {t} = RAP_create_logical_obj(RAP_IS_PTR({a}) && RAP_PTR_VALUE({a})->tag == RAP_OBJECT_TAG_NULL);",
+                    t = temp, a = arg
                 ));
                 Some(temp)
             }
@@ -1216,7 +1214,7 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_LOGICAL);",
+                    "RAP_Value {t} = RAP_create_logical_obj(RAP_IS_BOOL({a}));",
                     t = temp,
                     a = arg
                 ));
@@ -1226,9 +1224,8 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_INT);",
-                    t = temp,
-                    a = arg
+                    "RAP_Value {t} = RAP_create_logical_obj(RAP_IS_SMI({a}) || (RAP_IS_PTR({a}) && RAP_PTR_VALUE({a})->tag == RAP_OBJECT_TAG_INT));",
+                    t = temp, a = arg
                 ));
                 Some(temp)
             }
@@ -1236,9 +1233,8 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_FLOAT);",
-                    t = temp,
-                    a = arg
+                    "RAP_Value {t} = RAP_create_logical_obj(RAP_IS_DOUBLE({a}) || (RAP_IS_PTR({a}) && RAP_PTR_VALUE({a})->tag == RAP_OBJECT_TAG_FLOAT));",
+                    t = temp, a = arg
                 ));
                 Some(temp)
             }
@@ -1246,9 +1242,8 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_TEXT);",
-                    t = temp,
-                    a = arg
+                    "RAP_Value {t} = RAP_create_logical_obj(RAP_IS_PTR({a}) && RAP_PTR_VALUE({a})->tag == RAP_OBJECT_TAG_TEXT);",
+                    t = temp, a = arg
                 ));
                 Some(temp)
             }
@@ -1256,9 +1251,8 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_TUPLE);",
-                    t = temp,
-                    a = arg
+                    "RAP_Value {t} = RAP_create_logical_obj(RAP_IS_PTR({a}) && RAP_PTR_VALUE({a})->tag == RAP_OBJECT_TAG_TUPLE);",
+                    t = temp, a = arg
                 ));
                 Some(temp)
             }
@@ -1266,7 +1260,7 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_CALLABLE && !{a}->callable_val->is_function);",
+                    "RAP_Value {t} = RAP_create_logical_obj(RAP_IS_PTR({a}) && RAP_PTR_VALUE({a})->tag == RAP_OBJECT_TAG_CALLABLE && !RAP_PTR_VALUE({a})->callable_val->is_function);",
                     t = temp, a = arg
                 ));
                 Some(temp)
@@ -1275,7 +1269,7 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Object *{t} = RAP_create_logical_obj({a}->tag == RAP_OBJECT_TAG_CALLABLE && {a}->callable_val->is_function);",
+                    "RAP_Value {t} = RAP_create_logical_obj(RAP_IS_PTR({a}) && RAP_PTR_VALUE({a})->tag == RAP_OBJECT_TAG_CALLABLE && RAP_PTR_VALUE({a})->callable_val->is_function);",
                     t = temp, a = arg
                 ));
                 Some(temp)
@@ -1293,13 +1287,13 @@ impl Codegen {
         let count = item_temps.len();
         let items_array = format!("_tuple_items_{}", self.temp_counter);
         self.emit_line(&format!(
-            "RAP_Object *{}[] = {{{}}};",
+            "RAP_Value {}[] = {{{}}};",
             items_array,
             item_temps.join(", ")
         ));
         let result = self.fresh_temp();
         self.emit_line(&format!(
-            "RAP_Object *{} = RAP_create_tuple_obj({}, {});",
+            "RAP_Value {} = RAP_create_tuple_obj({}, {});",
             result, count, items_array
         ));
         result
