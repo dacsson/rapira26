@@ -1,3 +1,4 @@
+#include "rapvalue.h"
 #include "runtime_internal.h"
 #include <ctype.h>
 
@@ -21,15 +22,15 @@ static char *read_line(void) {
   return buf;
 }
 
-RAP_Object *RAP_input_text(void) {
+RAP_Value RAP_input_text(void) {
   char *line = read_line();
   if (!line) return RAP_create_text_obj("");
-  RAP_Object *result = RAP_create_text_obj(line);
+  RAP_Value result = RAP_create_text_obj(line);
   free(line);
   return result;
 }
 
-RAP_Object *RAP_input_value(void) {
+RAP_Value RAP_input_value(void) {
   char *line = read_line();
   if (!line) return RAP_create_null_obj();
 
@@ -65,7 +66,7 @@ RAP_Object *RAP_input_value(void) {
   }
 
   // Otherwise return as text
-  RAP_Object *result = RAP_create_text_obj(p);
+  RAP_Value result = RAP_create_text_obj(p);
   free(line);
   return result;
 }
