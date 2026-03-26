@@ -119,9 +119,12 @@ impl Codegen {
     fn flush_statement_temps(&mut self, exclude: Option<&str>) {
         let temps = std::mem::take(&mut self.statement_temps);
         for temp in &temps {
-            if exclude.map_or(true, |ex| ex != temp) {
+            if temp != exclude.unwrap_or_default() {
                 self.emit_line(&format!("RAP_dec_ref({});", temp));
             }
+            // if exclude.map_or(true, |ex| ex != temp) {
+            //     self.emit_line(&format!("RAP_dec_ref({});", temp));
+            // }
         }
     }
 
@@ -145,14 +148,14 @@ impl Codegen {
     /// Covers everything from the current nested scope up to the function scope,
     /// since outer (caller) scopes are saved/restored by emit_function_def.
     fn emit_epilogue(&mut self) {
-        // let all_vars: Vec<String> = self
-        //     .declared_vars
-        //     .iter()
-        //     .flat_map(|scope| scope.iter().cloned()) // TODO: cloned
-        //     .collect();
-        // for var in all_vars {
-        //     self.emit_line(&format!("RAP_dec_ref({});", var));
-        // }
+        let all_vars: Vec<String> = self
+            .declared_vars
+            .iter()
+            .flat_map(|scope| scope.iter().cloned()) // TODO: cloned
+            .collect();
+        for var in all_vars {
+            self.emit_line(&format!("RAP_dec_ref({});", var));
+        }
     }
 
     /// Main entry point: walk the whole program, return generated C source.
@@ -370,8 +373,7 @@ impl Codegen {
 
         // TODO: no return statment in func
 
-        self.forward_decls
-            .push_str("  return RAP_create_null_obj();\n}\n\n");
+        self.forward_decls.push_str("  return 0;\n}\n\n");
 
         // Restore state
         self.output = saved_output;
@@ -473,8 +475,7 @@ impl Codegen {
         ));
         self.forward_decls.push_str(&func_body);
 
-        self.forward_decls
-            .push_str("  return RAP_create_null_obj();\n}\n\n");
+        self.forward_decls.push_str("  return 0;\n}\n\n");
 
         self.output = saved_output;
         self.indent_level = saved_indent;
@@ -560,7 +561,11 @@ impl Codegen {
 
                 // Increment refcount when assigning from another variable (shared reference)
                 if let Expr::Name(_) = value.as_ref() {
-                    self.emit_line(&format!("RAP_inc_ref({});", value_temp));
+                    // Do not increment refcount if value is taken from frame,
+                    // since frame_get increments count on itself
+                    if self.output.lines().last().is_some() && !self.output.lines().last().unwrap().contains("frame_get") {
+                        self.emit_line(&format!("RAP_inc_ref({});", value_temp));
+                    }
                 }
 
                 self.emit_lvalue_assignment(target, &value_temp);
@@ -680,7 +685,11 @@ impl Codegen {
 
             Statement::Loop(loop_stmt) => {
                 self.emit_loop(loop_stmt);
-                self.flush_statement_temps(None);
+                // self.flush_statement_temps(None);
+                let temps = self.statement_temps.clone();
+                for temp in &temps {
+                    self.emit_line(&format!("RAP_dec_ref({});", temp));
+                }
             }
 
             Statement::Output { no_newline, values } => {
@@ -722,10 +731,20 @@ impl Codegen {
 
             Statement::ExitLoop => {
                 self.emit_line("break;");
+                // let temps = saved_temps.clone();
+                // for temp in &temps {
+                //     self.emit_line(&format!("RAP_dec_ref({});", temp));
+                // }
+                // self.emit_line("break;");
             }
 
             Statement::ReturnFromProcedure => {
-                self.flush_statement_temps(None);
+                // self.flush_statement_temps(None);
+                let mut temps = saved_temps.clone();
+                temps.append(&mut self.statement_temps.clone());
+                for temp in &temps {
+                    self.emit_line(&format!("RAP_dec_ref({});", temp));
+                }
                 self.emit_epilogue();
                 self.emit_line("return RAP_create_null_obj();");
             }
@@ -733,8 +752,15 @@ impl Codegen {
             Statement::ReturnFromFunction(expr) => {
                 let result_temp = self.emit_expression(expr);
                 // Protect return value: inc_ref before epilogue dec_refs all locals
-                self.emit_line(&format!("RAP_inc_ref({});", result_temp));
-                self.flush_statement_temps(None);
+                // self.emit_line(&format!("RAP_inc_ref({});", result_temp));
+                // self.flush_statement_temps(None);
+                let mut temps = saved_temps.clone();
+                temps.append(&mut self.statement_temps.clone());
+                for temp in &temps {
+                    if *temp != result_temp {
+                        self.emit_line(&format!("RAP_dec_ref({});", temp));
+                    }
+                }
                 self.emit_epilogue();
                 self.emit_line(&format!("return {};", result_temp));
             }
@@ -810,6 +836,12 @@ impl Codegen {
                     slice_temp, value_temp
                 ));
                 self.track_temp(&slice_temp);
+
+                // Decrement replacement if its not a temp (i.e. a local value), since its
+                // incremented in lvalue assignment BUT we dont consume the container
+                if !self.statement_temps.contains(&value_temp.to_string()) {
+                    self.emit_line(&format!("RAP_dec_ref({});", value_temp));
+                }
             }
         }
     }
@@ -1023,8 +1055,13 @@ impl Codegen {
         if let Some(cond_expr) = while_cond {
             let saved = std::mem::take(&mut self.statement_temps);
             let cond_temp = self.emit_expression(cond_expr);
-            self.emit_line(&format!("if (!RAP_BOOL_VALUE({})) break;", cond_temp));
-            self.flush_statement_temps(None);
+            self.emit_line(&format!("if (!RAP_BOOL_VALUE({})) {{", cond_temp));
+            let temps = self.statement_temps.clone();
+            for temp in &temps {
+                self.emit_line(&format!("  RAP_dec_ref({});", temp));
+            }
+            self.emit_line("  break;}");
+            // self.flush_statement_temps(None);
             self.statement_temps = saved;
         }
     }
@@ -1120,6 +1157,7 @@ impl Codegen {
                     "RAP_Value {} = RAP_get_tuple_item({}, (uint32_t)RAP_SMI_VALUE({}));",
                     result, coll_temp, idx_temp
                 ));
+                self.track_temp(&result);
                 result
             }
 

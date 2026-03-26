@@ -61,8 +61,11 @@ RAP_Value RAP_get_tuple_item(RAP_Value container, uint32_t index) {
     result->text_val->count = 1;
     result->text_val->items = malloc(sizeof(RAP_Object *));
     result->text_val->items[0] = RAP_get_text_val(RAP_PTR_VALUE(container))->items[index];
+    result->refcount = 1;
     return RAP_CREATE_PTR(result);
   }
+
+  RAP_inc_ref(RAP_PTR_VALUE(container)->tuple_val->items[index]);
   return RAP_PTR_VALUE(container)->tuple_val->items[index];
 }
 
