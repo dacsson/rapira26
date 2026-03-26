@@ -1,5 +1,6 @@
 #include "rapobject.h"
 #include "rapvalue.h"
+#include "runtime.h"
 #include "runtime_internal.h"
 
 // Integer operations
@@ -121,7 +122,7 @@ RAP_Value RAP_add(RAP_Value a, RAP_Value b) {
     result->text_val = malloc(sizeof(struct RAP_Tuple));
     result->text_val->count = new_count;
     result->text_val->items = items;
-    // TODO: reference counting here inserted
+    result->refcount = 1;
     return RAP_CREATE_PTR(result);
   }
   RAP_fatal_error("Неподдерживаемые типы для сложения");
@@ -141,6 +142,12 @@ RAP_Value RAP_multiply(RAP_Value a, RAP_Value b) {
     return RAP_integer_multiply(a, b);
   } else if (RAP_IS_DOUBLE(a) && RAP_IS_DOUBLE(b)) {
     return RAP_float_multiply(a, b);
+  } else if (RAP_IS_DOUBLE(a) && RAP_IS_SMI(b)) {
+    RAP_Value b_as_double = RAP_create_float_obj(RAP_SMI_VALUE(b));
+    return RAP_float_multiply(a, b_as_double);
+  } else if (RAP_IS_SMI(a) && RAP_IS_DOUBLE(b)) {
+    RAP_Value a_as_double = RAP_create_float_obj(RAP_SMI_VALUE(a));
+    return RAP_float_multiply(a_as_double, b);
   }
 
   // Tuple repeat: tuple * int

@@ -12,6 +12,7 @@ RAP_Value RAP_create_tuple_obj(uint32_t count, RAP_Value *items) {
   obj->tuple_val->items = malloc(count * sizeof(RAP_Value));
   for (uint32_t i = 0; i < count; i++) {
     obj->tuple_val->items[i] = items[i];
+    RAP_inc_ref(items[i]);
   }
   return RAP_CREATE_PTR(obj);
 }
@@ -33,9 +34,11 @@ RAP_Value RAP_set_tuple_item(RAP_Value container, uint32_t index,
     }
     RAP_dec_ref(RAP_PTR_VALUE(container)->text_val->items[index]);
     RAP_PTR_VALUE(container)->text_val->items[index] = item;
+    RAP_inc_ref(item);
   } else {
     RAP_dec_ref(RAP_PTR_VALUE(container)->tuple_val->items[index]);
     RAP_PTR_VALUE(container)->tuple_val->items[index] = item;
+    RAP_inc_ref(item);
   }
   return container;
 }
@@ -45,6 +48,7 @@ RAP_Value RAP_get_tuple_item(RAP_Value container, uint32_t index) {
     RAP_fatal_error("Первый аргумент должен быть указателем на объект");
   }
   if (RAP_PTR_VALUE(container)->tag != RAP_OBJECT_TAG_TUPLE && RAP_PTR_VALUE(container)->tag != RAP_OBJECT_TAG_TEXT) {
+    printf("container: %s\n", RAP_stringify_object(container));
     RAP_fatal_error("Объект не является кортежем или текстом");
   }
 

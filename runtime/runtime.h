@@ -134,4 +134,9 @@ void RAP_free_object(RAP_Object *obj);
 void RAP_check_leaks(void);
 #endif
 
+// Available for users actually
+RAP_Value RAP_get_objects_refcount(RAP_Value obj);
+
+void RAP_free_main_frame(struct RAP_CallFrame *frame);
+
 #endif // RAPIRA_RUNTIME_H
