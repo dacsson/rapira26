@@ -122,7 +122,12 @@ RAP_Value RAP_index_of(RAP_Value needle, RAP_Value haystack) {
   }
   // Materialize slices and recurse
   if (RAP_IS_PTR(haystack) && RAP_PTR_VALUE(haystack)->tag == RAP_OBJECT_TAG_SLICE || RAP_IS_PTR(needle) && RAP_PTR_VALUE(needle)->tag == RAP_OBJECT_TAG_SLICE) {
-    return RAP_index_of(RAP_materialize_slice(RAP_PTR_VALUE(needle)), RAP_materialize_slice(RAP_PTR_VALUE(haystack)));
+    RAP_Value materialized_needle = RAP_materialize_slice(RAP_PTR_VALUE(needle));
+    RAP_Value materialized_haystack = RAP_materialize_slice(RAP_PTR_VALUE(haystack));
+    RAP_Value index_of = RAP_index_of(materialized_needle, materialized_haystack);
+    if (RAP_IS_PTR(needle) && RAP_PTR_VALUE(needle)->tag == RAP_OBJECT_TAG_SLICE) RAP_free_object(RAP_PTR_VALUE(materialized_needle));
+    if (RAP_IS_PTR(haystack) && RAP_PTR_VALUE(haystack)->tag == RAP_OBJECT_TAG_SLICE) RAP_free_object(RAP_PTR_VALUE(materialized_haystack));
+    return index_of;
   }
   RAP_fatal_error("Неподдерживаемые типы для индекс()");
 }

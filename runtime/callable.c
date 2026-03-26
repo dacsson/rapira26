@@ -143,6 +143,8 @@ void RAP_frame_set_foreign(struct RAP_CallFrame *frame, const char *name, RAP_Va
   while (current) {
     int idx = frame_find_slot(current, name);
     if (idx >= 0) {
+      // Dec ref previous value
+      RAP_dec_ref(current->slots[idx].value);
       current->slots[idx].value = value;
       return;
     }

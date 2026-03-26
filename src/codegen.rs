@@ -809,6 +809,7 @@ impl Codegen {
                     "RAP_slice_assign({}, {});",
                     slice_temp, value_temp
                 ));
+                self.track_temp(&slice_temp);
             }
         }
     }
