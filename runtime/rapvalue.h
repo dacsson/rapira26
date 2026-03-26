@@ -17,7 +17,7 @@
 typedef uintptr_t RAP_Value;
 
 // Two least significant bits are used as a tag:
-// 00 = SMI, 01 = boolean, 10 = double, 11 = pointer
+// 00 = SMI, 01 = boolean, 11 = pointer
 #define RAP_TAG_MASK 0x3
 
 #define RAP_IS_SMI(value)    (((value) & RAP_TAG_MASK) == 0x0)

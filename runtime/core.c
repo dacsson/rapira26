@@ -1,3 +1,4 @@
+#include "rapobject.h"
 #include "rapvalue.h"
 #include "runtime.h"
 #include "runtime_internal.h"
@@ -194,6 +195,10 @@ char *RAP_stringify_object(RAP_Value obj) {
 void RAP_dec_ref(RAP_Value obj) {
   if (!RAP_IS_PTR(obj)) return;
 
+#ifdef RAP_DEBUG_LEAKS
+  printf("dec_ref: %p\n - refcount: %d - string: %s\n", obj, RAP_PTR_VALUE(obj)->refcount, RAP_stringify_object(obj));
+#endif
+
   RAP_Object *obj_ptr = RAP_PTR_VALUE(obj);
   if (obj_ptr == NULL) return;
   obj_ptr->refcount--;
@@ -203,6 +208,10 @@ void RAP_dec_ref(RAP_Value obj) {
 // OBJECT DESTRUCTOR
 
 void RAP_free_object(RAP_Object *obj) {
+#ifdef RAP_DEBUG_LEAKS
+  printf("free_object: %p - refcount: %d - string: %s\n", obj, obj->refcount, RAP_stringify_object(RAP_CREATE_PTR(obj)));
+#endif
+
   if (obj == NULL) return;
   RAP_TRACK_FREE();
 
@@ -230,10 +239,15 @@ void RAP_free_object(RAP_Object *obj) {
       break;
     }
     case RAP_OBJECT_TAG_CALLABLE: {
-      free(RAP_get_callable_val(obj)->name);
-      free(RAP_get_callable_val(obj)->params);
-      free(RAP_get_callable_val(obj)->frame);
-      free(RAP_get_callable_val(obj));
+      struct RAP_Callable *c = RAP_get_callable_val(obj);
+      free(c->name);
+      for (uint32_t i = 0; i < c->param_count; i++) {
+        free(c->params[i]->name);
+        free(c->params[i]);
+      }
+      free(c->params);
+      RAP_free_call_frame(c->frame);
+      free(c);
       break;
     }
     default: {
@@ -241,4 +255,17 @@ void RAP_free_object(RAP_Object *obj) {
     }
   }
   free(obj);
+}
+
+RAP_Value RAP_get_objects_refcount(RAP_Value obj) {
+  if (!RAP_IS_PTR(obj)) return 0;
+  return RAP_CREATE_SMI(RAP_PTR_VALUE(obj)->refcount);
+}
+
+void RAP_free_main_frame(struct RAP_CallFrame *frame) {
+  if (frame == NULL) return;
+  for (uint32_t i = 0; i < frame->slot_count; i++) {
+    RAP_dec_ref(frame->slots[i].value);
+  }
+  free(frame->slots);
 }

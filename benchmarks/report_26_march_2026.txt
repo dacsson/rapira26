@@ -1,0 +1,8 @@
+мандерльброт.рап:
+```
+    ~/Projects/rapira26  =>  time echo '200' | ./мандельброт
+        real    0m9.454s
+        user    0m9.442s
+        sys     0m0.005s
+```
+

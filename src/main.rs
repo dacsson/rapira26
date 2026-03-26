@@ -29,6 +29,10 @@ struct Cli {
     /// Enable leak checking (compile with RAP_TEST_LEAKS)
     #[arg(long)]
     check_leaks: bool,
+
+    /// Flags to be passed to C compiler
+    #[arg(long)]
+    cflags: Vec<String>,
 }
 
 // TODO:
@@ -119,6 +123,7 @@ fn main() {
         .arg(format!("-L{}", runtime_dir.join("lib").display()))
         .arg("-lrapruntime")
         .arg("-lm")
+        .args(cli.cflags)
         .status()
         .unwrap_or_else(|error| {
             eprintln!("failed to run gcc: {error}");

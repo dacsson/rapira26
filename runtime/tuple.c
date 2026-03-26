@@ -12,6 +12,7 @@ RAP_Value RAP_create_tuple_obj(uint32_t count, RAP_Value *items) {
   obj->tuple_val->items = malloc(count * sizeof(RAP_Value));
   for (uint32_t i = 0; i < count; i++) {
     obj->tuple_val->items[i] = items[i];
+    RAP_inc_ref(items[i]);
   }
   return RAP_CREATE_PTR(obj);
 }
@@ -33,9 +34,11 @@ RAP_Value RAP_set_tuple_item(RAP_Value container, uint32_t index,
     }
     RAP_dec_ref(RAP_PTR_VALUE(container)->text_val->items[index]);
     RAP_PTR_VALUE(container)->text_val->items[index] = item;
+    RAP_inc_ref(item);
   } else {
     RAP_dec_ref(RAP_PTR_VALUE(container)->tuple_val->items[index]);
     RAP_PTR_VALUE(container)->tuple_val->items[index] = item;
+    RAP_inc_ref(item);
   }
   return container;
 }
@@ -45,6 +48,7 @@ RAP_Value RAP_get_tuple_item(RAP_Value container, uint32_t index) {
     RAP_fatal_error("Первый аргумент должен быть указателем на объект");
   }
   if (RAP_PTR_VALUE(container)->tag != RAP_OBJECT_TAG_TUPLE && RAP_PTR_VALUE(container)->tag != RAP_OBJECT_TAG_TEXT) {
+    printf("container: %s\n", RAP_stringify_object(container));
     RAP_fatal_error("Объект не является кортежем или текстом");
   }
 
@@ -57,8 +61,11 @@ RAP_Value RAP_get_tuple_item(RAP_Value container, uint32_t index) {
     result->text_val->count = 1;
     result->text_val->items = malloc(sizeof(RAP_Object *));
     result->text_val->items[0] = RAP_get_text_val(RAP_PTR_VALUE(container))->items[index];
+    result->refcount = 1;
     return RAP_CREATE_PTR(result);
   }
+
+  RAP_inc_ref(RAP_PTR_VALUE(container)->tuple_val->items[index]);
   return RAP_PTR_VALUE(container)->tuple_val->items[index];
 }
 
@@ -118,7 +125,12 @@ RAP_Value RAP_index_of(RAP_Value needle, RAP_Value haystack) {
   }
   // Materialize slices and recurse
   if (RAP_IS_PTR(haystack) && RAP_PTR_VALUE(haystack)->tag == RAP_OBJECT_TAG_SLICE || RAP_IS_PTR(needle) && RAP_PTR_VALUE(needle)->tag == RAP_OBJECT_TAG_SLICE) {
-    return RAP_index_of(RAP_materialize_slice(RAP_PTR_VALUE(needle)), RAP_materialize_slice(RAP_PTR_VALUE(haystack)));
+    RAP_Value materialized_needle = RAP_materialize_slice(RAP_PTR_VALUE(needle));
+    RAP_Value materialized_haystack = RAP_materialize_slice(RAP_PTR_VALUE(haystack));
+    RAP_Value index_of = RAP_index_of(materialized_needle, materialized_haystack);
+    if (RAP_IS_PTR(needle) && RAP_PTR_VALUE(needle)->tag == RAP_OBJECT_TAG_SLICE) RAP_free_object(RAP_PTR_VALUE(materialized_needle));
+    if (RAP_IS_PTR(haystack) && RAP_PTR_VALUE(haystack)->tag == RAP_OBJECT_TAG_SLICE) RAP_free_object(RAP_PTR_VALUE(materialized_haystack));
+    return index_of;
   }
   RAP_fatal_error("Неподдерживаемые типы для индекс()");
 }

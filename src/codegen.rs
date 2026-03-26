@@ -2,6 +2,8 @@
 //!
 //! Walks the AST and emits C code that uses the runtime library (runtime.h).
 
+use std::collections::{HashMap, HashSet};
+
 use crate::ast::*;
 
 /// Escape a string for embedding in a C string literal.
@@ -36,6 +38,9 @@ struct CallableInfo {
     is_function: bool,
 }
 
+/// A stack of declared variables in scope
+type ScopeVariablesStack = Vec<HashSet<String>>;
+
 /// Holds codegen state while walking the AST.
 pub struct Codegen {
     /// Current scope output (main body, or function body while emitting a definition)
@@ -52,13 +57,16 @@ pub struct Codegen {
     param_counter: usize,
     /// Name of the current call frame variable ("_main_frame" at top level, "_frame" inside funcs)
     current_frame: String,
-    /// Variables declared in current scope (mangled names), to emit `RAP_Value ` only once
-    declared_vars: std::collections::HashSet<String>,
+    /// Stack of scopes — each scope holds the set of C variable names (mangled) declared in it.
+    /// push on scope entry (function, loop, if), pop on scope exit.
+    declared_vars: ScopeVariablesStack,
+    /// Temps created during expression evaluation that own a new value and need dec_ref at statement end.
+    statement_temps: Vec<String>,
     /// Rapira name → callable info, so call sites can create callables inline
-    known_callables: std::collections::HashMap<String, CallableInfo>,
+    known_callables: HashMap<String, CallableInfo>,
     /// Variables declared as чужие in current function scope (original Rapira names).
     /// Empty at top level and inside functions without чужие.
-    foreign_vars: std::collections::HashSet<String>,
+    foreign_vars: HashSet<String>,
     /// True when emitting inside a function/procedure body (use frame-based access for non-param locals)
     inside_function: bool,
     /// Emit RAP_check_leaks() call and #define RAP_TEST_LEAKS
@@ -75,9 +83,10 @@ impl Codegen {
             string_counter: 0,
             param_counter: 0,
             current_frame: "&_main_frame".to_string(),
-            declared_vars: std::collections::HashSet::new(),
-            known_callables: std::collections::HashMap::new(),
-            foreign_vars: std::collections::HashSet::new(),
+            declared_vars: Vec::new(),
+            statement_temps: Vec::new(),
+            known_callables: HashMap::new(),
+            foreign_vars: HashSet::new(),
             inside_function: false,
             check_leaks: false,
         }
@@ -89,8 +98,69 @@ impl Codegen {
         self
     }
 
+    /// Insert a variable into the current (top) scope's declared vars set.
+    fn insert_declared_var(&mut self, var: String) {
+        if let Some(scope) = self.declared_vars.last_mut() {
+            scope.insert(var);
+        }
+    }
+
+    fn is_var_in_scope(&self, var: &str) -> bool {
+        self.declared_vars.iter().any(|scope| scope.contains(var))
+    }
+
+    /// Record a temp as needing dec_ref at statement end.
+    fn track_temp(&mut self, temp: &str) {
+        self.statement_temps.push(temp.to_string());
+    }
+
+    /// Emit dec_ref for all tracked temps, then clear the list.
+    /// `exclude` is the temp whose ownership was transferred (e.g. assigned to a named var).
+    fn flush_statement_temps(&mut self, exclude: Option<&str>) {
+        let temps = std::mem::take(&mut self.statement_temps);
+        for temp in &temps {
+            if temp != exclude.unwrap_or_default() {
+                self.emit_line(&format!("RAP_dec_ref({});", temp));
+            }
+            // if exclude.map_or(true, |ex| ex != temp) {
+            //     self.emit_line(&format!("RAP_dec_ref({});", temp));
+            // }
+        }
+    }
+
+    fn create_scope(&mut self) {
+        self.declared_vars.push(std::collections::HashSet::new());
+    }
+
+    fn drop_scope(&mut self) {
+        if self.declared_vars.is_empty() {
+            return; // TODO: error
+        }
+        let vars_in_scope = self.declared_vars.pop().unwrap(); // TODO: error
+
+        // Decrement reference count for all variables in scope
+        for var in vars_in_scope {
+            self.emit_line(&format!("RAP_dec_ref({});", var));
+        }
+    }
+
+    /// Emit dec_ref for all variables across all function scopes (used before return).
+    /// Covers everything from the current nested scope up to the function scope,
+    /// since outer (caller) scopes are saved/restored by emit_function_def.
+    fn emit_epilogue(&mut self) {
+        let all_vars: Vec<String> = self
+            .declared_vars
+            .iter()
+            .flat_map(|scope| scope.iter().cloned()) // TODO: cloned
+            .collect();
+        for var in all_vars {
+            self.emit_line(&format!("RAP_dec_ref({});", var));
+        }
+    }
+
     /// Main entry point: walk the whole program, return generated C source.
     pub fn generate(mut self, program: &Program) -> String {
+        self.create_scope(); // main scope
         for unit in &program.units {
             self.emit_program_unit(unit);
         }
@@ -111,10 +181,14 @@ impl Codegen {
         result.push_str("  struct RAP_CallFrame _main_frame = {NULL, NULL, 0};\n");
         result.push('\n');
         result.push_str(&self.output);
+        result.push_str("  RAP_free_main_frame(&_main_frame);\n");
         if self.check_leaks {
             // Decref all locals declared in main scope
-            for var in &self.declared_vars {
-                result.push_str(&format!("  RAP_dec_ref({});\n", var));
+            let vars_in_scope = self.declared_vars.pop();
+            if let Some(vars) = vars_in_scope {
+                for var in &vars {
+                    result.push_str(&format!("  RAP_dec_ref({});\n", var));
+                }
             }
             result.push_str("  RAP_check_leaks();\n");
         }
@@ -263,11 +337,14 @@ impl Codegen {
         self.temp_counter = 0;
         self.string_counter = 0;
 
+        // Creates empty declared vars set for this function scope
+        self.create_scope();
+
         // Unpack parameters from _args array — mark them as declared.
         // Incref each param so the function owns its reference.
         for (i, param_name) in func_def.parameters.iter().enumerate() {
             let mangled = self.mangle_name(param_name);
-            self.declared_vars.insert(mangled.clone());
+            self.insert_declared_var(mangled.clone());
             self.emit_line(&format!("RAP_Value {} = _args[{}];", mangled, i));
             self.emit_line(&format!("RAP_inc_ref({});", mangled));
         }
@@ -276,6 +353,8 @@ impl Codegen {
         }
 
         self.emit_statement_list(&func_def.body);
+
+        self.drop_scope();
 
         // Wrap in C function signature
         let func_body = std::mem::take(&mut self.output);
@@ -292,8 +371,9 @@ impl Codegen {
         ));
         self.forward_decls.push_str(&func_body);
 
-        self.forward_decls
-            .push_str("  return RAP_create_null_obj();\n}\n\n");
+        // TODO: no return statment in func
+
+        self.forward_decls.push_str("  return 0;\n}\n\n");
 
         // Restore state
         self.output = saved_output;
@@ -354,13 +434,16 @@ impl Codegen {
         self.temp_counter = 0;
         self.string_counter = 0;
 
+        // Creates empty declared vars set for this procedure scope
+        self.create_scope();
+
         // Unpack only input parameters — in-out params use frame lookup
         let mut arg_index = 0;
         for param in &proc_def.parameters {
             match param {
                 ProcParameter::Input(n) => {
                     let mangled = self.mangle_name(n);
-                    self.declared_vars.insert(mangled.clone());
+                    self.insert_declared_var(mangled.clone());
                     self.emit_line(&format!("RAP_Value {} = _args[{}];", mangled, arg_index));
                     self.emit_line(&format!("RAP_inc_ref({});", mangled));
                     arg_index += 1;
@@ -376,6 +459,8 @@ impl Codegen {
 
         self.emit_statement_list(&proc_def.body);
 
+        self.drop_scope();
+
         let func_body = std::mem::take(&mut self.output);
         self.forward_decls.push_str(&format!("// проц {}\n", name));
         self.forward_decls.push_str(&format!(
@@ -390,8 +475,7 @@ impl Codegen {
         ));
         self.forward_decls.push_str(&func_body);
 
-        self.forward_decls
-            .push_str("  return RAP_create_null_obj();\n}\n\n");
+        self.forward_decls.push_str("  return 0;\n}\n\n");
 
         self.output = saved_output;
         self.indent_level = saved_indent;
@@ -450,10 +534,17 @@ impl Codegen {
                 temp, self.current_frame, c_func_name, array_name, param_count, is_func_str
             ));
         }
+        // TODO
+        self.track_temp(&temp);
         temp
     }
 
     fn emit_statement(&mut self, stmt: &Statement) {
+        // Each statement gets its own temp tracking context.
+        // Inner statements (in if/loop bodies) save and restore, so they don't
+        // interfere with the outer statement's temps.
+        let saved_temps = std::mem::take(&mut self.statement_temps);
+
         match stmt {
             Statement::Empty => {}
 
@@ -463,17 +554,29 @@ impl Codegen {
                 // Decrement refcount of old value in target (if reassigning a known variable)
                 if let LValue::Name(name) = target {
                     let mangled = self.mangle_name(name);
-                    if self.declared_vars.contains(&mangled) {
+                    if self.is_var_in_scope(&mangled) {
                         self.emit_line(&format!("RAP_dec_ref({});", mangled));
                     }
                 }
 
                 // Increment refcount when assigning from another variable (shared reference)
                 if let Expr::Name(_) = value.as_ref() {
-                    self.emit_line(&format!("RAP_inc_ref({});", value_temp));
+                    // Do not increment refcount if value is taken from frame,
+                    // since frame_get increments count on itself
+                    if self.output.lines().last().is_some() && !self.output.lines().last().unwrap().contains("frame_get") {
+                        self.emit_line(&format!("RAP_inc_ref({});", value_temp));
+                    }
                 }
 
                 self.emit_lvalue_assignment(target, &value_temp);
+
+                // For name assignments, ownership transfers to the C local — don't dec_ref the value.
+                // For subscript/slice, the runtime inc_refs internally, so all temps can be freed.
+                let exclude = match target {
+                    LValue::Name(_) => Some(value_temp.as_str()),
+                    _ => None,
+                };
+                self.flush_statement_temps(exclude);
             }
 
             Statement::ProcedureCall {
@@ -518,6 +621,8 @@ impl Codegen {
                         "RAP_frame_set({}, \"{}\", {});",
                         self.current_frame, param_name, val_temp
                     ));
+                    // Also incref inout pararms
+                    self.emit_line(&format!("RAP_inc_ref({});", val_temp));
                 }
 
                 let proc_temp = self.emit_expression(procedure);
@@ -543,6 +648,8 @@ impl Codegen {
                         self.current_frame, caller_name, val_temp
                     ));
                 }
+
+                self.flush_statement_temps(None);
             }
 
             Statement::Conditional {
@@ -552,21 +659,38 @@ impl Codegen {
             } => {
                 let cond_temp = self.emit_expression(condition);
                 self.emit_line(&format!("if (RAP_BOOL_VALUE({})) {{", cond_temp));
+
+                self.create_scope();
+
                 self.indent_level += 1;
                 self.emit_statement_list(then_body);
+                self.drop_scope();
                 self.indent_level -= 1;
                 if let Some(else_stmts) = else_body {
                     self.emit_line("} else {");
+                    self.create_scope();
                     self.indent_level += 1;
                     self.emit_statement_list(else_stmts);
+                    self.drop_scope();
                     self.indent_level -= 1;
                 }
                 self.emit_line("}");
+                self.flush_statement_temps(None);
             }
 
-            Statement::Selection(sel) => self.emit_selection(sel),
+            Statement::Selection(sel) => {
+                self.emit_selection(sel);
+                self.flush_statement_temps(None);
+            }
 
-            Statement::Loop(loop_stmt) => self.emit_loop(loop_stmt),
+            Statement::Loop(loop_stmt) => {
+                self.emit_loop(loop_stmt);
+                // self.flush_statement_temps(None);
+                let temps = self.statement_temps.clone();
+                for temp in &temps {
+                    self.emit_line(&format!("RAP_dec_ref({});", temp));
+                }
+            }
 
             Statement::Output { no_newline, values } => {
                 for value_expr in values {
@@ -577,10 +701,12 @@ impl Codegen {
                         str_buf, val_temp
                     ));
                     self.emit_line(&format!("printf(\"%s\", {});", str_buf));
+                    self.emit_line(&format!("free({});", str_buf));
                 }
                 if !no_newline {
                     self.emit_line("printf(\"\\n\");");
                 }
+                self.flush_statement_temps(None);
             }
 
             Statement::Input {
@@ -594,31 +720,62 @@ impl Codegen {
                     } else {
                         self.emit_line(&format!("RAP_Value {} = RAP_input_value();", temp));
                     }
+                    // Input creates a new value — track it
+                    // self.track_temp(&temp);
                     self.emit_lvalue_assignment(var, &temp);
                 }
+                // Input value ownership transfers to the variable
+                // but flush any other intermediate temps
+                self.flush_statement_temps(None);
             }
 
             Statement::ExitLoop => {
                 self.emit_line("break;");
+                // let temps = saved_temps.clone();
+                // for temp in &temps {
+                //     self.emit_line(&format!("RAP_dec_ref({});", temp));
+                // }
+                // self.emit_line("break;");
             }
 
             Statement::ReturnFromProcedure => {
+                // self.flush_statement_temps(None);
+                let mut temps = saved_temps.clone();
+                temps.append(&mut self.statement_temps.clone());
+                for temp in &temps {
+                    self.emit_line(&format!("RAP_dec_ref({});", temp));
+                }
+                self.emit_epilogue();
                 self.emit_line("return RAP_create_null_obj();");
             }
 
             Statement::ReturnFromFunction(expr) => {
                 let result_temp = self.emit_expression(expr);
+                // Protect return value: inc_ref before epilogue dec_refs all locals
+                // self.emit_line(&format!("RAP_inc_ref({});", result_temp));
+                // self.flush_statement_temps(None);
+                let mut temps = saved_temps.clone();
+                temps.append(&mut self.statement_temps.clone());
+                for temp in &temps {
+                    if *temp != result_temp {
+                        self.emit_line(&format!("RAP_dec_ref({});", temp));
+                    }
+                }
+                self.emit_epilogue();
                 self.emit_line(&format!("return {};", result_temp));
             }
         }
+
+        self.statement_temps = saved_temps;
     }
 
     fn emit_lvalue_assignment(&mut self, target: &LValue, value_temp: &str) {
         match target {
             LValue::Name(name) => {
                 let mangled = self.mangle_name(name);
-                if self.declared_vars.contains(&mangled) {
+                if self.is_var_in_scope(&mangled) {
                     // Parameter updates BOTH C local and frame
+                    self.emit_line(&format!("RAP_inc_ref({});", value_temp));
                     self.emit_line(&format!("{} = {};", mangled, value_temp));
                     self.emit_line(&format!(
                         "RAP_frame_set({}, \"{}\", {});",
@@ -630,12 +787,19 @@ impl Codegen {
                         "RAP_frame_set_foreign({}, \"{}\", {});",
                         self.current_frame, name, value_temp
                     ));
+                    // Inc ref new value
+                    // self.emit_line(&format!("RAP_inc_ref({});", value_temp));
                 } else {
                     // Locals saved to frame, to allow access from nested scopes
+                    // self.emit_line(&format!("RAP_Value {} = {};", mangled, value_temp));
                     self.emit_line(&format!(
                         "RAP_frame_set({}, \"{}\", {});",
                         self.current_frame, name, value_temp
                     ));
+                    // Inc ref new value
+                    // self.emit_line(&format!("RAP_nc_ref({});", value_temp));
+
+                    // self.insert_declared_var(mangled.clone());
                 }
             }
             LValue::Subscript { collection, index } => {
@@ -671,6 +835,13 @@ impl Codegen {
                     "RAP_slice_assign({}, {});",
                     slice_temp, value_temp
                 ));
+                self.track_temp(&slice_temp);
+
+                // Decrement replacement if its not a temp (i.e. a local value), since its
+                // incremented in lvalue assignment BUT we dont consume the container
+                if !self.statement_temps.contains(&value_temp.to_string()) {
+                    self.emit_line(&format!("RAP_dec_ref({});", value_temp));
+                }
             }
         }
     }
@@ -776,6 +947,8 @@ impl Codegen {
                 to,
                 step,
             } => {
+                self.create_scope();
+
                 // Emit from/to/step expressions before the loop
                 let from_temp = if let Some(from_expr) = from {
                     self.emit_expression(from_expr)
@@ -830,7 +1003,7 @@ impl Codegen {
                     iter_var, from_temp, condition, iter_var, step_var
                 ));
                 self.indent_level += 1;
-                self.declared_vars.insert(local_var.clone());
+                self.insert_declared_var(local_var.clone());
                 self.emit_line(&format!(
                     "RAP_Value {} = RAP_create_int_obj({});",
                     local_var, iter_var
@@ -839,12 +1012,14 @@ impl Codegen {
                 self.emit_while_condition(&loop_stmt.while_condition);
                 self.emit_statement_list(&loop_stmt.body);
                 self.emit_post_condition(&loop_stmt.post_condition);
+                self.drop_scope();
                 self.indent_level -= 1;
                 self.emit_line("}");
-                self.declared_vars.remove(&local_var);
             }
 
             LoopHeader::Repeat(count_expr) => {
+                self.create_scope();
+
                 let count_temp = self.emit_expression(count_expr);
                 let rep_var = format!("_rep_{}", self.temp_counter);
                 self.emit_line(&format!(
@@ -855,16 +1030,19 @@ impl Codegen {
                 self.emit_while_condition(&loop_stmt.while_condition);
                 self.emit_statement_list(&loop_stmt.body);
                 self.emit_post_condition(&loop_stmt.post_condition);
+                self.drop_scope();
                 self.indent_level -= 1;
                 self.emit_line("}");
             }
 
             LoopHeader::Infinite => {
+                self.create_scope();
                 self.emit_line("while (1) {");
                 self.indent_level += 1;
                 self.emit_while_condition(&loop_stmt.while_condition);
                 self.emit_statement_list(&loop_stmt.body);
                 self.emit_post_condition(&loop_stmt.post_condition);
+                self.drop_scope();
                 self.indent_level -= 1;
                 self.emit_line("}");
             }
@@ -872,18 +1050,31 @@ impl Codegen {
     }
 
     /// Emit `пока` (while) pre-condition: `if (!cond) break;` at top of loop body.
+    /// Flushes its own temps since they're inside the C loop block.
     fn emit_while_condition(&mut self, while_cond: &Option<Box<Expr>>) {
         if let Some(cond_expr) = while_cond {
+            let saved = std::mem::take(&mut self.statement_temps);
             let cond_temp = self.emit_expression(cond_expr);
-            self.emit_line(&format!("if (!RAP_BOOL_VALUE({})) break;", cond_temp));
+            self.emit_line(&format!("if (!RAP_BOOL_VALUE({})) {{", cond_temp));
+            let temps = self.statement_temps.clone();
+            for temp in &temps {
+                self.emit_line(&format!("  RAP_dec_ref({});", temp));
+            }
+            self.emit_line("  break;}");
+            // self.flush_statement_temps(None);
+            self.statement_temps = saved;
         }
     }
 
     /// Emit `по` (until) post-condition: `if (cond) break;` at bottom of loop body.
+    /// Flushes its own temps since they're inside the C loop block.
     fn emit_post_condition(&mut self, post_cond: &Option<Box<Expr>>) {
         if let Some(cond_expr) = post_cond {
+            let saved = std::mem::take(&mut self.statement_temps);
             let cond_temp = self.emit_expression(cond_expr);
             self.emit_line(&format!("if (RAP_BOOL_VALUE({})) break;", cond_temp));
+            self.flush_statement_temps(None);
+            self.statement_temps = saved;
         }
     }
 
@@ -900,7 +1091,7 @@ impl Codegen {
                     let params = info.params.clone();
                     let is_function = info.is_function;
                     self.emit_inline_callable(&c_func_name, &params, is_function)
-                } else if self.declared_vars.contains(&self.mangle_name(name)) {
+                } else if self.is_var_in_scope(&self.mangle_name(name)) {
                     // Parameter is local
                     self.mangle_name(name)
                 } else {
@@ -917,6 +1108,7 @@ impl Codegen {
                             temp, self.current_frame, name
                         ));
                     }
+                    self.track_temp(&temp);
                     temp
                 }
             }
@@ -928,6 +1120,20 @@ impl Codegen {
             } => {
                 let left_temp = self.emit_expression(left);
                 let right_temp = self.emit_expression(right);
+
+                // self.track_temp(&left_temp);
+                // self.track_temp(&right_temp);
+
+                // Both temps must be cleared, they can be heap allocated temporaries and
+                // we should decrement their refcount at the scope end
+                // TODO: this is ugly, need to rethink how to handle frame-based locals
+                // if !left_temp.contains("_local") {
+                //     self.insert_declared_var(left_temp.clone());
+                // }
+                // if !right_temp.contains("_local_") {
+                //     self.insert_declared_var(right_temp.clone());
+                // }
+
                 self.emit_binary_op(operator, &left_temp, &right_temp)
             }
 
@@ -951,6 +1157,7 @@ impl Codegen {
                     "RAP_Value {} = RAP_get_tuple_item({}, (uint32_t)RAP_SMI_VALUE({}));",
                     result, coll_temp, idx_temp
                 ));
+                self.track_temp(&result);
                 result
             }
 
@@ -975,6 +1182,7 @@ impl Codegen {
                     "RAP_Value {} = RAP_create_slice({}, {}, {});",
                     result, coll_temp, from_val, to_val
                 ));
+                self.track_temp(&result);
                 result
             }
         }
@@ -990,11 +1198,15 @@ impl Codegen {
             Literal::Text(s) => format!("RAP_create_text_obj(\"{}\")", escape_c_string(s)),
         };
         self.emit_line(&format!("RAP_Value {} = {};", temp, rhs));
+        self.track_temp(&temp);
         temp
     }
 
     fn emit_binary_op(&mut self, op: &BinaryOperator, left: &str, right: &str) -> String {
         let temp = self.fresh_temp();
+        // self.track_temp(&left);
+        // self.track_temp(&right);
+
         let rhs = match op {
             BinaryOperator::Add => format!("RAP_add({}, {})", left, right),
             BinaryOperator::Subtract => format!("RAP_subtract({}, {})", left, right),
@@ -1029,6 +1241,7 @@ impl Codegen {
             ),
         };
         self.emit_line(&format!("RAP_Value {} = {};", temp, rhs));
+        self.track_temp(&temp);
         temp
     }
 
@@ -1044,6 +1257,7 @@ impl Codegen {
             UnaryOperator::Length => format!("RAP_length({})", operand),
         };
         self.emit_line(&format!("RAP_Value {} = {};", temp, rhs));
+        self.track_temp(&temp);
         temp
     }
 
@@ -1087,12 +1301,13 @@ impl Codegen {
                 result, func_temp, args_array, arg_count
             ));
         }
+        self.track_temp(&result);
         result
     }
 
     /// Try to emit a built-in function call. Returns Some(temp_name) if handled.
     fn try_emit_builtin(&mut self, name: &str, arguments: &[Box<Expr>]) -> Option<String> {
-        match name {
+        let result = match name {
             "корень" | "sqrt" => {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
@@ -1274,8 +1489,23 @@ impl Codegen {
                 ));
                 Some(temp)
             }
+            // Gets the current refcount of an object
+            "кол_ссылок" => {
+                let arg = self.emit_expression(&arguments[0]);
+                let temp = self.fresh_temp();
+                self.emit_line(&format!(
+                    "RAP_Value {t} = RAP_get_objects_refcount({a});",
+                    t = temp,
+                    a = arg
+                ));
+                Some(temp)
+            }
             _ => None,
+        };
+        if let Some(ref t) = result {
+            self.track_temp(t);
         }
+        result
     }
 
     fn emit_tuple_construct(&mut self, items: &[Box<Expr>]) -> String {
@@ -1296,6 +1526,7 @@ impl Codegen {
             "RAP_Value {} = RAP_create_tuple_obj({}, {});",
             result, count, items_array
         ));
+        self.track_temp(&result);
         result
     }
 }
