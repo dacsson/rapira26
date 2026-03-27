@@ -2,10 +2,8 @@
 #include "runtime_internal.h"
 
 RAP_Value RAP_create_callable_obj(struct RAP_CallFrame *frame_parent,
-                                    RAP_FunctionDecl func,
-                                    RAP_Parameter **params,
-                                    uint32_t params_count,
-                                    bool is_function) {
+                                  RAP_FunctionDecl func, RAP_Parameter **params,
+                                  uint32_t params_count, bool is_function) {
   RAP_TRACK_ALLOC();
   RAP_Object *obj = malloc(sizeof(RAP_Object));
   obj->tag = RAP_OBJECT_TAG_CALLABLE;
@@ -24,7 +22,8 @@ RAP_Value RAP_create_callable_obj(struct RAP_CallFrame *frame_parent,
   // Copy the params array — callers pass stack pointers (e.g. &_p0)
   if (params_count > 0) {
     obj->callable_val->params = malloc(params_count * sizeof(RAP_Parameter *));
-    memcpy(obj->callable_val->params, params, params_count * sizeof(RAP_Parameter *));
+    memcpy(obj->callable_val->params, params,
+           params_count * sizeof(RAP_Parameter *));
   } else {
     obj->callable_val->params = NULL;
   }
@@ -41,7 +40,7 @@ RAP_Parameter *RAP_create_parameter(RAP_ParameterMode mode, const char *name) {
 }
 
 RAP_Value RAP_call_callable_obj(RAP_Value callable, RAP_Value *args,
-                                  uint32_t arg_count) {
+                                uint32_t arg_count) {
   if (!RAP_IS_PTR(callable)) {
     RAP_fatal_error("Ожидал указатель на функцию или процедуру\n");
   }
@@ -70,14 +69,21 @@ struct RAP_CallFrame *RAP_create_call_frame(struct RAP_CallFrame *parent) {
 }
 
 void RAP_free_call_frame(struct RAP_CallFrame *frame) {
-  if (frame == NULL) return;
+  if (frame == NULL)
+    return;
   for (uint32_t i = 0; i < frame->slot_count; i++) {
 #ifdef RAP_DEBUG_LEAKS
     printf(" - slot %u: %s\n", i, frame->slots[i].name);
     printf("   - value: %s\n", RAP_stringify_object(frame->slots[i].value));
-    printf("   - refcount: %d\n", RAP_IS_PTR(frame->slots[i].value) ? RAP_PTR_VALUE(frame->slots[i].value)->refcount : 0);
-    printf("   - is ptr: %s\n", RAP_IS_PTR(frame->slots[i].value) ? "yes" : "no");
-    printf("   - ptr: %p\n", RAP_IS_PTR(frame->slots[i].value) ? RAP_PTR_VALUE(frame->slots[i].value) : NULL);
+    printf("   - refcount: %d\n",
+           RAP_IS_PTR(frame->slots[i].value)
+               ? RAP_PTR_VALUE(frame->slots[i].value)->refcount
+               : 0);
+    printf("   - is ptr: %s\n",
+           RAP_IS_PTR(frame->slots[i].value) ? "yes" : "no");
+    printf("   - ptr: %p\n", RAP_IS_PTR(frame->slots[i].value)
+                                 ? RAP_PTR_VALUE(frame->slots[i].value)
+                                 : NULL);
 #endif
     RAP_dec_ref(frame->slots[i].value);
   }
@@ -88,7 +94,8 @@ void RAP_free_call_frame(struct RAP_CallFrame *frame) {
 // Find slot index by name in a single frame. Returns -1 if not found.
 static int frame_find_slot(struct RAP_CallFrame *frame, const char *name) {
   for (uint32_t i = 0; i < frame->slot_count; i++) {
-    if (strcmp(frame->slots[i].name, name) == 0) return (int)i;
+    if (strcmp(frame->slots[i].name, name) == 0)
+      return (int)i;
   }
   return -1;
 }
@@ -106,7 +113,8 @@ RAP_Value RAP_frame_get(struct RAP_CallFrame *frame, const char *name) {
 }
 
 // Set variable in current frame (creates slot if not found).
-void RAP_frame_set(struct RAP_CallFrame *frame, const char *name, RAP_Value value) {
+void RAP_frame_set(struct RAP_CallFrame *frame, const char *name,
+                   RAP_Value value) {
   int idx = frame_find_slot(frame, name);
   if (idx >= 0) {
     // Dec ref previous value
@@ -115,7 +123,8 @@ void RAP_frame_set(struct RAP_CallFrame *frame, const char *name, RAP_Value valu
     return;
   }
   frame->slot_count++;
-  frame->slots = realloc(frame->slots, frame->slot_count * sizeof(struct RAP_FrameSlot));
+  frame->slots =
+      realloc(frame->slots, frame->slot_count * sizeof(struct RAP_FrameSlot));
   frame->slots[frame->slot_count - 1].name = name;
   frame->slots[frame->slot_count - 1].value = value;
 }
@@ -137,8 +146,10 @@ RAP_Value RAP_frame_get_foreign(struct RAP_CallFrame *frame, const char *name) {
 }
 
 // Set variable by walking up the parent chain (чужие).
-// If found in a parent, updates it there. Otherwise creates in the immediate parent.
-void RAP_frame_set_foreign(struct RAP_CallFrame *frame, const char *name, RAP_Value value) {
+// If found in a parent, updates it there. Otherwise creates in the immediate
+// parent.
+void RAP_frame_set_foreign(struct RAP_CallFrame *frame, const char *name,
+                           RAP_Value value) {
   struct RAP_CallFrame *current = frame->parent;
   while (current) {
     int idx = frame_find_slot(current, name);

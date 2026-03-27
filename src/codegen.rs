@@ -563,7 +563,9 @@ impl Codegen {
                 if let Expr::Name(_) = value.as_ref() {
                     // Do not increment refcount if value is taken from frame,
                     // since frame_get increments count on itself
-                    if self.output.lines().last().is_some() && !self.output.lines().last().unwrap().contains("frame_get") {
+                    if self.output.lines().last().is_some()
+                        && !self.output.lines().last().unwrap().contains("frame_get")
+                    {
                         self.emit_line(&format!("RAP_inc_ref({});", value_temp));
                     }
                 }
@@ -981,7 +983,7 @@ impl Codegen {
                 if let Some(ref to_t) = to_temp {
                     self.emit_line(&format!(
                         "int64_t {} = RAP_IS_SMI({}) \
-                         ? RAP_SMI_VALUE({}) : (int64_t)RAP_DOUBLE_VALUE({});",
+                         ? RAP_SMI_VALUE({}) : (int64_t)RAP_GET_FLOAT_VAL({});",
                         limit_var, to_t, to_t, to_t
                     ));
                 }
@@ -1314,7 +1316,7 @@ impl Codegen {
                 self.emit_line(&format!(
                     "RAP_Value {t} = RAP_create_float_obj(\
                      sqrt(RAP_IS_SMI({a}) \
-                     ? (double)RAP_SMI_VALUE({a}) : RAP_DOUBLE_VALUE({a})));",
+                     ? (double)RAP_SMI_VALUE({a}) : RAP_GET_FLOAT_VAL({a})));",
                     t = temp,
                     a = arg
                 ));
@@ -1326,7 +1328,7 @@ impl Codegen {
                 self.emit_line(&format!(
                     "RAP_Value {t} = RAP_IS_SMI({a}) \
                      ? RAP_create_int_obj(llabs(RAP_SMI_VALUE({a}))) \
-                     : RAP_create_float_obj(fabs(RAP_DOUBLE_VALUE({a})));",
+                     : RAP_create_float_obj(fabs(RAP_GET_FLOAT_VAL({a})));",
                     t = temp,
                     a = arg
                 ));
@@ -1338,7 +1340,7 @@ impl Codegen {
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
                     "RAP_Value {} = RAP_create_int_obj(\
-                     (int64_t)RAP_DOUBLE_VALUE({}));",
+                     (int64_t)RAP_GET_FLOAT_VAL({}));",
                     temp, arg
                 ));
                 Some(temp)
@@ -1448,7 +1450,7 @@ impl Codegen {
                 let arg = self.emit_expression(&arguments[0]);
                 let temp = self.fresh_temp();
                 self.emit_line(&format!(
-                    "RAP_Value {t} = RAP_create_logical_obj(RAP_IS_DOUBLE({a}) || (RAP_IS_PTR({a}) && RAP_PTR_VALUE({a})->tag == RAP_OBJECT_TAG_FLOAT));",
+                    "RAP_Value {t} = RAP_create_logical_obj(RAP_IS_FLOAT({a}) || (RAP_IS_PTR({a}) && RAP_PTR_VALUE({a})->tag == RAP_OBJECT_TAG_FLOAT));",
                     t = temp, a = arg
                 ));
                 Some(temp)

@@ -7,16 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/// From spec 2.2.2:
-/// Объекты:
-/// Пустой
-/// Логический
-/// Процедура
-/// Функция
-/// Целый
-/// Вещественный
-/// Текст
-/// Кортеж
+// Tag identifies the type of a [RAP_Object]
 typedef enum {
   RAP_OBJECT_TAG_NULL,
   RAP_OBJECT_TAG_LOGICAL,
@@ -30,11 +21,14 @@ typedef enum {
 
 struct RAP_Tuple;
 struct RAP_Callable;
-/// Each object in the runtime has a tag indicating its type and a union of
-/// possible values for that type.
+
+// RAP_Object is specifically a heap allocated entity, encoded as a pointer in
+// [RAP_Value]
+// Each object in the runtime has a tag indicating its type and a
+// union of possible values for that type
 typedef struct {
   RAP_ObjectTag tag;
-  atomic_int refcount;
+  int refcount;
   union {
     bool logical_val;
     int64_t int_val;
@@ -46,10 +40,11 @@ typedef struct {
   };
 } RAP_Object;
 
-/// From spec 2.2.2:
-/// Параметры:
-/// Входные - ['=>']
-/// Возвратные - ['<=']
+// Parameter mode specification
+// From spec 2.2.2:
+// Параметры:
+// Входные - ['=>']
+// Возвратные - ['<=']
 typedef enum {
   RAP_PARAMETER_MODE_IN,
   RAP_PARAMETER_MODE_OUT,
@@ -78,7 +73,7 @@ struct RAP_CallFrame {
 struct RAP_Callable {
   char *name;
   RAP_Value (*func)(struct RAP_CallFrame *frame, RAP_Value *args,
-                      unsigned int arg_count);
+                    unsigned int arg_count);
   struct RAP_CallFrame *frame;
   RAP_Parameter **params;
   uint32_t param_count;
@@ -93,7 +88,7 @@ struct RAP_Tuple {
 
 /// Unified function type
 typedef RAP_Value (*RAP_FunctionDecl)(struct RAP_CallFrame *frame,
-                                        RAP_Value *args, uint32_t arg_count);
+                                      RAP_Value *args, uint32_t arg_count);
 
 /// Slice: a view into a tuple (or text).
 /// Holds a pointer to the parent and 0-based [from, to) bounds.

@@ -55,12 +55,15 @@ RESULT: Lexer emits `Indent`/`Dedent`/`Newline` tokens; parser uses `parse_block
 ### ✓ Step 2 — Reference counting ✓
 Add `refcount` field to `RAP_Object`. Increment on assignment/parameter pass, decrement on scope exit/reassignment, free at zero. No circular references in Rapira, so refcounting is sufficient.
 
-### Step 3 — SMI pointer tagging
+### ✓ Step 3 — SMI pointer tagging ✓
 Replace `RAP_Object*` with a tagged `uintptr_t` (V8-style). Lowest bit distinguishes SMI (Small Integer, bit 0 = 0, value = word >> 1) from heap pointer (bit 0 = 1, pointer = word & ~1). Integers — the most common type in loops, indexing, arithmetic — never touch the heap. Floats, text, tuples, callables remain heap-allocated with a type tag. Gives 63-bit integers, single-instruction type checks (`v & 1`), and free add/subtract without untagging.
 
-### Step 4 — Easy optimizations
-- **Constant folding:** evaluate constant expressions at compile time (e.g. `2 + 3` → `5`)
-- **No redundant wrapping:** keep for-loop counters as C `int64_t`, only wrap into `RAP_Object` when used as values. Avoid allocating intermediate objects for known-type operations.
+### Step 4 — Runtime optimization
+- Come up with a number of benchmarks 
+- Optimize bottleneckzzz:
+  - Frame variable lookup: we can statically analyze when do we actually need to save a local variable in frame, i.e. do it _only if_ there is a function in CFG that uses it in `чужие` block
+  - Reference counting, idk look at Perceus?
+  - Experiment with mimalloc
 
 ### Step 5 - Add new features from big spec and change container syntax
 - Source: https://ershov.iis.nsk.su/ru/node/772596

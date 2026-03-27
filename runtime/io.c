@@ -24,7 +24,8 @@ static char *read_line(void) {
 
 RAP_Value RAP_input_text(void) {
   char *line = read_line();
-  if (!line) return RAP_create_text_obj("");
+  if (!line)
+    return RAP_create_text_obj("");
   RAP_Value result = RAP_create_text_obj(line);
   free(line);
   return result;
@@ -32,11 +33,13 @@ RAP_Value RAP_input_text(void) {
 
 RAP_Value RAP_input_value(void) {
   char *line = read_line();
-  if (!line) return RAP_create_null_obj();
+  if (!line)
+    return RAP_create_null_obj();
 
   // Skip leading whitespace
   char *p = line;
-  while (*p && isspace((unsigned char)*p)) p++;
+  while (*p && isspace((unsigned char)*p))
+    p++;
 
   if (*p == '\0') {
     free(line);
@@ -48,7 +51,8 @@ RAP_Value RAP_input_value(void) {
   long long int_val = strtoll(p, &end, 10);
   if (*end == '\0' || (*end && isspace((unsigned char)*end))) {
     // Check there's nothing else after the number
-    while (*end && isspace((unsigned char)*end)) end++;
+    while (*end && isspace((unsigned char)*end))
+      end++;
     if (*end == '\0') {
       free(line);
       return RAP_create_int_obj((int64_t)int_val);
@@ -58,7 +62,8 @@ RAP_Value RAP_input_value(void) {
   // Try to parse as float
   double float_val = strtod(p, &end);
   if (*end == '\0' || (*end && isspace((unsigned char)*end))) {
-    while (*end && isspace((unsigned char)*end)) end++;
+    while (*end && isspace((unsigned char)*end))
+      end++;
     if (*end == '\0') {
       free(line);
       return RAP_create_float_obj(float_val);

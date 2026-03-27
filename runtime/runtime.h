@@ -12,20 +12,17 @@ RAP_Value RAP_create_float_obj(double value);
 RAP_Value RAP_create_text_obj(const char *value);
 RAP_Value RAP_create_tuple_obj(uint32_t count, RAP_Value *items);
 RAP_Value RAP_create_callable_obj(struct RAP_CallFrame *frame_parent,
-                                    RAP_FunctionDecl func,
-                                    RAP_Parameter **params,
-                                    uint32_t params_count,
-                                    bool is_function);
+                                  RAP_FunctionDecl func, RAP_Parameter **params,
+                                  uint32_t params_count, bool is_function);
 RAP_Parameter *RAP_create_parameter(RAP_ParameterMode mode, const char *name);
 RAP_Value RAP_create_logical_obj(bool value);
 
 // OBJECTS UTILITIES
 
 RAP_Value RAP_call_callable_obj(RAP_Value callable, RAP_Value *args,
-                                  uint32_t arg_count);
+                                uint32_t arg_count);
 RAP_Value RAP_get_tuple_item(RAP_Value tuple, uint32_t index);
-RAP_Value RAP_set_tuple_item(RAP_Value tuple, uint32_t index,
-                               RAP_Value value);
+RAP_Value RAP_set_tuple_item(RAP_Value tuple, uint32_t index, RAP_Value value);
 // Joins two tuples into a new tuple
 RAP_Value RAP_append_tuple(RAP_Object *a, RAP_Object *b);
 RAP_Value RAP_index_of(RAP_Value needle, RAP_Value haystack);
@@ -83,21 +80,33 @@ struct RAP_CallFrame *RAP_create_call_frame(struct RAP_CallFrame *parent);
 void RAP_free_call_frame(struct RAP_CallFrame *frame);
 // Get/set a variable in the current frame only (свои / implicit locals)
 RAP_Value RAP_frame_get(struct RAP_CallFrame *frame, const char *name);
-void RAP_frame_set(struct RAP_CallFrame *frame, const char *name, RAP_Value value);
+void RAP_frame_set(struct RAP_CallFrame *frame, const char *name,
+                   RAP_Value value);
 // Get/set by walking up the parent chain (чужие)
 RAP_Value RAP_frame_get_foreign(struct RAP_CallFrame *frame, const char *name);
-void RAP_frame_set_foreign(struct RAP_CallFrame *frame, const char *name, RAP_Value value);
+void RAP_frame_set_foreign(struct RAP_CallFrame *frame, const char *name,
+                           RAP_Value value);
 
 // EXTRACTORS
-//
-#define RAP_IS_DOUBLE(v) (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_FLOAT)
-#define RAP_DOUBLE_VALUE(v) (RAP_PTR_VALUE(v)->float_val)
-#define RAP_get_int_val(obj) ((obj)->int_val)
-#define RAP_get_float_val(obj) ((obj)->float_val)
-#define RAP_get_text_val(obj) ((obj)->text_val)
-#define RAP_get_tuple_val(obj) ((obj)->tuple_val)
-#define RAP_get_callable_val(obj) ((obj)->callable_val)
-#define RAP_get_slice_val(obj) ((obj)->slice_val)
+
+// TODO: re-introduce after BigInt implementation
+// #define RAP_get_int_val(obj) ((obj)->int_val)
+#define RAP_GET_FLOAT_VAL(obj) (RAP_PTR_VALUE(obj)->float_val)
+#define RAP_GET_TEXT_VAL(obj) (RAP_PTR_VALUE(obj)->text_val)
+#define RAP_GET_TUPLE_VAL(obj) (RAP_PTR_VALUE(obj)->tuple_val)
+#define RAP_GET_CALLABLE_VAL(obj) (RAP_PTR_VALUE(obj)->callable_val)
+#define RAP_GET_SLICE_VAL(obj) (RAP_PTR_VALUE(obj)->slice_val)
+
+#define RAP_IS_FLOAT(v)                                                        \
+  (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_FLOAT)
+#define RAP_IS_TEXT(v)                                                         \
+  (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_TEXT)
+#define RAP_IS_TUPLE(v)                                                        \
+  (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_TUPLE)
+#define RAP_IS_SLICE(v)                                                        \
+  (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_SLICE)
+#define RAP_IS_NULL(v)                                                         \
+  (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_NULL)
 
 char *RAP_stringify_object(RAP_Value obj);
 
@@ -123,8 +132,13 @@ RAP_Value RAP_input_value(void);
 
 // REFERENCE COUNTING
 
-// RAP_inc_ref takes a RAP_Value — no-op for inline values (SMI, bool, double)
-#define RAP_inc_ref(val) do { if (RAP_IS_PTR(val)) RAP_PTR_VALUE(val)->refcount++; } while(0)
+// RAP_inc_ref takes a RAP_Value, no-op for inline values (SMI, bool, double)
+#define RAP_inc_ref(val)                                                       \
+  do {                                                                         \
+    if (RAP_IS_PTR(val))                                                       \
+      RAP_PTR_VALUE(val)->refcount++;                                          \
+  } while (0)
+
 void RAP_dec_ref(RAP_Value obj);
 
 void RAP_free_object(RAP_Object *obj);
