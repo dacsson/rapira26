@@ -62,14 +62,21 @@ Replace `RAP_Object*` with a tagged `uintptr_t` (V8-style). Lowest bit distingui
 - Come up with a number of benchmarks 
 - Optimize bottleneckzzz:
   - Frame variable lookup: we can statically analyze when do we actually need to save a local variable in frame, i.e. do it _only if_ there is a function in CFG that uses it in `чужие` block
-  - Reference counting, idk look at Perceus?
+  - Forbid `чужие` usage from top-level
   - Experiment with mimalloc
+- Reference counting
+  - idk look at Perceus?
+  - escape-analysis?
 
-### Step 5 - Add new features from big spec and change container syntax
+### Step 5 - Errors tied to file source instead of C
+If an error hapens emit source file line, not C error
+
+### Step 6 - Add new features from big spec and change container syntax
 - Source: https://ershov.iis.nsk.su/ru/node/772596
 
 Fetures to add:
 - Structs: `<$ имя: "иван", фамилия: "петров" $>`
+  - Dont forget about cycle references in refcounting alg.
 - Change tuple syntax: `< 1, 2, 3 >`
 - Sets: `<* 1, 1+1, <1, 5> *>`
 - ИЗ — проверка принадлежности:
@@ -82,14 +89,16 @@ Fetures to add:
 ВЫВОД: «В тексте Книга », Сч, " букв <А>";
 ```
 - `КОНТРОЛЬ` - asserts
+- `::` - consts (Jai inspired):
+```
+пенделей := 10 \ переменная
+пенделей :: 10 \ константа
+```
 
 We probably should change symbols `<` to use something more ergonomic for RU keyborads, something like:
 - Structs: `(имя: "иван", фамилия: "петров")`
 - tuple: `(1, 2, 3)`
 - Sets: `(1; 1+1; <1, 5>)`
-
-### Step 6 - Errors tied to file source instead of C
-If an error hapens emit source file line, not C error
 
 ### Step 7 — Optional type hints with flow typing
 Leverage `тип_*` checks for static type narrowing. When the compiler can prove a variable's type from a guard (`если тип_цел(X) то ...`), emit direct typed operations instead of polymorphic dispatch. Optional type annotations on parameters and variables.

@@ -1,14 +1,15 @@
-/// Indentation-aware lexer for the Rapira language (spec Препринт 767).
-///
-/// Produces `(byte_start, Token, byte_end)` triples.
-/// Emits `Indent`/`Dedent` tokens based on leading whitespace changes
-/// (Python-style significant indentation). Newlines separate statements.
-/// Inside balanced delimiters `()`, `[]`, `<* *>`, newlines and indentation
-/// are suppressed.
-///
-/// Tabs in leading indentation are rejected; only spaces are allowed.
-/// Comments (`\` to end of line) and blank lines are skipped during
-/// indentation processing and never affect the indent level.
+//! WARNING: this lexer is 99% written by AI
+//! Indentation-aware lexer for the Rapira language (spec Препринт 767).
+//!
+//! Produces `(byte_start, Token, byte_end)` triples.
+//! Emits `Indent`/`Dedent` tokens based on leading whitespace changes
+//! (Python-style significant indentation). Newlines separate statements.
+//! Inside balanced delimiters `()`, `[]`, `<* *>`, newlines and indentation
+//! are suppressed.
+//!
+//! Tabs in leading indentation are rejected; only spaces are allowed.
+//! Comments (`\` to end of line) and blank lines are skipped during
+//! indentation processing and never affect the indent level.
 
 use std::collections::VecDeque;
 

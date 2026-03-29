@@ -142,16 +142,12 @@ RAP_Value RAP_multiply(RAP_Value a, RAP_Value b) {
   } else if (RAP_IS_FLOAT(a) && RAP_IS_FLOAT(b)) {
     return RAP_float_multiply(a, b);
   } else if (RAP_IS_FLOAT(a) && RAP_IS_SMI(b)) {
-    RAP_Value b_as_double = RAP_create_float_obj(RAP_SMI_VALUE(b));
-    RAP_Value res = RAP_float_multiply(a, b_as_double);
-    RAP_free_object(RAP_PTR_VALUE(
-        b_as_double)); // avoid leaking memory for temporary cast value
+    RAP_Value res =
+        RAP_create_float_obj(RAP_GET_FLOAT_VAL(a) * (double)RAP_SMI_VALUE(b));
     return res;
   } else if (RAP_IS_SMI(a) && RAP_IS_FLOAT(b)) {
-    RAP_Value a_as_double = RAP_create_float_obj(RAP_SMI_VALUE(a));
-    RAP_Value res = RAP_float_multiply(a_as_double, b);
-    RAP_free_object(RAP_PTR_VALUE(
-        a_as_double)); // avoid leaking memory for temporary cast value
+    RAP_Value res =
+        RAP_create_float_obj(RAP_GET_FLOAT_VAL(b) * (double)RAP_SMI_VALUE(a));
     return res;
   }
 
