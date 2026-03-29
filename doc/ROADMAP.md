@@ -55,18 +55,28 @@ RESULT: Lexer emits `Indent`/`Dedent`/`Newline` tokens; parser uses `parse_block
 ### ✓ Step 2 — Reference counting ✓
 Add `refcount` field to `RAP_Object`. Increment on assignment/parameter pass, decrement on scope exit/reassignment, free at zero. No circular references in Rapira, so refcounting is sufficient.
 
-### Step 3 — SMI pointer tagging
+### ✓ Step 3 — SMI pointer tagging ✓
 Replace `RAP_Object*` with a tagged `uintptr_t` (V8-style). Lowest bit distinguishes SMI (Small Integer, bit 0 = 0, value = word >> 1) from heap pointer (bit 0 = 1, pointer = word & ~1). Integers — the most common type in loops, indexing, arithmetic — never touch the heap. Floats, text, tuples, callables remain heap-allocated with a type tag. Gives 63-bit integers, single-instruction type checks (`v & 1`), and free add/subtract without untagging.
 
-### Step 4 — Easy optimizations
-- **Constant folding:** evaluate constant expressions at compile time (e.g. `2 + 3` → `5`)
-- **No redundant wrapping:** keep for-loop counters as C `int64_t`, only wrap into `RAP_Object` when used as values. Avoid allocating intermediate objects for known-type operations.
+### Step 4 — Runtime optimization
+- Come up with a number of benchmarks 
+- Optimize bottleneckzzz:
+  - Frame variable lookup: we can statically analyze when do we actually need to save a local variable in frame, i.e. do it _only if_ there is a function in CFG that uses it in `чужие` block
+  - Forbid `чужие` usage from top-level
+  - Experiment with mimalloc
+- Reference counting
+  - idk look at Perceus?
+  - escape-analysis?
 
-### Step 5 - Add new features from big spec and change container syntax
+### Step 5 - Errors tied to file source instead of C
+If an error hapens emit source file line, not C error
+
+### Step 6 - Add new features from big spec and change container syntax
 - Source: https://ershov.iis.nsk.su/ru/node/772596
 
 Fetures to add:
 - Structs: `<$ имя: "иван", фамилия: "петров" $>`
+  - Dont forget about cycle references in refcounting alg.
 - Change tuple syntax: `< 1, 2, 3 >`
 - Sets: `<* 1, 1+1, <1, 5> *>`
 - ИЗ — проверка принадлежности:
@@ -79,14 +89,16 @@ Fetures to add:
 ВЫВОД: «В тексте Книга », Сч, " букв <А>";
 ```
 - `КОНТРОЛЬ` - asserts
+- `::` - consts (Jai inspired):
+```
+пенделей := 10 \ переменная
+пенделей :: 10 \ константа
+```
 
 We probably should change symbols `<` to use something more ergonomic for RU keyborads, something like:
 - Structs: `(имя: "иван", фамилия: "петров")`
 - tuple: `(1, 2, 3)`
 - Sets: `(1; 1+1; <1, 5>)`
-
-### Step 6 - Errors tied to file source instead of C
-If an error hapens emit source file line, not C error
 
 ### Step 7 — Optional type hints with flow typing
 Leverage `тип_*` checks for static type narrowing. When the compiler can prove a variable's type from a guard (`если тип_цел(X) то ...`), emit direct typed operations instead of polymorphic dispatch. Optional type annotations on parameters and variables.

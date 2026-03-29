@@ -1,3 +1,4 @@
+//! WARNING: this parser is 90% written by AI
 //! Recursive descent parser for the Rapira language (spec Препринт 767).
 //!
 //! Uses indentation-based block structure: Indent/Dedent tokens from the lexer
@@ -8,6 +9,8 @@
 //!
 //! The `возврат` ambiguity (bare `возврат` vs `возврат expr`) is resolved greedily:
 //! if the next token can start an expression, we parse an expression.
+
+use std::collections::HashSet;
 
 use crate::ast::*;
 use crate::lexer::{Lexer, LexerError, Token};
@@ -251,6 +254,7 @@ impl<'input> Parser<'input> {
             parameters,
             name_declarations,
             body,
+            variables_need_saving: HashSet::new(),
         })
     }
 
@@ -280,6 +284,7 @@ impl<'input> Parser<'input> {
             parameters,
             name_declarations,
             body,
+            variables_need_saving: HashSet::new(),
         })
     }
 

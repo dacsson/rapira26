@@ -299,7 +299,12 @@ fn lex_skips_whitespace() {
     let tokens = tokenize("  42   да  ");
     assert_eq!(
         tokens,
-        vec![Token::Indent, Token::Integer(42), Token::KwДа, Token::Dedent]
+        vec![
+            Token::Indent,
+            Token::Integer(42),
+            Token::KwДа,
+            Token::Dedent
+        ]
     );
 }
 
@@ -309,7 +314,12 @@ fn lex_newlines_produce_tokens() {
     let tokens = tokenize("42\n;\nда");
     assert_eq!(
         tokens,
-        vec![Token::Integer(42), Token::Newline, Token::Newline, Token::KwДа]
+        vec![
+            Token::Integer(42),
+            Token::Newline,
+            Token::Newline,
+            Token::KwДа
+        ]
     );
 }
 

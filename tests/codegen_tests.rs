@@ -6,6 +6,9 @@
 //!   `\ => (empty line)` — an empty line is expected
 //!   `\ => (empty string)` — same as empty line
 
+use rapira26::opt::deframe::DeframePass;
+use rapira26::opt::opt_pass::{OptimizationPassOpts, run_optimizations};
+
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -64,9 +67,20 @@ fn run_rap_file(rap_path: &Path) -> Result<String, String> {
 
     let token_stream = rapira26::lexer::Lexer::new(&source);
     let parser = rapira26::parser::Parser::new(token_stream);
-    let program = parser
+    let mut program = parser
         .parse_program()
         .map_err(|e| format!("parse error: {e}"))?;
+
+    // Apply optimizations
+    run_optimizations(
+        &mut program,
+        &[&DeframePass],
+        &OptimizationPassOpts { dump: false },
+    )
+    .unwrap_or_else(|error| {
+        eprintln!("Оптимизация не справилась: {error}");
+        std::process::exit(1);
+    });
 
     let codegen = rapira26::codegen::Codegen::new();
     let c_code = codegen.generate(&program);

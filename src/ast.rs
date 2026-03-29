@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 /// Top-level program: an ordered sequence of definitions and statements
 /// (called "единица_общения_с_системой" in the spec §2.1).
 #[derive(Debug, Clone)]
@@ -12,8 +14,6 @@ pub enum ProgramUnit {
     FunctionDefinition(FunctionDefinition),
 }
 
-// ── Definitions ─────────────────────────────────────────────────────────────
-
 /// проц NAME (params) ;; [name_decls] body конец
 #[derive(Debug, Clone)]
 pub struct ProcedureDefinition {
@@ -21,6 +21,8 @@ pub struct ProcedureDefinition {
     pub parameters: Vec<ProcParameter>,
     pub name_declarations: NameDeclarations,
     pub body: Vec<Statement>,
+    // variables that need to be saved in the frame, so other procedures can access them via `чужие`
+    pub variables_need_saving: HashSet<String>,
 }
 
 /// функ NAME (params) ;; [name_decls] body конец
@@ -30,6 +32,8 @@ pub struct FunctionDefinition {
     pub parameters: Vec<String>, // functions only have input parameters (spec §1.5)
     pub name_declarations: NameDeclarations,
     pub body: Vec<Statement>,
+    // variables that need to be saved in the frame, so other procedures can access them via `чужие`
+    pub variables_need_saving: HashSet<String>,
 }
 
 /// A single parameter in a procedure definition.
@@ -56,8 +60,6 @@ impl NameDeclarations {
         }
     }
 }
-
-// ── Statements ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub enum Statement {
@@ -135,8 +137,6 @@ pub enum CallArgument {
     InOut(LValue),
 }
 
-// ── Selection ─────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub enum SelectionStatement {
     /// выбор expr при v1,v2: body ... [иначе body] все
@@ -163,8 +163,6 @@ pub struct ConditionCase {
     pub condition: Box<Expr>,
     pub body: Vec<Statement>,
 }
-
-// ── Loops ─────────────────────────────────────────────────────────────────
 
 /// All loop forms share optional pre/post conditions (spec §2.1 "цикл").
 ///
@@ -194,9 +192,7 @@ pub enum LoopHeader {
     },
 }
 
-// ── Expressions ──────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Literal(Literal),
     Name(String),
@@ -234,9 +230,7 @@ pub enum Expr {
     },
 }
 
-// ── Literals ─────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Null,          // пусто
     Boolean(bool), // да / нет
@@ -244,8 +238,6 @@ pub enum Literal {
     Real(f64),
     Text(String),
 }
-
-// ── Operators ────────────────────────────────────────────────────────────
 
 /// Binary operators in precedence order (spec §2.2.3, highest to lowest):
 /// ** > * / // /% > + - > > < >= <= > = /= > и > или

@@ -5,23 +5,23 @@
 
 // Integer operations
 
-RAP_Value RAP_integer_less_than(RAP_Value a, RAP_Value b) {
+inline RAP_Value RAP_integer_less_than(RAP_Value a, RAP_Value b) {
   return RAP_create_logical_obj(RAP_SMI_VALUE(a) < RAP_SMI_VALUE(b));
 }
 
-RAP_Value RAP_integer_greater_than(RAP_Value a, RAP_Value b) {
+inline RAP_Value RAP_integer_greater_than(RAP_Value a, RAP_Value b) {
   return RAP_create_logical_obj(RAP_SMI_VALUE(a) > RAP_SMI_VALUE(b));
 }
 
-RAP_Value RAP_integer_equal(RAP_Value a, RAP_Value b) {
+inline RAP_Value RAP_integer_equal(RAP_Value a, RAP_Value b) {
   return RAP_create_logical_obj(RAP_SMI_VALUE(a) == RAP_SMI_VALUE(b));
 }
 
-RAP_Value RAP_integer_not_equal(RAP_Value a, RAP_Value b) {
+inline RAP_Value RAP_integer_not_equal(RAP_Value a, RAP_Value b) {
   return RAP_create_logical_obj(RAP_SMI_VALUE(a) != RAP_SMI_VALUE(b));
 }
 
-RAP_Value RAP_integer_modulo(RAP_Value a, RAP_Value b) {
+inline RAP_Value RAP_integer_modulo(RAP_Value a, RAP_Value b) {
   // Spec §2.2.4.2: remainder = A - A//B * B (where // is floor division)
   int64_t av = RAP_SMI_VALUE(a);
   int64_t bv = RAP_SMI_VALUE(b);
@@ -29,15 +29,15 @@ RAP_Value RAP_integer_modulo(RAP_Value a, RAP_Value b) {
   return RAP_create_int_obj(av - quotient * bv);
 }
 
-RAP_Value RAP_integer_add(RAP_Value a, RAP_Value b) {
+inline RAP_Value RAP_integer_add(RAP_Value a, RAP_Value b) {
   return RAP_create_int_obj(RAP_SMI_VALUE(a) + RAP_SMI_VALUE(b));
 }
 
-RAP_Value RAP_integer_subtract(RAP_Value a, RAP_Value b) {
+inline RAP_Value RAP_integer_subtract(RAP_Value a, RAP_Value b) {
   return RAP_create_int_obj(RAP_SMI_VALUE(a) - RAP_SMI_VALUE(b));
 }
 
-RAP_Value RAP_integer_multiply(RAP_Value a, RAP_Value b) {
+inline RAP_Value RAP_integer_multiply(RAP_Value a, RAP_Value b) {
   return RAP_create_int_obj(RAP_SMI_VALUE(a) * RAP_SMI_VALUE(b));
 }
 
@@ -47,40 +47,40 @@ RAP_Value RAP_integer_divide(RAP_Value a, RAP_Value b) {
 
 // Float operations
 
-RAP_Value RAP_float_less_than(RAP_Value a, RAP_Value b) {
-  return RAP_create_logical_obj(RAP_DOUBLE_VALUE(a) < RAP_DOUBLE_VALUE(b));
+inline RAP_Value RAP_float_less_than(RAP_Value a, RAP_Value b) {
+  return RAP_create_logical_obj(RAP_GET_FLOAT_VAL(a) < RAP_GET_FLOAT_VAL(b));
 }
 
-RAP_Value RAP_float_greater_than(RAP_Value a, RAP_Value b) {
-  return RAP_create_logical_obj(RAP_DOUBLE_VALUE(a) > RAP_DOUBLE_VALUE(b));
+inline RAP_Value RAP_float_greater_than(RAP_Value a, RAP_Value b) {
+  return RAP_create_logical_obj(RAP_GET_FLOAT_VAL(a) > RAP_GET_FLOAT_VAL(b));
 }
 
-RAP_Value RAP_float_equal(RAP_Value a, RAP_Value b) {
-  return RAP_create_logical_obj(RAP_DOUBLE_VALUE(a) == RAP_DOUBLE_VALUE(b));
+inline RAP_Value RAP_float_equal(RAP_Value a, RAP_Value b) {
+  return RAP_create_logical_obj(RAP_GET_FLOAT_VAL(a) == RAP_GET_FLOAT_VAL(b));
 }
 
-RAP_Value RAP_float_not_equal(RAP_Value a, RAP_Value b) {
-  return RAP_create_logical_obj(RAP_DOUBLE_VALUE(a) != RAP_DOUBLE_VALUE(b));
+inline RAP_Value RAP_float_not_equal(RAP_Value a, RAP_Value b) {
+  return RAP_create_logical_obj(RAP_GET_FLOAT_VAL(a) != RAP_GET_FLOAT_VAL(b));
 }
 
-RAP_Value RAP_float_add(RAP_Value a, RAP_Value b) {
-  return RAP_create_float_obj(RAP_DOUBLE_VALUE(a) + RAP_DOUBLE_VALUE(b));
+inline RAP_Value RAP_float_add(RAP_Value a, RAP_Value b) {
+  return RAP_create_float_obj(RAP_GET_FLOAT_VAL(a) + RAP_GET_FLOAT_VAL(b));
 }
 
-RAP_Value RAP_float_subtract(RAP_Value a, RAP_Value b) {
-  return RAP_create_float_obj(RAP_DOUBLE_VALUE(a) - RAP_DOUBLE_VALUE(b));
+inline RAP_Value RAP_float_subtract(RAP_Value a, RAP_Value b) {
+  return RAP_create_float_obj(RAP_GET_FLOAT_VAL(a) - RAP_GET_FLOAT_VAL(b));
 }
 
-RAP_Value RAP_float_multiply(RAP_Value a, RAP_Value b) {
-  return RAP_create_float_obj(RAP_DOUBLE_VALUE(a) * RAP_DOUBLE_VALUE(b));
+inline RAP_Value RAP_float_multiply(RAP_Value a, RAP_Value b) {
+  return RAP_create_float_obj(RAP_GET_FLOAT_VAL(a) * RAP_GET_FLOAT_VAL(b));
 }
 
-RAP_Value RAP_float_divide(RAP_Value a, RAP_Value b) {
-  return RAP_create_float_obj(RAP_DOUBLE_VALUE(a) / RAP_DOUBLE_VALUE(b));
+inline RAP_Value RAP_float_divide(RAP_Value a, RAP_Value b) {
+  return RAP_create_float_obj(RAP_GET_FLOAT_VAL(a) / RAP_GET_FLOAT_VAL(b));
 }
 
-RAP_Value RAP_float_modulo(RAP_Value a, RAP_Value b) {
-  return RAP_create_float_obj(fmod(RAP_DOUBLE_VALUE(a), RAP_DOUBLE_VALUE(b)));
+inline RAP_Value RAP_float_modulo(RAP_Value a, RAP_Value b) {
+  return RAP_create_float_obj(fmod(RAP_GET_FLOAT_VAL(a), RAP_GET_FLOAT_VAL(b)));
 }
 
 // Generic operations
@@ -88,7 +88,7 @@ RAP_Value RAP_float_modulo(RAP_Value a, RAP_Value b) {
 RAP_Value RAP_add(RAP_Value a, RAP_Value b) {
   if (RAP_IS_SMI(a) && RAP_IS_SMI(b)) {
     return RAP_integer_add(a, b);
-  } else if (RAP_IS_DOUBLE(a) && RAP_IS_DOUBLE(b)) {
+  } else if (RAP_IS_FLOAT(a) && RAP_IS_FLOAT(b)) {
     return RAP_float_add(a, b);
   }
 
@@ -96,14 +96,13 @@ RAP_Value RAP_add(RAP_Value a, RAP_Value b) {
   RAP_Object *b_ptr = RAP_PTR_VALUE(b);
 
   // TUPLE APPEND
-  if (a_ptr->tag == RAP_OBJECT_TAG_TUPLE &&
-      b_ptr->tag == RAP_OBJECT_TAG_TUPLE) {
+  if (RAP_IS_TUPLE(a) && RAP_IS_TUPLE(b)) {
     return RAP_append_tuple(a_ptr, b_ptr);
   }
   // TEXT CONCAT
-  if (a_ptr->tag == RAP_OBJECT_TAG_TEXT && b_ptr->tag == RAP_OBJECT_TAG_TEXT) {
-    struct RAP_Tuple *at = RAP_get_text_val(a_ptr);
-    struct RAP_Tuple *bt = RAP_get_text_val(b_ptr);
+  if (RAP_IS_TEXT(a) && RAP_IS_TEXT(b)) {
+    struct RAP_Tuple *at = a_ptr->text_val;
+    struct RAP_Tuple *bt = b_ptr->text_val;
     uint32_t new_count = at->count + bt->count;
     RAP_Value *items = malloc(new_count * sizeof(RAP_Value));
     for (uint32_t i = 0; i < at->count; i++) {
@@ -131,7 +130,7 @@ RAP_Value RAP_add(RAP_Value a, RAP_Value b) {
 RAP_Value RAP_subtract(RAP_Value a, RAP_Value b) {
   if (RAP_IS_SMI(a) && RAP_IS_SMI(b)) {
     return RAP_integer_subtract(a, b);
-  } else if (RAP_IS_DOUBLE(a) && RAP_IS_DOUBLE(b)) {
+  } else if (RAP_IS_FLOAT(a) && RAP_IS_FLOAT(b)) {
     return RAP_float_subtract(a, b);
   }
   RAP_fatal_error("Неподдерживаемые типы для вычитания");
@@ -140,22 +139,20 @@ RAP_Value RAP_subtract(RAP_Value a, RAP_Value b) {
 RAP_Value RAP_multiply(RAP_Value a, RAP_Value b) {
   if (RAP_IS_SMI(a) && RAP_IS_SMI(b)) {
     return RAP_integer_multiply(a, b);
-  } else if (RAP_IS_DOUBLE(a) && RAP_IS_DOUBLE(b)) {
+  } else if (RAP_IS_FLOAT(a) && RAP_IS_FLOAT(b)) {
     return RAP_float_multiply(a, b);
-  } else if (RAP_IS_DOUBLE(a) && RAP_IS_SMI(b)) {
-    RAP_Value b_as_double = RAP_create_float_obj(RAP_SMI_VALUE(b));
-    RAP_Value res = RAP_float_multiply(a, b_as_double);
-    RAP_free_object(RAP_PTR_VALUE(b_as_double)); // avoid leaking memory for temporary cast value
+  } else if (RAP_IS_FLOAT(a) && RAP_IS_SMI(b)) {
+    RAP_Value res =
+        RAP_create_float_obj(RAP_GET_FLOAT_VAL(a) * (double)RAP_SMI_VALUE(b));
     return res;
-  } else if (RAP_IS_SMI(a) && RAP_IS_DOUBLE(b)) {
-    RAP_Value a_as_double = RAP_create_float_obj(RAP_SMI_VALUE(a));
-    RAP_Value res = RAP_float_multiply(a_as_double, b);
-    RAP_free_object(RAP_PTR_VALUE(a_as_double)); // avoid leaking memory for temporary cast value
+  } else if (RAP_IS_SMI(a) && RAP_IS_FLOAT(b)) {
+    RAP_Value res =
+        RAP_create_float_obj(RAP_GET_FLOAT_VAL(b) * (double)RAP_SMI_VALUE(a));
     return res;
   }
 
   // Tuple repeat: tuple * int
-  if (RAP_IS_PTR(a) && RAP_PTR_VALUE(a)->tag == RAP_OBJECT_TAG_TUPLE && RAP_IS_SMI(b)) {
+  if (RAP_IS_TUPLE(a) && RAP_IS_SMI(b)) {
     RAP_Object *a_ptr = RAP_PTR_VALUE(a);
     int64_t n = RAP_SMI_VALUE(b);
     if (n <= 0)
@@ -177,15 +174,15 @@ RAP_Value RAP_multiply(RAP_Value a, RAP_Value b) {
   // Text repeat: text * int or int * text
   RAP_Object *text_obj = NULL;
   int64_t repeat_n = 0;
-  if (RAP_IS_PTR(a) && RAP_PTR_VALUE(a)->tag == RAP_OBJECT_TAG_TEXT && RAP_IS_SMI(b)) {
+  if (RAP_IS_TEXT(a) && RAP_IS_SMI(b)) {
     text_obj = RAP_PTR_VALUE(a);
     repeat_n = RAP_SMI_VALUE(b);
-  } else if (RAP_IS_SMI(a) && RAP_IS_PTR(b) && RAP_PTR_VALUE(b)->tag == RAP_OBJECT_TAG_TEXT) {
+  } else if (RAP_IS_SMI(a) && RAP_IS_TEXT(b)) {
     text_obj = RAP_PTR_VALUE(b);
     repeat_n = RAP_SMI_VALUE(a);
   }
   if (text_obj) {
-    struct RAP_Tuple *src = RAP_get_text_val(text_obj);
+    struct RAP_Tuple *src = text_obj->text_val;
     if (repeat_n <= 0 || src->count == 0) {
       return RAP_create_text_obj("");
     }
@@ -217,15 +214,16 @@ RAP_Value RAP_divide(RAP_Value a, RAP_Value b) {
       return RAP_create_int_obj(av / bv);
     }
     return RAP_create_float_obj((double)av / (double)bv);
-  } else if (RAP_IS_DOUBLE(a)) {
+  } else if (RAP_IS_FLOAT(a)) {
     if (RAP_IS_SMI(b)) {
-      return RAP_create_float_obj(RAP_DOUBLE_VALUE(a) /
+      return RAP_create_float_obj(RAP_GET_FLOAT_VAL(a) /
                                   (double)RAP_SMI_VALUE(b));
-    } else if (RAP_IS_DOUBLE(b)) {
+    } else if (RAP_IS_FLOAT(b)) {
       return RAP_float_divide(a, b);
     }
-  } else if (RAP_IS_SMI(a) && RAP_IS_DOUBLE(b)) {
-    return RAP_create_float_obj((double)RAP_SMI_VALUE(a) / RAP_DOUBLE_VALUE(b));
+  } else if (RAP_IS_SMI(a) && RAP_IS_FLOAT(b)) {
+    return RAP_create_float_obj((double)RAP_SMI_VALUE(a) /
+                                RAP_GET_FLOAT_VAL(b));
   }
   RAP_fatal_error("Неподдерживаемые типы для деления");
 }
@@ -233,7 +231,7 @@ RAP_Value RAP_divide(RAP_Value a, RAP_Value b) {
 RAP_Value RAP_less_than(RAP_Value a, RAP_Value b) {
   if (RAP_IS_SMI(a) && RAP_IS_SMI(b)) {
     return RAP_integer_less_than(a, b);
-  } else if (RAP_IS_DOUBLE(a) && RAP_IS_DOUBLE(b)) {
+  } else if (RAP_IS_FLOAT(a) && RAP_IS_FLOAT(b)) {
     return RAP_float_less_than(a, b);
   }
   RAP_fatal_error("Неподдерживаемые типы для сравнения");
@@ -242,8 +240,8 @@ RAP_Value RAP_less_than(RAP_Value a, RAP_Value b) {
 RAP_Value RAP_less_or_equal(RAP_Value a, RAP_Value b) {
   if (RAP_IS_SMI(a) && RAP_IS_SMI(b)) {
     return RAP_create_logical_obj(RAP_SMI_VALUE(a) <= RAP_SMI_VALUE(b));
-  } else if (RAP_IS_DOUBLE(a) && RAP_IS_DOUBLE(b)) {
-    return RAP_create_logical_obj(RAP_DOUBLE_VALUE(a) <= RAP_DOUBLE_VALUE(b));
+  } else if (RAP_IS_FLOAT(a) && RAP_IS_FLOAT(b)) {
+    return RAP_create_logical_obj(RAP_GET_FLOAT_VAL(a) <= RAP_GET_FLOAT_VAL(b));
   }
   RAP_fatal_error("Неподдерживаемые типы для сравнения");
 }
@@ -251,7 +249,7 @@ RAP_Value RAP_less_or_equal(RAP_Value a, RAP_Value b) {
 RAP_Value RAP_greater_than(RAP_Value a, RAP_Value b) {
   if (RAP_IS_SMI(a) && RAP_IS_SMI(b)) {
     return RAP_integer_greater_than(a, b);
-  } else if (RAP_IS_DOUBLE(a) && RAP_IS_DOUBLE(b)) {
+  } else if (RAP_IS_FLOAT(a) && RAP_IS_FLOAT(b)) {
     return RAP_float_greater_than(a, b);
   }
   RAP_fatal_error("Неподдерживаемые типы для сравнения");
@@ -260,8 +258,8 @@ RAP_Value RAP_greater_than(RAP_Value a, RAP_Value b) {
 RAP_Value RAP_greater_or_equal(RAP_Value a, RAP_Value b) {
   if (RAP_IS_SMI(a) && RAP_IS_SMI(b)) {
     return RAP_create_logical_obj(RAP_SMI_VALUE(a) >= RAP_SMI_VALUE(b));
-  } else if (RAP_IS_DOUBLE(a) && RAP_IS_DOUBLE(b)) {
-    return RAP_create_logical_obj(RAP_DOUBLE_VALUE(a) >= RAP_DOUBLE_VALUE(b));
+  } else if (RAP_IS_FLOAT(a) && RAP_IS_FLOAT(b)) {
+    return RAP_create_logical_obj(RAP_GET_FLOAT_VAL(a) >= RAP_GET_FLOAT_VAL(b));
   }
   RAP_fatal_error("Неподдерживаемые типы для сравнения");
 }
@@ -273,12 +271,11 @@ RAP_Value RAP_equal(RAP_Value a, RAP_Value b) {
 
   if (RAP_IS_SMI(a) && RAP_IS_SMI(b)) {
     return RAP_integer_equal(a, b);
-  } else if (RAP_IS_DOUBLE(a) && RAP_IS_DOUBLE(b)) {
+  } else if (RAP_IS_FLOAT(a) && RAP_IS_FLOAT(b)) {
     return RAP_float_equal(a, b);
-  } else if (RAP_IS_PTR(a) && RAP_PTR_VALUE(a)->tag == RAP_OBJECT_TAG_TEXT &&
-             RAP_IS_PTR(b) && RAP_PTR_VALUE(b)->tag == RAP_OBJECT_TAG_TEXT) {
-    struct RAP_Tuple *at = RAP_get_text_val(RAP_PTR_VALUE(a));
-    struct RAP_Tuple *bt = RAP_get_text_val(RAP_PTR_VALUE(b));
+  } else if (RAP_IS_TEXT(a) && RAP_IS_TEXT(b)) {
+    struct RAP_Tuple *at = RAP_GET_TEXT_VAL(a);
+    struct RAP_Tuple *bt = RAP_GET_TEXT_VAL(b);
     if (at->count != bt->count)
       return RAP_create_logical_obj(false);
     for (uint32_t i = 0; i < at->count; i++) {
@@ -286,15 +283,11 @@ RAP_Value RAP_equal(RAP_Value a, RAP_Value b) {
         return RAP_create_logical_obj(false);
     }
     return RAP_create_logical_obj(true);
-  } else if (RAP_IS_PTR(a) && RAP_PTR_VALUE(a)->tag == RAP_OBJECT_TAG_NULL &&
-             RAP_IS_PTR(b) && RAP_PTR_VALUE(b)->tag == RAP_OBJECT_TAG_NULL) {
+  } else if (RAP_IS_NULL(a) && RAP_IS_NULL(b)) {
     return RAP_create_logical_obj(true);
-  } else if (RAP_IS_PTR(a) && RAP_PTR_VALUE(a)->tag == RAP_OBJECT_TAG_LOGICAL &&
-             RAP_IS_PTR(b) && RAP_PTR_VALUE(b)->tag == RAP_OBJECT_TAG_LOGICAL) {
-    return RAP_create_logical_obj(RAP_PTR_VALUE(a)->logical_val ==
-                                  RAP_PTR_VALUE(b)->logical_val);
-  } else if (RAP_IS_PTR(a) && RAP_PTR_VALUE(a)->tag == RAP_OBJECT_TAG_TUPLE &&
-             RAP_IS_PTR(b) && RAP_PTR_VALUE(b)->tag == RAP_OBJECT_TAG_TUPLE) {
+  } else if (RAP_IS_BOOL(a) && RAP_IS_BOOL(b)) {
+    return RAP_create_logical_obj(RAP_BOOL_VALUE(a) == RAP_BOOL_VALUE(b));
+  } else if (RAP_IS_TUPLE(a) && RAP_IS_TUPLE(b)) {
     if (RAP_PTR_VALUE(a)->tuple_val->count !=
         RAP_PTR_VALUE(b)->tuple_val->count) {
       return RAP_create_logical_obj(false);
@@ -326,45 +319,44 @@ RAP_Value RAP_modulo(RAP_Value a, RAP_Value b) {
 RAP_Value RAP_negate(RAP_Value a) {
   if (RAP_IS_SMI(a)) {
     return RAP_create_int_obj(-1 * RAP_SMI_VALUE(a));
-  } else if (RAP_IS_DOUBLE(a)) {
-    return RAP_create_float_obj(-1.0 * RAP_DOUBLE_VALUE(a));
+  } else if (RAP_IS_FLOAT(a)) {
+    return RAP_create_float_obj(-1.0 * RAP_GET_FLOAT_VAL(a));
   }
   RAP_fatal_error("Неподдерживаемые типы для отрицания");
 }
 
 RAP_Value RAP_length(RAP_Value a) {
   // Text stores one codepoint per item, so count == character length
-  if (RAP_IS_PTR(a) && RAP_PTR_VALUE(a)->tag == RAP_OBJECT_TAG_TEXT) {
-    return RAP_create_int_obj(RAP_get_text_val(RAP_PTR_VALUE(a))->count);
+  if (RAP_IS_TEXT(a)) {
+    return RAP_create_int_obj(RAP_GET_TEXT_VAL(a)->count);
   }
-  if (RAP_IS_PTR(a) && RAP_PTR_VALUE(a)->tag == RAP_OBJECT_TAG_TUPLE) {
-    return RAP_create_int_obj(RAP_get_tuple_val(RAP_PTR_VALUE(a))->count);
+  if (RAP_IS_TUPLE(a)) {
+    return RAP_create_int_obj(RAP_GET_TUPLE_VAL(a)->count);
   }
-  if (RAP_IS_PTR(a) && RAP_PTR_VALUE(a)->tag == RAP_OBJECT_TAG_SLICE) {
-    return RAP_create_int_obj(RAP_PTR_VALUE(a)->slice_val->to - RAP_PTR_VALUE(a)->slice_val->from);
+  if (RAP_IS_SLICE(a)) {
+    return RAP_create_int_obj(RAP_GET_SLICE_VAL(a)->to -
+                              RAP_GET_SLICE_VAL(a)->from);
   }
   RAP_fatal_error("Неподдерживаемые типы для длины");
 }
 
 RAP_Value RAP_power(RAP_Value a, RAP_Value b) {
-  bool result_is_float =
-      RAP_IS_DOUBLE(a) || RAP_IS_DOUBLE(b);
-  if (!RAP_IS_SMI(b) && !RAP_IS_DOUBLE(b)) {
+  bool result_is_float = RAP_IS_FLOAT(a) || RAP_IS_FLOAT(b);
+  if (!RAP_IS_SMI(b) && !RAP_IS_FLOAT(b)) {
     RAP_fatal_error("Неподдерживаемые типы для возведения в степень");
   }
-  double power_value =
-      RAP_IS_SMI(b) ? RAP_SMI_VALUE(b) : RAP_DOUBLE_VALUE(b);
+  double power_value = RAP_IS_SMI(b) ? RAP_SMI_VALUE(b) : RAP_GET_FLOAT_VAL(b);
   if (RAP_IS_SMI(a)) {
     if (result_is_float) {
       return RAP_create_float_obj(pow(RAP_SMI_VALUE(a), power_value));
     } else {
       return RAP_create_int_obj(pow(RAP_SMI_VALUE(a), power_value));
     }
-  } else if (RAP_IS_DOUBLE(a)) {
+  } else if (RAP_IS_FLOAT(a)) {
     if (result_is_float) {
-      return RAP_create_float_obj(pow(RAP_DOUBLE_VALUE(a), power_value));
+      return RAP_create_float_obj(pow(RAP_GET_FLOAT_VAL(a), power_value));
     } else {
-      return RAP_create_int_obj(pow(RAP_DOUBLE_VALUE(a), power_value));
+      return RAP_create_int_obj(pow(RAP_GET_FLOAT_VAL(a), power_value));
     }
   }
 

@@ -8,8 +8,11 @@
   чужие: ЗНАЧЕНИЕ
   вывод: ЗНАЧЕНИЕ
 
-ЗНАЧЕНИЕ := 42
-вызов ПЕЧАТАЕТ_ВНЕШНЕЕ()
+проц чек1()
+    ЗНАЧЕНИЕ := 42
+    вызов ПЕЧАТАЕТ_ВНЕШНЕЕ()
+
+чек1()
 \ => 42
 
 \ --- without чужие: the name is local, defaults to пусто ---
@@ -24,10 +27,18 @@
   чужие: X
   X := X * 2
 
-X := 5
-вызов УДВАИВАЕТ()
-вывод: X
+\ чужие usage from top-level is forbidden
+проц ЧУЖ()
+  X := 5
+  вызов УДВАИВАЕТ()
+  возврат X
+
+X := 0
+вывод: ЧУЖ()
 \ => 10
+вывод: X
+\ => 0
+\ top-level X is not affected, forbidden usage of foreign args
 
 \ --- dynamic (not lexical): lookup goes up the call chain ---
 \ ВНЕШНЯЯ sets СЧЁТЧИК, calls СРЕДНЯЯ, which calls ВНУТРЕННЯЯ.

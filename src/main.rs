@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use clap::Parser;
+use rapira26::opt::deframe::DeframePass;
+use rapira26::opt::opt_pass::{OptimizationPassOpts, run_optimizations};
 
 #[derive(Parser)]
 #[command(name = "rapira26", about = "Rapira language compiler")]
@@ -33,6 +35,10 @@ struct Cli {
     /// Flags to be passed to C compiler
     #[arg(long)]
     cflags: Vec<String>,
+
+    /// Dump optimization passes debug info
+    #[arg(long)]
+    dump_opts: bool,
 }
 
 // TODO:
@@ -74,7 +80,7 @@ fn main() {
     let token_stream = rapira26::lexer::Lexer::new(&source);
     let parser = rapira26::parser::Parser::new(token_stream);
 
-    let program = match parser.parse_program() {
+    let mut program = match parser.parse_program() {
         Ok(program) => program,
         Err(error) => {
             eprintln!("parse error: {error}");
@@ -87,6 +93,20 @@ fn main() {
         return;
     }
 
+    // Apply optimizations
+    run_optimizations(
+        &mut program,
+        &[&DeframePass],
+        &OptimizationPassOpts {
+            dump: cli.dump_opts,
+        },
+    )
+    .unwrap_or_else(|error| {
+        eprintln!("Оптимизация не справилась: {error}");
+        std::process::exit(1);
+    });
+
+    // Run codegen
     let codegen = rapira26::codegen::Codegen::new().with_check_leaks(cli.check_leaks);
     let c_code = codegen.generate(&program);
 
