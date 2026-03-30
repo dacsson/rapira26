@@ -573,10 +573,12 @@ impl Codegen {
 
                 // Increment refcount when assigning from another variable (shared reference)
                 if let Expr::Name(_) = value.as_ref() {
-                    // Do not increment refcount if value is taken from frame,
-                    // since frame_get increments count on itself
+                    // Do not increment refcount if value is taken from frame OR if its a temp,
+                    // since frame_get increments count on itself and temps usually created with refcount=1
+                    // TODO: refactor, this is bad
                     if self.output.lines().last().is_some()
                         && !self.output.lines().last().unwrap().contains("frame_get")
+                        && !value_temp.contains("_t")
                     {
                         self.emit_line(&format!("RAP_inc_ref({});", value_temp));
                     }
@@ -641,7 +643,8 @@ impl Codegen {
                         ));
 
                         // Also incref inout pararms
-                        self.emit_line(&format!("RAP_inc_ref({});", val_temp));
+                        // frame_get already increfs (?)
+                        // self.emit_line(&format!("RAP_inc_ref({});", val_temp));
                     } else {
                         // Otherwise just use mangled name, since it is just a local
                         self.emit_line(&format!(
@@ -807,7 +810,7 @@ impl Codegen {
                 let mangled = self.mangle_name(name);
                 if self.is_var_in_scope(&mangled) {
                     // Parameter updates BOTH C local and frame
-                    self.emit_line(&format!("RAP_inc_ref({});", value_temp));
+                    // self.emit_line(&format!("RAP_inc_ref({});", value_temp)); // handled in caller
                     self.emit_line(&format!("{} = {};", mangled, value_temp));
                     // Variable needs saving in frame
                     if self.variables_need_saving.contains(name) {
@@ -1095,10 +1098,15 @@ impl Codegen {
             let cond_temp = self.emit_expression(cond_expr);
             self.emit_line(&format!("if (!RAP_BOOL_VALUE({})) {{", cond_temp));
             let temps = self.statement_temps.clone();
+            // Decref temps in condition body
             for temp in &temps {
                 self.emit_line(&format!("  RAP_dec_ref({});", temp));
             }
             self.emit_line("  break;}");
+            // We should also decref if we havent step into branch
+            for temp in &temps {
+                self.emit_line(&format!("RAP_dec_ref({});", temp));
+            }
             // self.flush_statement_temps(None);
             self.statement_temps = saved;
         }

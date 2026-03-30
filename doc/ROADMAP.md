@@ -67,8 +67,10 @@ Replace `RAP_Object*` with a tagged `uintptr_t` (V8-style). Lowest bit distingui
 - Reference counting
   - idk look at Perceus?
   - escape-analysis?
+  - Каунтер надо сделать гораздо меньше, хедер объекта у нас какой-то безумный
+  - Фикс залипания счётчика ссылок, переполнения каунтера
 
-### Step 5 - Errors tied to file source instead of C
+### Step 5 - Errors tied to file source instead of C and Semcheck
 If an error hapens emit source file line, not C error
 
 ### Step 6 - Add new features from big spec and change container syntax
@@ -100,17 +102,36 @@ We probably should change symbols `<` to use something more ergonomic for RU key
 - tuple: `(1, 2, 3)`
 - Sets: `(1; 1+1; <1, 5>)`
 
-### Step 7 — Optional type hints with flow typing
+### Step 7 - Semantic analysis
+
+possible errors to find (at this stage):
+- Passing InOut parameters from top-level
+- Requesting foreign vars from top-level
+- Indent/Dedent issues
+- Infinite or zero-effect loop check
+- Function call arity
+- Tuple bound checks (?)
+- Check for existence of requested "чужие" variables
+
+General semantic anal. idea:
+- Have N levels of checks/strictness/safety/...
+  - 1st if Prototyping, no type checking minimal semcheck
+  - 2nd is Refactoring, type checking for TYPED MODULES, check for unknown vars
+    - We should make a law, either a function where type hints occur must be typed for all variables, or same but for a whole module
+  - 3d is Safety, type checking, check for unknown and unititalized (?) vars, disables refcounting, enables manual memory handling (?)
+    - Maybe some sort of safety feature like borrow checking or whatever
+
+### Step 8 — Optional type hints with flow typing
 Leverage `тип_*` checks for static type narrowing. When the compiler can prove a variable's type from a guard (`если тип_цел(X) то ...`), emit direct typed operations instead of polymorphic dispatch. Optional type annotations on parameters and variables.
 
-### Step 8 — Module system
+### Step 9 — Module system
 Import/export mechanism for splitting programs across files. Spec §1.6 sketches modules and devices — design a modern take that supports namespacing and selective imports.
 
-### Step 9 — OOP / Object system
+### Step 10 — OOP / Object system
 User-defined object types with fields and methods. Design TBD — could be prototype-based (like Lua) or class-based.
 
-### Step 10 — Build system
+### Step 11 — Build system
 Project-level build tool: dependency resolution, multi-file compilation, incremental builds. Replaces manual `cargo run -- file.rap` workflow.
 
-### Step 11 — REPL mode
+### Step 12 — REPL mode
 Interactive line-by-line execution. Compile each input to a shared library, dlopen into a persistent process with a live frame. Accumulate definitions across inputs.
