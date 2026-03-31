@@ -600,6 +600,7 @@ impl Codegen {
                 arguments,
             } => {
                 // Collect in-out param info: (proc_param_name, caller_var_name)
+                // TODO: refactor, wtf is this
                 let inout_pairs: Vec<(String, String)> = if let Expr::Name(proc_name) =
                     procedure.as_ref()
                 {

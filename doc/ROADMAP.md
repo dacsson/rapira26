@@ -16,6 +16,7 @@ A complete, faithful implementation of the Rapira spec (Препринт 767) wi
 - **Builtins:** корень, абс, целый, длин, знак, целч, окрч, дсч, цсч, индекс, пс, пи
 - **Type checks:** тип_пуст, тип_лог, тип_цел, тип_вещ, тип_текст, тип_корт, тип_проц, тип_функ
 - **Text escaping:** `""` → literal `"`
+- **Automatic Reference counting** 
 
 ### Intentional Deviations
 
@@ -40,10 +41,6 @@ Runtime split into modules (`runtime/`):
 | `builtins.c` | Built-in math functions |
 | `io.c` | Input (ввод/ввод текста) |
 
-## Phase 1 — Remaining Work
-
-- **REPL mode:** Interactive line-by-line execution (see TODO in `src/main.rs`)
-
 ## Phase 2 — Modernization
 
 Revisit and extend the language with modern features. The spec will be rewritten to reflect these additions.
@@ -58,13 +55,13 @@ Add `refcount` field to `RAP_Object`. Increment on assignment/parameter pass, de
 ### ✓ Step 3 — SMI pointer tagging ✓
 Replace `RAP_Object*` with a tagged `uintptr_t` (V8-style). Lowest bit distinguishes SMI (Small Integer, bit 0 = 0, value = word >> 1) from heap pointer (bit 0 = 1, pointer = word & ~1). Integers — the most common type in loops, indexing, arithmetic — never touch the heap. Floats, text, tuples, callables remain heap-allocated with a type tag. Gives 63-bit integers, single-instruction type checks (`v & 1`), and free add/subtract without untagging.
 
-### Step 4 — Runtime optimization
+### ✓ Step 4 — Simple optimization ✓
 - Come up with a number of benchmarks 
 - Optimize bottleneckzzz:
   - Frame variable lookup: we can statically analyze when do we actually need to save a local variable in frame, i.e. do it _only if_ there is a function in CFG that uses it in `чужие` block
   - Forbid `чужие` usage from top-level
   - Experiment with mimalloc
-- Reference counting
+- Reference counting (PUSHED TO LATER, too hard m8 :c )
   - idk look at Perceus?
   - escape-analysis?
   - Каунтер надо сделать гораздо меньше, хедер объекта у нас какой-то безумный
