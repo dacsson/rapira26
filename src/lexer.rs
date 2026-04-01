@@ -89,14 +89,12 @@ pub enum Token {
     InputArrow,     // =>  (input parameter marker)
 
     // ── Punctuation ───────────────────────────────────────────────────────
-    LParen,     // (
-    RParen,     // )
-    LBracket,   // [
-    RBracket,   // ]
-    TupleOpen,  // <*
-    TupleClose, // *>
-    Colon,      // :
-    Comma,      // ,
+    LParen,   // (
+    RParen,   // )
+    LBracket, // [
+    RBracket, // ]
+    Colon,    // :
+    Comma,    // ,
 }
 
 impl std::fmt::Display for Token {
@@ -162,8 +160,6 @@ impl std::fmt::Display for Token {
             Token::RParen => write!(f, "`)`"),
             Token::LBracket => write!(f, "`[`"),
             Token::RBracket => write!(f, "`]`"),
-            Token::TupleOpen => write!(f, "`<*`"),
-            Token::TupleClose => write!(f, "`>*`"),
             Token::Colon => write!(f, "`:`"),
             Token::Comma => write!(f, "`,`"),
         }
@@ -661,18 +657,11 @@ impl<'input> Lexer<'input> {
                 if self.peek_char() == Some('*') {
                     self.advance();
                     Ok(Token::StarStar)
-                } else if self.peek_char() == Some('>') {
-                    self.advance();
-                    Ok(Token::TupleClose)
                 } else {
                     Ok(Token::Star)
                 }
             }
             '<' => match self.peek_char() {
-                Some('*') => {
-                    self.advance();
-                    Ok(Token::TupleOpen)
-                }
                 Some('=') => {
                     self.advance();
                     Ok(Token::LessOrEqual)
@@ -707,10 +696,10 @@ impl<'input> Lexer<'input> {
         // Track paren depth for delimiter nesting
         if let Ok(ref token) = token_result {
             match token {
-                Token::LParen | Token::LBracket | Token::TupleOpen => {
+                Token::LParen | Token::LBracket => {
                     self.paren_depth += 1;
                 }
-                Token::RParen | Token::RBracket | Token::TupleClose => {
+                Token::RParen | Token::RBracket => {
                     if self.paren_depth > 0 {
                         self.paren_depth -= 1;
                     }

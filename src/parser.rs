@@ -137,7 +137,6 @@ impl<'input> Parser<'input> {
                     | Token::KwПи
                     | Token::KwPi
                     | Token::LParen
-                    | Token::TupleOpen
                     | Token::Minus
                     | Token::Plus
                     | Token::Hash
@@ -1071,21 +1070,32 @@ impl<'input> Parser<'input> {
             }
             Some(Token::LParen) => {
                 self.advance();
+
+                // Empty tuple `()`
+                if self.peek() == Some(&Token::RParen) {
+                    self.advance();
+                    return Ok(Expr::TupleConstruct(vec![]));
+                }
+
                 let inner = self.parse_expression()?;
+
+                // Tuple case
+                // Note: single element tuples should be `(<el>,)` with comma
+                if self.peek() == Some(&Token::Comma) {
+                    self.advance();
+                    let mut elements = vec![Box::new(inner)];
+                    if self.peek() != Some(&Token::RParen) {
+                        elements.push(Box::new(self.parse_expression()?));
+                        while self.eat(&Token::Comma) {
+                            elements.push(Box::new(self.parse_expression()?));
+                        }
+                    }
+                    self.expect(&Token::RParen)?;
+                    return Ok(Expr::TupleConstruct(elements));
+                }
+
                 self.expect(&Token::RParen)?;
                 Ok(inner)
-            }
-            Some(Token::TupleOpen) => {
-                self.advance();
-                let mut elements = Vec::new();
-                if self.peek() != Some(&Token::TupleClose) {
-                    elements.push(Box::new(self.parse_expression()?));
-                    while self.eat(&Token::Comma) {
-                        elements.push(Box::new(self.parse_expression()?));
-                    }
-                }
-                self.expect(&Token::TupleClose)?;
-                Ok(Expr::TupleConstruct(elements))
             }
             Some(_) => {
                 let (position_start, found, position_end) = self.current.as_ref().unwrap();

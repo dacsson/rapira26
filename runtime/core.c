@@ -186,11 +186,11 @@ char *RAP_stringify_object(RAP_Value obj) {
   }
   case RAP_OBJECT_TAG_TUPLE: {
     if (obj_ptr->tuple_val->count == 0) {
-      return strdup("<* *>");
+      return strdup("( )");
     }
     size_t len = 0, cap = 0;
     char *buf = NULL;
-    buf = rap_strbuf_append(buf, &len, &cap, "<* ");
+    buf = rap_strbuf_append(buf, &len, &cap, "( ");
     for (uint32_t i = 0; i < obj_ptr->tuple_val->count; i++) {
       if (i > 0) {
         buf = rap_strbuf_append(buf, &len, &cap, ", ");
@@ -199,7 +199,7 @@ char *RAP_stringify_object(RAP_Value obj) {
       buf = rap_strbuf_append(buf, &len, &cap, item_str);
       free(item_str);
     }
-    buf = rap_strbuf_append(buf, &len, &cap, " *>");
+    buf = rap_strbuf_append(buf, &len, &cap, " )");
     return buf;
   }
   case RAP_OBJECT_TAG_SLICE: {
