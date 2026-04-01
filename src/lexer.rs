@@ -20,7 +20,6 @@ pub enum Token {
     KwЕсли,   // если
     KwТо,     // то
     KwИначе,  // иначе
-    KwВсе,    // все     (legacy, kept for error messages)
     KwВыбор,  // выбор
     KwПри,    // при
     KwДля,    // для
@@ -30,14 +29,12 @@ pub enum Token {
     KwПока,   // пока
     KwПовтор, // повтор
     KwЦикл,   // цикл
-    KwКц,     // кц      (legacy, kept for error messages)
     KwПо,     // по
     KwВыход,  // выход
 
     // Definitions
     KwПроц,    // проц
     KwФунк,    // функ
-    KwКонец,   // конец   (legacy, kept for error messages)
     KwВозврат, // возврат
     KwЧужие,   // чужие
     KwСвои,    // свои
@@ -102,6 +99,77 @@ pub enum Token {
     Comma,      // ,
 }
 
+impl std::fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Token::KwЕсли => write!(f, "если"),
+            Token::KwТо => write!(f, "то"),
+            Token::KwИначе => write!(f, "иначе"),
+            Token::KwВыбор => write!(f, "выбор"),
+            Token::KwПри => write!(f, "при"),
+            Token::KwДля => write!(f, "для"),
+            Token::KwОт => write!(f, "от"),
+            Token::KwДо => write!(f, "до"),
+            Token::KwШаг => write!(f, "шаг"),
+            Token::KwПока => write!(f, "пока"),
+            Token::KwПовтор => write!(f, "повтор"),
+            Token::KwЦикл => write!(f, "цикл"),
+            Token::KwПо => write!(f, "по"),
+            Token::KwВыход => write!(f, "выход"),
+            Token::KwПроц => write!(f, "проц"),
+            Token::KwФунк => write!(f, "функ"),
+            Token::KwВозврат => write!(f, "возврат"),
+            Token::KwЧужие => write!(f, "чужие"),
+            Token::KwСвои => write!(f, "свои"),
+            Token::KwВывод => write!(f, "вывод"),
+            Token::KwВвод => write!(f, "ввод"),
+            Token::KwБпс => write!(f, "бпс"),
+            Token::KwТекста => write!(f, "текста"),
+            Token::KwВызов => write!(f, "вызов"),
+            Token::KwИ => write!(f, "и"),
+            Token::KwИли => write!(f, "или"),
+            Token::KwНе => write!(f, "не"),
+            Token::KwПусто => write!(f, "пусто"),
+            Token::KwДа => write!(f, "да"),
+            Token::KwНет => write!(f, "нет"),
+            Token::KwПс => write!(f, "пс"),
+            Token::KwПи => write!(f, "пи"),
+            Token::KwPi => write!(f, "pi"),
+            Token::Newline => write!(f, "переход на новую строку"),
+            Token::Indent => write!(f, "просто отступ"),
+            Token::Dedent => write!(f, "отступ на один уровень меньше предыдущего"),
+            Token::Ident(_) => write!(f, "идентификатор"),
+            Token::Integer(_) => write!(f, "целое число"),
+            Token::Real(_) => write!(f, "вещественное число"),
+            Token::Text(_) => write!(f, "текст"),
+            Token::StarStar => write!(f, "возведение в степень ( `**` )"),
+            Token::Star => write!(f, "умножение ( `*` )"),
+            Token::SlashSlash => write!(f, "деление ( `//` )"),
+            Token::SlashPercent => write!(f, "модуль ( `/%` )"),
+            Token::Slash => write!(f, "деление ( `/` )"),
+            Token::Plus => write!(f, "сложение ( `+` )"),
+            Token::Minus => write!(f, "минус ( `-` )"),
+            Token::Hash => write!(f, "получение длины контейнера ( `#` )"),
+            Token::Assign => write!(f, "присваивание ( `:=` )"),
+            Token::Equal => write!(f, "проверка на равенствно ( `=` )"),
+            Token::NotEqual => write!(f, "неравенство ( `/=` )"),
+            Token::LessOrEqual => write!(f, "`<="),
+            Token::GreaterOrEqual => write!(f, "`>=`"),
+            Token::Less => write!(f, "`<`"),
+            Token::Greater => write!(f, "`>`"),
+            Token::InputArrow => write!(f, "`=>`"),
+            Token::LParen => write!(f, "`(`"),
+            Token::RParen => write!(f, "`)`"),
+            Token::LBracket => write!(f, "`[`"),
+            Token::RBracket => write!(f, "`]`"),
+            Token::TupleOpen => write!(f, "`<*`"),
+            Token::TupleClose => write!(f, "`>*`"),
+            Token::Colon => write!(f, "`:`"),
+            Token::Comma => write!(f, "`,`"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexerError {
     pub position: usize,
@@ -110,11 +178,7 @@ pub struct LexerError {
 
 impl std::fmt::Display for LexerError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "lexer error at byte {}: {}",
-            self.position, self.message
-        )
+        write!(formatter, "{}", self.message)
     }
 }
 
@@ -326,7 +390,6 @@ impl<'input> Lexer<'input> {
             "если" => Token::KwЕсли,
             "то" => Token::KwТо,
             "иначе" => Token::KwИначе,
-            "все" => Token::KwВсе,
             "выбор" => Token::KwВыбор,
             "при" => Token::KwПри,
             "для" => Token::KwДля,
@@ -336,12 +399,10 @@ impl<'input> Lexer<'input> {
             "пока" => Token::KwПока,
             "повтор" => Token::KwПовтор,
             "цикл" => Token::KwЦикл,
-            "кц" => Token::KwКц,
             "по" => Token::KwПо,
             "выход" => Token::KwВыход,
             "проц" => Token::KwПроц,
             "функ" => Token::KwФунк,
-            "конец" => Token::KwКонец,
             "возврат" => Token::KwВозврат,
             "чужие" => Token::KwЧужие,
             "свои" => Token::KwСвои,

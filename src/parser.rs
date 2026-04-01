@@ -19,34 +19,14 @@ use crate::lexer::{Lexer, LexerError, Token};
 pub enum ParseError {
     LexerError(LexerError),
     UnexpectedToken {
-        position: usize,
+        position_start: usize,
+        position_end: usize,
         found: Token,
         expected: String,
     },
     UnexpectedEof {
         expected: String,
     },
-}
-
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParseError::LexerError(error) => write!(formatter, "{error}"),
-            ParseError::UnexpectedToken {
-                position,
-                found,
-                expected,
-            } => {
-                write!(
-                    formatter,
-                    "at byte {position}: expected {expected}, found {found:?}"
-                )
-            }
-            ParseError::UnexpectedEof { expected } => {
-                write!(formatter, "unexpected end of input, expected {expected}")
-            }
-        }
-    }
 }
 
 pub struct Parser<'input> {
@@ -80,11 +60,11 @@ impl<'input> Parser<'input> {
         self.current.as_ref().map(|(_, token, _)| token)
     }
 
-    fn position(&self) -> usize {
+    fn positions(&self) -> (usize, usize) {
         self.current
             .as_ref()
-            .map(|(position, _, _)| *position)
-            .unwrap_or(0)
+            .map(|(st, _, end)| (*st, *end))
+            .unwrap_or((0, 0))
     }
 
     fn eat(&mut self, expected: &Token) -> bool {
@@ -101,13 +81,14 @@ impl<'input> Parser<'input> {
             Ok(self.advance().unwrap())
         } else {
             match &self.current {
-                Some((position, found, _)) => Err(ParseError::UnexpectedToken {
-                    position: *position,
+                Some((position_start, found, position_end)) => Err(ParseError::UnexpectedToken {
+                    position_start: *position_start,
+                    position_end: *position_end,
                     found: found.clone(),
-                    expected: format!("{expected:?}"),
+                    expected: format!("{expected}"),
                 }),
                 None => Err(ParseError::UnexpectedEof {
-                    expected: format!("{expected:?}"),
+                    expected: format!("{expected}"),
                 }),
             }
         }
@@ -123,11 +104,12 @@ impl<'input> Parser<'input> {
                 }
             }
             Some(_) => {
-                let (position, found, _) = self.current.as_ref().unwrap();
+                let (position_start, found, position_end) = self.current.as_ref().unwrap();
                 Err(ParseError::UnexpectedToken {
-                    position: *position,
+                    position_start: *position_start,
+                    position_end: *position_end,
                     found: found.clone(),
-                    expected: "identifier".to_string(),
+                    expected: "индентификатор".to_string(),
                 })
             }
             None => Err(ParseError::UnexpectedEof {
@@ -395,11 +377,13 @@ impl<'input> Parser<'input> {
             Some(Token::KwВызов) => self.parse_procedure_call_with_keyword(),
             Some(Token::Ident(_)) => self.parse_ident_statement(),
             Some(_) => {
-                let (position, found, _) = self.current.as_ref().unwrap();
+                let (position_start, found, position_end) = self.current.as_ref().unwrap();
                 Err(ParseError::UnexpectedToken {
-                    position: *position,
+                    position_start: *position_start,
+                    position_end: *position_end,
                     found: found.clone(),
-                    expected: "statement".to_string(),
+                    expected: "утверждение (функцию, процедуру, объявление переменной...)"
+                        .to_string(),
                 })
             }
             None => Err(ParseError::UnexpectedEof {
@@ -444,12 +428,13 @@ impl<'input> Parser<'input> {
                 })
             }
             other => {
-                let expected = "':=', '(', or '['".to_string();
+                let expected = "':=', '(', или '['".to_string();
                 match other {
                     Some(_) => {
-                        let (position, found, _) = self.current.as_ref().unwrap();
+                        let (position_start, found, position_end) = self.current.as_ref().unwrap();
                         Err(ParseError::UnexpectedToken {
-                            position: *position,
+                            position_start: *position_start,
+                            position_end: *position_end,
                             found: found.clone(),
                             expected,
                         })
@@ -589,7 +574,8 @@ impl<'input> Parser<'input> {
 
             // Shouldn't happen — выбор block should start with при
             return Err(ParseError::UnexpectedToken {
-                position: self.position(),
+                position_end: self.positions().0,
+                position_start: self.positions().1,
                 found: self.peek().cloned().unwrap_or(Token::Newline),
                 expected: "при".to_string(),
             });
@@ -1102,11 +1088,12 @@ impl<'input> Parser<'input> {
                 Ok(Expr::TupleConstruct(elements))
             }
             Some(_) => {
-                let (position, found, _) = self.current.as_ref().unwrap();
+                let (position_start, found, position_end) = self.current.as_ref().unwrap();
                 Err(ParseError::UnexpectedToken {
-                    position: *position,
+                    position_start: *position_start,
+                    position_end: *position_end,
                     found: found.clone(),
-                    expected: "expression".to_string(),
+                    expected: "выражение".to_string(),
                 })
             }
             None => Err(ParseError::UnexpectedEof {

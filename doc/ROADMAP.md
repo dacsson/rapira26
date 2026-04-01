@@ -61,7 +61,7 @@ Replace `RAP_Object*` with a tagged `uintptr_t` (V8-style). Lowest bit distingui
   - Frame variable lookup: we can statically analyze when do we actually need to save a local variable in frame, i.e. do it _only if_ there is a function in CFG that uses it in `чужие` block
   - Forbid `чужие` usage from top-level
   - Experiment with mimalloc
-- Reference counting (PUSHED TO LATER, too hard m8 :c )
+- Reference counting (==PUSHED TO LATER==, too hard m8 :c )
   - idk look at Perceus?
   - escape-analysis?
   - Каунтер надо сделать гораздо меньше, хедер объекта у нас какой-то безумный

@@ -5,6 +5,7 @@ use std::process::Command;
 use clap::Parser;
 use rapira26::opt::deframe::DeframePass;
 use rapira26::opt::opt_pass::{OptimizationPassOpts, run_optimizations};
+use rapira26::pretty::pretty_parse_error;
 
 #[derive(Parser)]
 #[command(name = "rapira26", about = "Rapira language compiler")]
@@ -83,7 +84,10 @@ fn main() {
     let mut program = match parser.parse_program() {
         Ok(program) => program,
         Err(error) => {
-            eprintln!("parse error: {error}");
+            eprintln!(
+                "{}",
+                pretty_parse_error(&source, cli.source.to_str().unwrap(), error)
+            );
             std::process::exit(1);
         }
     };
