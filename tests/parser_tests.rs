@@ -19,7 +19,7 @@ fn parse_first_statement(source: &str) -> Statement {
         "expected at least one program unit"
     );
     match program.units.into_iter().next().unwrap() {
-        ProgramUnit::Statement(statement) => statement,
+        ProgramUnit::Statement(statement) => statement.node,
         other => panic!("expected statement, got {other:?}"),
     }
 }
@@ -27,7 +27,7 @@ fn parse_first_statement(source: &str) -> Statement {
 fn parse_first_procedure(source: &str) -> ProcedureDefinition {
     let program = parse(source);
     match program.units.into_iter().next().unwrap() {
-        ProgramUnit::ProcedureDefinition(def) => def,
+        ProgramUnit::ProcedureDefinition(def) => def.node,
         other => panic!("expected procedure definition, got {other:?}"),
     }
 }
@@ -35,7 +35,7 @@ fn parse_first_procedure(source: &str) -> ProcedureDefinition {
 fn parse_first_function(source: &str) -> FunctionDefinition {
     let program = parse(source);
     match program.units.into_iter().next().unwrap() {
-        ProgramUnit::FunctionDefinition(def) => def,
+        ProgramUnit::FunctionDefinition(def) => def.node,
         other => panic!("expected function definition, got {other:?}"),
     }
 }
@@ -49,7 +49,10 @@ fn parse_output_integer() {
         Statement::Output { no_newline, values } => {
             assert!(!no_newline);
             assert_eq!(values.len(), 1);
-            assert!(matches!(*values[0], Expr::Literal(Literal::Integer(42))));
+            assert!(matches!(
+                values[0].node,
+                Expr::Literal(Literal::Integer(42))
+            ));
         }
         other => panic!("expected Output, got {other:?}"),
     }
@@ -61,7 +64,7 @@ fn parse_output_text() {
     match statement {
         Statement::Output { values, .. } => {
             assert_eq!(values.len(), 1);
-            match &*values[0] {
+            match &values[0].node {
                 Expr::Literal(Literal::Text(text)) => assert_eq!(text, "hello"),
                 other => panic!("expected text literal, got {other:?}"),
             }
@@ -76,9 +79,15 @@ fn parse_output_boolean_constants() {
     match statement {
         Statement::Output { values, .. } => {
             assert_eq!(values.len(), 3);
-            assert!(matches!(*values[0], Expr::Literal(Literal::Boolean(true))));
-            assert!(matches!(*values[1], Expr::Literal(Literal::Boolean(false))));
-            assert!(matches!(*values[2], Expr::Literal(Literal::Null)));
+            assert!(matches!(
+                &values[0].node,
+                Expr::Literal(Literal::Boolean(true))
+            ));
+            assert!(matches!(
+                &values[1].node,
+                Expr::Literal(Literal::Boolean(false))
+            ));
+            assert!(matches!(&values[2].node, Expr::Literal(Literal::Null)));
         }
         other => panic!("expected Output, got {other:?}"),
     }
@@ -108,15 +117,15 @@ fn parse_output_empty() {
 fn parse_binary_addition() {
     let statement = parse_first_statement("вывод: 1 + 2");
     match statement {
-        Statement::Output { values, .. } => match &*values[0] {
+        Statement::Output { values, .. } => match &values[0].node {
             Expr::BinaryOp {
                 operator,
                 left,
                 right,
             } => {
                 assert_eq!(*operator, BinaryOperator::Add);
-                assert!(matches!(**left, Expr::Literal(Literal::Integer(1))));
-                assert!(matches!(**right, Expr::Literal(Literal::Integer(2))));
+                assert!(matches!(&left.node, Expr::Literal(Literal::Integer(1))));
+                assert!(matches!(&right.node, Expr::Literal(Literal::Integer(2))));
             }
             other => panic!("expected BinaryOp, got {other:?}"),
         },
@@ -129,16 +138,16 @@ fn parse_operator_precedence_mul_over_add() {
     // 1 + 2 * 3 should parse as 1 + (2 * 3)
     let statement = parse_first_statement("вывод: 1 + 2 * 3");
     match statement {
-        Statement::Output { values, .. } => match &*values[0] {
+        Statement::Output { values, .. } => match &values[0].node {
             Expr::BinaryOp {
                 operator,
                 left,
                 right,
             } => {
                 assert_eq!(*operator, BinaryOperator::Add);
-                assert!(matches!(**left, Expr::Literal(Literal::Integer(1))));
+                assert!(matches!(&left.node, Expr::Literal(Literal::Integer(1))));
                 assert!(matches!(
-                    **right,
+                    &right.node,
                     Expr::BinaryOp {
                         operator: BinaryOperator::Multiply,
                         ..
@@ -156,15 +165,15 @@ fn parse_power_right_associative() {
     // 2 ** 3 ** 2 should parse as 2 ** (3 ** 2)
     let statement = parse_first_statement("вывод: 2 ** 3 ** 2");
     match statement {
-        Statement::Output { values, .. } => match &*values[0] {
+        Statement::Output { values, .. } => match &values[0].node {
             Expr::BinaryOp {
                 operator,
                 left,
                 right,
             } => {
                 assert_eq!(*operator, BinaryOperator::Power);
-                assert!(matches!(**left, Expr::Literal(Literal::Integer(2))));
-                match &**right {
+                assert!(matches!(&left.node, Expr::Literal(Literal::Integer(2))));
+                match &right.node {
                     Expr::BinaryOp { operator, .. } => assert_eq!(*operator, BinaryOperator::Power),
                     other => panic!("expected BinaryOp(Power), got {other:?}"),
                 }
@@ -181,7 +190,7 @@ fn parse_unary_negate() {
     match statement {
         Statement::Output { values, .. } => {
             assert!(matches!(
-                &*values[0],
+                &values[0].node,
                 Expr::UnaryOp {
                     operator: UnaryOperator::Negate,
                     ..
@@ -198,7 +207,7 @@ fn parse_length_operator() {
     match statement {
         Statement::Output { values, .. } => {
             assert!(matches!(
-                &*values[0],
+                &values[0].node,
                 Expr::UnaryOp {
                     operator: UnaryOperator::Length,
                     ..
@@ -216,7 +225,7 @@ fn parse_logical_operators() {
         Statement::Output { values, .. } => {
             // Should parse as (да и нет) или да
             assert!(matches!(
-                &*values[0],
+                &values[0].node,
                 Expr::BinaryOp {
                     operator: BinaryOperator::Or,
                     ..
@@ -233,7 +242,7 @@ fn parse_logical_not() {
     match statement {
         Statement::Output { values, .. } => {
             assert!(matches!(
-                &*values[0],
+                &values[0].node,
                 Expr::UnaryOp {
                     operator: UnaryOperator::Not,
                     ..
@@ -249,11 +258,11 @@ fn parse_parenthesised_expression() {
     // (1 + 2) * 3 — parens override precedence
     let statement = parse_first_statement("вывод: (1 + 2) * 3");
     match statement {
-        Statement::Output { values, .. } => match &*values[0] {
+        Statement::Output { values, .. } => match &values[0].node {
             Expr::BinaryOp { operator, left, .. } => {
                 assert_eq!(*operator, BinaryOperator::Multiply);
                 assert!(matches!(
-                    **left,
+                    &left.node,
                     Expr::BinaryOp {
                         operator: BinaryOperator::Add,
                         ..
@@ -273,8 +282,8 @@ fn parse_simple_assignment() {
     let statement = parse_first_statement("X := 42");
     match statement {
         Statement::Assignment { target, value } => {
-            assert!(matches!(target, LValue::Name(ref name) if name == "X"));
-            assert!(matches!(*value, Expr::Literal(Literal::Integer(42))));
+            assert!(matches!(&target.node, LValue::Name(name) if name == "X"));
+            assert!(matches!(&value.node, Expr::Literal(Literal::Integer(42))));
         }
         other => panic!("expected Assignment, got {other:?}"),
     }
@@ -285,7 +294,7 @@ fn parse_subscript_assignment() {
     let statement = parse_first_statement("X[1] := 5");
     match statement {
         Statement::Assignment { target, .. } => {
-            assert!(matches!(target, LValue::Subscript { .. }));
+            assert!(matches!(&target.node, LValue::Subscript { .. }));
         }
         other => panic!("expected Assignment, got {other:?}"),
     }
@@ -296,7 +305,7 @@ fn parse_slice_assignment() {
     let statement = parse_first_statement("X[1:3] := \"abc\"");
     match statement {
         Statement::Assignment { target, .. } => {
-            assert!(matches!(target, LValue::Slice { .. }));
+            assert!(matches!(&target.node, LValue::Slice { .. }));
         }
         other => panic!("expected Assignment, got {other:?}"),
     }
@@ -560,9 +569,9 @@ fn parse_function_with_params() {
 fn parse_return_from_procedure() {
     let proc_def = parse_first_procedure("проц ТЕСТ (N)\n  если N <= 0 то возврат\n  вывод: N");
     // возврат in procedure body should be ReturnFromProcedure
-    match &proc_def.body[0] {
+    match &proc_def.body[0].node {
         Statement::Conditional { then_body, .. } => {
-            assert!(matches!(&then_body[0], Statement::ReturnFromProcedure));
+            assert!(matches!(&then_body[0].node, Statement::ReturnFromProcedure));
         }
         other => panic!("expected Conditional, got {other:?}"),
     }
@@ -571,9 +580,9 @@ fn parse_return_from_procedure() {
 #[test]
 fn parse_return_from_function() {
     let func_def = parse_first_function("функ ОДИН ()\n  возврат 1");
-    match &func_def.body[0] {
+    match &func_def.body[0].node {
         Statement::ReturnFromFunction(expr) => {
-            assert!(matches!(**expr, Expr::Literal(Literal::Integer(1))));
+            assert!(matches!(&expr.node, Expr::Literal(Literal::Integer(1))));
         }
         other => panic!("expected ReturnFromFunction, got {other:?}"),
     }
@@ -586,7 +595,9 @@ fn parse_empty_tuple() {
     let statement = parse_first_statement("вывод: ()");
     match statement {
         Statement::Output { values, .. } => {
-            assert!(matches!(&*values[0], Expr::TupleConstruct(elements) if elements.is_empty()));
+            assert!(
+                matches!(&values[0].node, Expr::TupleConstruct(elements) if elements.is_empty())
+            );
         }
         other => panic!("expected Output, got {other:?}"),
     }
@@ -596,7 +607,7 @@ fn parse_empty_tuple() {
 fn parse_tuple_with_elements() {
     let statement = parse_first_statement("вывод: (1, 2, 3)");
     match statement {
-        Statement::Output { values, .. } => match &*values[0] {
+        Statement::Output { values, .. } => match &values[0].node {
             Expr::TupleConstruct(elements) => assert_eq!(elements.len(), 3),
             other => panic!("expected TupleConstruct, got {other:?}"),
         },
@@ -611,7 +622,7 @@ fn parse_subscript_expression() {
     let statement = parse_first_statement("вывод: X[1]");
     match statement {
         Statement::Output { values, .. } => {
-            assert!(matches!(&*values[0], Expr::Subscript { .. }));
+            assert!(matches!(&values[0].node, Expr::Subscript { .. }));
         }
         other => panic!("expected Output, got {other:?}"),
     }
@@ -622,7 +633,7 @@ fn parse_slice_expression() {
     let statement = parse_first_statement("вывод: X[1:3]");
     match statement {
         Statement::Output { values, .. } => {
-            assert!(matches!(&*values[0], Expr::Slice { .. }));
+            assert!(matches!(&values[0].node, Expr::Slice { .. }));
         }
         other => panic!("expected Output, got {other:?}"),
     }
@@ -633,7 +644,7 @@ fn parse_function_call_expression() {
     let statement = parse_first_statement("вывод: КВАДРАТ(7)");
     match statement {
         Statement::Output { values, .. } => {
-            assert!(matches!(&*values[0], Expr::FunctionCall { .. }));
+            assert!(matches!(&values[0].node, Expr::FunctionCall { .. }));
         }
         other => panic!("expected Output, got {other:?}"),
     }
@@ -646,7 +657,7 @@ fn parse_exit_loop() {
     let statement = parse_first_statement("цикл выход");
     match statement {
         Statement::Loop(LoopStatement { body, .. }) => {
-            assert!(matches!(&body[0], Statement::ExitLoop));
+            assert!(matches!(&body[0].node, Statement::ExitLoop));
         }
         other => panic!("expected Loop, got {other:?}"),
     }

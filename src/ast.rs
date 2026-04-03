@@ -9,9 +9,9 @@ pub struct Program {
 
 #[derive(Debug, Clone)]
 pub enum ProgramUnit {
-    Statement(Statement),
-    ProcedureDefinition(ProcedureDefinition),
-    FunctionDefinition(FunctionDefinition),
+    Statement(Spannable<Statement>),
+    ProcedureDefinition(Spannable<ProcedureDefinition>),
+    FunctionDefinition(Spannable<FunctionDefinition>),
 }
 
 /// проц NAME (params) ;; [name_decls] body конец
@@ -20,7 +20,7 @@ pub struct ProcedureDefinition {
     pub name: Option<String>, // spec allows anonymous procedures as values
     pub parameters: Vec<ProcParameter>,
     pub name_declarations: NameDeclarations,
-    pub body: Vec<Statement>,
+    pub body: Vec<Spannable<Statement>>,
     // variables that need to be saved in the frame, so other procedures can access them via `чужие`
     pub variables_need_saving: HashSet<String>,
 }
@@ -31,7 +31,7 @@ pub struct FunctionDefinition {
     pub name: Option<String>,
     pub parameters: Vec<String>, // functions only have input parameters (spec §1.5)
     pub name_declarations: NameDeclarations,
-    pub body: Vec<Statement>,
+    pub body: Vec<Spannable<Statement>>,
     // variables that need to be saved in the frame, so other procedures can access them via `чужие`
     pub variables_need_saving: HashSet<String>,
 }
@@ -67,19 +67,22 @@ pub enum Statement {
     Empty,
 
     /// variable := expression
-    Assignment { target: LValue, value: Box<Expr> },
+    Assignment {
+        target: Spannable<LValue>,
+        value: Box<Spannable<Expr>>,
+    },
 
     /// вызов expr(args)  or  name(args)
     ProcedureCall {
-        procedure: Box<Expr>,
+        procedure: Box<Spannable<Expr>>,
         arguments: Vec<CallArgument>,
     },
 
     /// если condition то body [иначе body] все
     Conditional {
-        condition: Box<Expr>,
-        then_body: Vec<Statement>,
-        else_body: Option<Vec<Statement>>,
+        condition: Box<Spannable<Expr>>,
+        then_body: Vec<Spannable<Statement>>,
+        else_body: Option<Vec<Spannable<Statement>>>,
     },
 
     /// выбор — two forms (spec §2.2.4.2 item 3)
@@ -91,13 +94,13 @@ pub enum Statement {
     /// вывод [бпс] [: expr, ...]
     Output {
         no_newline: bool,
-        values: Vec<Box<Expr>>,
+        values: Vec<Box<Spannable<Expr>>>,
     },
 
     /// ввод [текста] : var, ...
     Input {
         text_mode: bool,
-        variables: Vec<LValue>,
+        variables: Vec<Spannable<LValue>>,
     },
 
     /// выход  — break out of the innermost loop
@@ -107,7 +110,7 @@ pub enum Statement {
     ReturnFromProcedure,
 
     /// возврат expr  — return value from function
-    ReturnFromFunction(Box<Expr>),
+    ReturnFromFunction(Box<Spannable<Expr>>),
 }
 
 /// Left-hand side of an assignment (spec §2.1 "переменная")
@@ -117,14 +120,14 @@ pub enum LValue {
     Name(String),
     /// Subscript:   X[i]
     Subscript {
-        collection: Box<Expr>,
-        index: Box<Expr>,
+        collection: Box<Spannable<Expr>>,
+        index: Box<Spannable<Expr>>,
     },
     /// Slice:       X[a:b]  X[a:]  X[:b]  X[:]
     Slice {
-        collection: Box<Expr>,
-        from: Option<Box<Expr>>,
-        to: Option<Box<Expr>>,
+        collection: Box<Spannable<Expr>>,
+        from: Option<Box<Spannable<Expr>>>,
+        to: Option<Box<Spannable<Expr>>>,
     },
 }
 
@@ -132,36 +135,36 @@ pub enum LValue {
 #[derive(Debug, Clone)]
 pub enum CallArgument {
     /// =>expr  or just  expr  — input argument
-    Input(Box<Expr>),
+    Input(Box<Spannable<Expr>>),
     /// <=variable  — in-out (return) argument
-    InOut(LValue),
+    InOut(Spannable<LValue>),
 }
 
 #[derive(Debug, Clone)]
 pub enum SelectionStatement {
     /// выбор expr при v1,v2: body ... [иначе body] все
     ValueMatch {
-        expression: Box<Expr>,
-        cases: Vec<ValueMatchCase>,
-        else_body: Option<Vec<Statement>>,
+        expression: Box<Spannable<Expr>>,
+        cases: Vec<Spannable<ValueMatchCase>>,
+        else_body: Option<Vec<Spannable<Statement>>>,
     },
     /// выбор при cond: body ... [иначе body] все
     ConditionList {
-        cases: Vec<ConditionCase>,
-        else_body: Option<Vec<Statement>>,
+        cases: Vec<Spannable<ConditionCase>>,
+        else_body: Option<Vec<Spannable<Statement>>>,
     },
 }
 
 #[derive(Debug, Clone)]
 pub struct ValueMatchCase {
-    pub values: Vec<Box<Expr>>,
-    pub body: Vec<Statement>,
+    pub values: Vec<Box<Spannable<Expr>>>,
+    pub body: Vec<Spannable<Statement>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ConditionCase {
-    pub condition: Box<Expr>,
-    pub body: Vec<Statement>,
+    pub condition: Box<Spannable<Expr>>,
+    pub body: Vec<Spannable<Statement>>,
 }
 
 /// All loop forms share optional pre/post conditions (spec §2.1 "цикл").
@@ -172,9 +175,9 @@ pub struct ConditionCase {
 #[derive(Debug, Clone)]
 pub struct LoopStatement {
     pub header: LoopHeader,
-    pub while_condition: Option<Box<Expr>>, // пока f
-    pub body: Vec<Statement>,
-    pub post_condition: Option<Box<Expr>>, // кц по g
+    pub while_condition: Option<Box<Spannable<Expr>>>, // пока f
+    pub body: Vec<Spannable<Statement>>,
+    pub post_condition: Option<Box<Spannable<Expr>>>, // кц по g
 }
 
 #[derive(Debug, Clone)]
@@ -182,13 +185,13 @@ pub enum LoopHeader {
     /// Plain цикл (infinite loop, or with пока/кц по)
     Infinite,
     /// повтор N
-    Repeat(Box<Expr>),
+    Repeat(Box<Spannable<Expr>>),
     /// для i [от a] [до b] [шаг c]
     For {
         variable: String,
-        from: Option<Box<Expr>>,
-        to: Option<Box<Expr>>,
-        step: Option<Box<Expr>>,
+        from: Option<Box<Spannable<Expr>>>,
+        to: Option<Box<Spannable<Expr>>>,
+        step: Option<Box<Spannable<Expr>>>,
     },
 }
 
@@ -199,34 +202,34 @@ pub enum Expr {
 
     /// k[a]
     Subscript {
-        collection: Box<Expr>,
-        index: Box<Expr>,
+        collection: Box<Spannable<Expr>>,
+        index: Box<Spannable<Expr>>,
     },
 
     /// k[a:b]  k[a:]  k[:b]  k[:]
     Slice {
-        collection: Box<Expr>,
-        from: Option<Box<Expr>>,
-        to: Option<Box<Expr>>,
+        collection: Box<Spannable<Expr>>,
+        from: Option<Box<Spannable<Expr>>>,
+        to: Option<Box<Spannable<Expr>>>,
     },
 
     /// <* expr, ... *>
-    TupleConstruct(Vec<Box<Expr>>),
+    TupleConstruct(Vec<Box<Spannable<Expr>>>),
 
     /// f(expr, ...)  — function call (only input args in expression position)
     FunctionCall {
-        function: Box<Expr>,
-        arguments: Vec<Box<Expr>>,
+        function: Box<Spannable<Expr>>,
+        arguments: Vec<Box<Spannable<Expr>>>,
     },
 
     BinaryOp {
         operator: BinaryOperator,
-        left: Box<Expr>,
-        right: Box<Expr>,
+        left: Box<Spannable<Expr>>,
+        right: Box<Spannable<Expr>>,
     },
     UnaryOp {
         operator: UnaryOperator,
-        operand: Box<Expr>,
+        operand: Box<Spannable<Expr>>,
     },
 }
 
@@ -266,4 +269,22 @@ pub enum UnaryOperator {
     Plus,   // +
     Not,    // не
     Length, // #  (spec level 2, above **)
+}
+
+/// A node with span info
+#[derive(Debug, Clone, PartialEq)]
+pub struct Spannable<T> {
+    pub node: T,
+    pub position_start: usize,
+    pub position_end: usize,
+}
+
+impl<T> Spannable<T> {
+    pub fn new(node: T, pos: (usize, usize)) -> Self {
+        Self {
+            node,
+            position_start: pos.0,
+            position_end: pos.1,
+        }
+    }
 }
