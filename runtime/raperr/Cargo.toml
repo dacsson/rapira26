@@ -1,9 +1,10 @@
 [package]
-name = "rapira26"
+name = "raperr"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["staticlib"]
+
 [dependencies]
 annotate-snippets = "0.12.13"
-clap = { version = "4.6.0", features = ["derive"] }
-petgraph = "0.8.3"

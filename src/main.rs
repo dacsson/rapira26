@@ -5,6 +5,7 @@ use std::process::Command;
 use clap::Parser;
 use rapira26::opt::deframe::DeframePass;
 use rapira26::opt::opt_pass::{OptimizationPassOpts, run_optimizations};
+use rapira26::pretty::pretty_parse_error;
 
 #[derive(Parser)]
 #[command(name = "rapira26", about = "Rapira language compiler")]
@@ -83,7 +84,10 @@ fn main() {
     let mut program = match parser.parse_program() {
         Ok(program) => program,
         Err(error) => {
-            eprintln!("parse error: {error}");
+            eprintln!(
+                "{}",
+                pretty_parse_error(&source, cli.source.to_str().unwrap(), error)
+            );
             std::process::exit(1);
         }
     };
@@ -108,7 +112,10 @@ fn main() {
 
     // Run codegen
     let codegen = rapira26::codegen::Codegen::new().with_check_leaks(cli.check_leaks);
-    let c_code = codegen.generate(&program);
+    let c_code = codegen.generate(
+        &program,
+        cli.source.canonicalize().unwrap().to_str().unwrap(),
+    );
 
     if cli.emit_c {
         print!("{c_code}");
@@ -139,9 +146,18 @@ fn main() {
         .arg(&c_path)
         .arg("-o")
         .arg(&binary_path)
-        .arg(format!("-I{}", runtime_dir.display()))
+        .arg(format!("-I{}", runtime_dir.display())) // runtime C library
+        .arg(format!(
+            "-I{}",
+            runtime_dir.join("raperr/include").display()
+        )) // runtime error C library
         .arg(format!("-L{}", runtime_dir.join("lib").display()))
+        .arg(format!(
+            "-L{}",
+            runtime_dir.join("raperr/target/release").display()
+        ))
         .arg("-lrapruntime")
+        .arg("-lraperr")
         .arg("-lm")
         .args(cli.cflags)
         .status()

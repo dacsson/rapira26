@@ -164,7 +164,7 @@ impl Codegen {
     }
 
     /// Main entry point: walk the whole program, return generated C source.
-    pub fn generate(mut self, program: &Program) -> String {
+    pub fn generate(mut self, program: &Program, filename: &str) -> String {
         self.create_scope(); // main scope
         for unit in &program.units {
             self.emit_program_unit(unit);
@@ -181,6 +181,11 @@ impl Codegen {
         result.push_str("#include <stdlib.h>\n");
         result.push_str("#include <string.h>\n");
         result.push('\n');
+        result.push_str(&format!(
+            "char* RAP_curret_module_path = \"{}\";\n",
+            filename
+        ));
+        result.push_str("size_t RAP_current_pos_start=0;\nsize_t RAP_current_pos_end=0;\n\n");
         result.push_str(&self.forward_decls);
         result.push_str("int main(void) {\n");
         result.push_str("  struct RAP_CallFrame _main_frame = {NULL, NULL, 0};\n");
@@ -289,7 +294,7 @@ impl Codegen {
         format!("RAP_FUNC_{}", Self::transliterate(rapira_name))
     }
 
-    fn emit_statement_list(&mut self, stmts: &[Statement]) {
+    fn emit_statement_list(&mut self, stmts: &[Spannable<Statement>]) {
         for stmt in stmts {
             self.emit_statement(stmt);
         }
@@ -303,7 +308,17 @@ impl Codegen {
         }
     }
 
-    fn emit_function_def(&mut self, func_def: &FunctionDefinition) {
+    fn emit_function_def(&mut self, func_def_span: &Spannable<FunctionDefinition>) {
+        self.emit_line(&format!(
+            "RAP_current_pos_start={};",
+            func_def_span.position_start
+        ));
+        self.emit_line(&format!(
+            "RAP_current_pos_end={};",
+            func_def_span.position_end
+        ));
+
+        let func_def = &func_def_span.node;
         let name = func_def.name.as_deref().unwrap_or("_anon");
         let c_func_name = self.mangle_func_name(name);
         self.known_callables.insert(
@@ -394,7 +409,17 @@ impl Codegen {
         self.inside_function = saved_inside;
     }
 
-    fn emit_procedure_def(&mut self, proc_def: &ProcedureDefinition) {
+    fn emit_procedure_def(&mut self, proc_def_span: &Spannable<ProcedureDefinition>) {
+        self.emit_line(&format!(
+            "RAP_current_pos_start={};",
+            proc_def_span.position_start
+        ));
+        self.emit_line(&format!(
+            "RAP_current_pos_end={};",
+            proc_def_span.position_end
+        ));
+
+        let proc_def = &proc_def_span.node;
         let name = proc_def.name.as_deref().unwrap_or("_anon");
         let c_func_name = self.mangle_func_name(name);
         self.known_callables.insert(
@@ -546,12 +571,19 @@ impl Codegen {
                 temp, self.current_frame, c_func_name, array_name, param_count, is_func_str
             ));
         }
-        // TODO
         self.track_temp(&temp);
         temp
     }
 
-    fn emit_statement(&mut self, stmt: &Statement) {
+    fn emit_statement(&mut self, stmt_span: &Spannable<Statement>) {
+        let stmt = &stmt_span.node;
+
+        self.emit_line(&format!(
+            "RAP_current_pos_start={};",
+            stmt_span.position_start
+        ));
+        self.emit_line(&format!("RAP_current_pos_end={};", stmt_span.position_end));
+
         // Each statement gets its own temp tracking context.
         // Inner statements (in if/loop bodies) save and restore, so they don't
         // interfere with the outer statement's temps.
@@ -561,18 +593,26 @@ impl Codegen {
             Statement::Empty => {}
 
             Statement::Assignment { target, value } => {
-                let value_temp = self.emit_expression(value);
+                let value_temp = self.emit_expression(&value);
 
                 // Decrement refcount of old value in target (if reassigning a known variable)
-                if let LValue::Name(name) = target {
-                    let mangled = self.mangle_name(name);
+                if let Spannable {
+                    node: LValue::Name(name),
+                    ..
+                } = &target
+                {
+                    let mangled = self.mangle_name(&name);
                     if self.is_var_in_scope(&mangled) {
                         self.emit_line(&format!("RAP_dec_ref({});", mangled));
                     }
                 }
 
                 // Increment refcount when assigning from another variable (shared reference)
-                if let Expr::Name(_) = value.as_ref() {
+                if let Spannable {
+                    node: Expr::Name(_),
+                    ..
+                } = value.as_ref()
+                {
                     // Do not increment refcount if value is taken from frame OR if its a temp,
                     // since frame_get increments count on itself and temps usually created with refcount=1
                     // TODO: refactor, this is bad
@@ -584,33 +624,40 @@ impl Codegen {
                     }
                 }
 
-                self.emit_lvalue_assignment(target, &value_temp);
+                self.emit_lvalue_assignment(&target, &value_temp);
 
                 // For name assignments, ownership transfers to the C local — don't dec_ref the value.
                 // For subscript/slice, the runtime inc_refs internally, so all temps can be freed.
                 let exclude = match target {
-                    LValue::Name(_) => Some(value_temp.as_str()),
+                    Spannable {
+                        node: LValue::Name(_),
+                        ..
+                    } => Some(value_temp.as_str()),
                     _ => None,
                 };
                 self.flush_statement_temps(exclude);
             }
 
             Statement::ProcedureCall {
-                procedure,
+                procedure: proc,
                 arguments,
             } => {
+                let procedure = &proc.node;
+
                 // Collect in-out param info: (proc_param_name, caller_var_name)
                 // TODO: refactor, wtf is this
-                let inout_pairs: Vec<(String, String)> = if let Expr::Name(proc_name) =
-                    procedure.as_ref()
-                {
+                let inout_pairs: Vec<(String, String)> = if let Expr::Name(proc_name) = procedure {
                     if let Some(info) = self.known_callables.get(proc_name.as_str()) {
                         info.params
                             .iter()
                             .zip(arguments.iter())
                             .filter_map(|((param_name, mode), arg)| {
                                 if mode == "RAP_PARAMETER_MODE_OUT" {
-                                    if let CallArgument::InOut(LValue::Name(caller_name)) = arg {
+                                    if let CallArgument::InOut(Spannable {
+                                        node: LValue::Name(caller_name),
+                                        ..
+                                    }) = arg
+                                    {
                                         Some((param_name.clone(), caller_name.clone()))
                                     } else {
                                         None
@@ -663,7 +710,7 @@ impl Codegen {
                     }
                 }
 
-                let proc_temp = self.emit_expression(procedure);
+                let proc_temp = self.emit_expression(&proc);
                 // Only pass input args; in-out params use frame lookup
                 let arg_temps: Vec<String> = arguments
                     .iter()
@@ -695,20 +742,20 @@ impl Codegen {
                 then_body,
                 else_body,
             } => {
-                let cond_temp = self.emit_expression(condition);
+                let cond_temp = self.emit_expression(&condition);
                 self.emit_line(&format!("if (RAP_BOOL_VALUE({})) {{", cond_temp));
 
                 self.create_scope();
 
                 self.indent_level += 1;
-                self.emit_statement_list(then_body);
+                self.emit_statement_list(&then_body);
                 self.drop_scope();
                 self.indent_level -= 1;
                 if let Some(else_stmts) = else_body {
                     self.emit_line("} else {");
                     self.create_scope();
                     self.indent_level += 1;
-                    self.emit_statement_list(else_stmts);
+                    self.emit_statement_list(&else_stmts);
                     self.drop_scope();
                     self.indent_level -= 1;
                 }
@@ -717,12 +764,12 @@ impl Codegen {
             }
 
             Statement::Selection(sel) => {
-                self.emit_selection(sel);
+                self.emit_selection(&sel);
                 self.flush_statement_temps(None);
             }
 
             Statement::Loop(loop_stmt) => {
-                self.emit_loop(loop_stmt);
+                self.emit_loop(&loop_stmt);
                 // self.flush_statement_temps(None);
                 let temps = self.statement_temps.clone();
                 for temp in &temps {
@@ -732,7 +779,7 @@ impl Codegen {
 
             Statement::Output { no_newline, values } => {
                 for value_expr in values {
-                    let val_temp = self.emit_expression(value_expr);
+                    let val_temp = self.emit_expression(value_expr.as_ref());
                     let str_buf = self.fresh_string_buf();
                     self.emit_line(&format!(
                         "char *{} = RAP_stringify_object({});",
@@ -760,7 +807,7 @@ impl Codegen {
                     }
                     // Input creates a new value — track it
                     // self.track_temp(&temp);
-                    self.emit_lvalue_assignment(var, &temp);
+                    self.emit_lvalue_assignment(&var, &temp);
                 }
                 // Input value ownership transfers to the variable
                 // but flush any other intermediate temps
@@ -788,7 +835,7 @@ impl Codegen {
             }
 
             Statement::ReturnFromFunction(expr) => {
-                let result_temp = self.emit_expression(expr);
+                let result_temp = self.emit_expression(&expr);
                 // Remember to protect return value
                 let mut temps = saved_temps.clone();
                 temps.append(&mut self.statement_temps.clone());
@@ -805,7 +852,9 @@ impl Codegen {
         self.statement_temps = saved_temps;
     }
 
-    fn emit_lvalue_assignment(&mut self, target: &LValue, value_temp: &str) {
+    fn emit_lvalue_assignment(&mut self, target_node: &Spannable<LValue>, value_temp: &str) {
+        let target = &target_node.node;
+
         match target {
             LValue::Name(name) => {
                 let mangled = self.mangle_name(name);
@@ -928,7 +977,8 @@ impl Codegen {
                 let case_value_temps: Vec<Vec<String>> = cases
                     .iter()
                     .map(|case| {
-                        case.values
+                        case.node
+                            .values
                             .iter()
                             .map(|val_expr| self.emit_expression(val_expr))
                             .collect()
@@ -944,7 +994,7 @@ impl Codegen {
                     let keyword = if i == 0 { "if" } else { "} else if" };
                     self.emit_line(&format!("{} ({}) {{", keyword, conditions.join(" || ")));
                     self.indent_level += 1;
-                    self.emit_statement_list(&case.body);
+                    self.emit_statement_list(&case.node.body);
                     self.indent_level -= 1;
                 }
                 if let Some(else_stmts) = else_body {
@@ -960,14 +1010,14 @@ impl Codegen {
                 // Pre-evaluate all conditions before the if-else chain.
                 let cond_temps: Vec<String> = cases
                     .iter()
-                    .map(|case| self.emit_expression(&case.condition))
+                    .map(|case| self.emit_expression(&case.node.condition))
                     .collect();
 
                 for (i, (case, cond_temp)) in cases.iter().zip(cond_temps.iter()).enumerate() {
                     let keyword = if i == 0 { "if" } else { "} else if" };
                     self.emit_line(&format!("{} (RAP_BOOL_VALUE({})) {{", keyword, cond_temp));
                     self.indent_level += 1;
-                    self.emit_statement_list(&case.body);
+                    self.emit_statement_list(&case.node.body);
                     self.indent_level -= 1;
                 }
                 if let Some(else_stmts) = else_body {
@@ -1093,8 +1143,14 @@ impl Codegen {
 
     /// Emit `пока` (while) pre-condition: `if (!cond) break;` at top of loop body.
     /// Flushes its own temps since they're inside the C loop block.
-    fn emit_while_condition(&mut self, while_cond: &Option<Box<Expr>>) {
+    fn emit_while_condition(&mut self, while_cond: &Option<Box<Spannable<Expr>>>) {
         if let Some(cond_expr) = while_cond {
+            self.emit_line(&format!(
+                "RAP_current_pos_start={};",
+                cond_expr.position_start
+            ));
+            self.emit_line(&format!("RAP_current_pos_end={};", cond_expr.position_end));
+
             let saved = std::mem::take(&mut self.statement_temps);
             let cond_temp = self.emit_expression(cond_expr);
             self.emit_line(&format!("if (!RAP_BOOL_VALUE({})) {{", cond_temp));
@@ -1115,8 +1171,14 @@ impl Codegen {
 
     /// Emit `по` (until) post-condition: `if (cond) break;` at bottom of loop body.
     /// Flushes its own temps since they're inside the C loop block.
-    fn emit_post_condition(&mut self, post_cond: &Option<Box<Expr>>) {
+    fn emit_post_condition(&mut self, post_cond: &Option<Box<Spannable<Expr>>>) {
         if let Some(cond_expr) = post_cond {
+            self.emit_line(&format!(
+                "RAP_current_pos_start={};",
+                cond_expr.position_start
+            ));
+            self.emit_line(&format!("RAP_current_pos_end={};", cond_expr.position_end));
+
             let saved = std::mem::take(&mut self.statement_temps);
             let cond_temp = self.emit_expression(cond_expr);
             self.emit_line(&format!("if (RAP_BOOL_VALUE({})) break;", cond_temp));
@@ -1126,7 +1188,15 @@ impl Codegen {
     }
 
     /// Emit code for an expression. Returns the temp variable name holding the result.
-    fn emit_expression(&mut self, expr: &Expr) -> String {
+    fn emit_expression(&mut self, expr_node: &Spannable<Expr>) -> String {
+        let expr = &expr_node.node;
+
+        self.emit_line(&format!(
+            "RAP_current_pos_start={};",
+            expr_node.position_start
+        ));
+        self.emit_line(&format!("RAP_current_pos_end={};", expr_node.position_end));
+
         match expr {
             Expr::Literal(lit) => self.emit_literal(lit),
 
@@ -1309,16 +1379,34 @@ impl Codegen {
         temp
     }
 
-    fn emit_function_call(&mut self, function: &Expr, arguments: &[Box<Expr>]) -> String {
+    fn emit_function_call(
+        &mut self,
+        function_node: &Spannable<Expr>,
+        arguments: &[Box<Spannable<Expr>>],
+    ) -> String {
+        let function = &function_node.node;
+
+        self.emit_line(&format!(
+            "RAP_current_pos_start={};",
+            function_node.position_start
+        ));
+        self.emit_line(&format!(
+            "RAP_current_pos_end={};",
+            arguments
+                .last()
+                .map(|i| i.position_end)
+                .unwrap_or(function_node.position_start)
+        ));
+
         // Check for built-in functions by name
         if let Expr::Name(name) = function {
-            if let Some(result) = self.try_emit_builtin(name, arguments) {
+            if let Some(result) = self.try_emit_builtin(&name, arguments) {
                 return result;
             }
         }
 
         // General case: callable dispatch
-        let func_temp = self.emit_expression(function);
+        let func_temp = self.emit_expression(function_node);
         let arg_temps: Vec<String> = arguments
             .iter()
             .map(|arg| self.emit_expression(arg))
@@ -1354,7 +1442,11 @@ impl Codegen {
     }
 
     /// Try to emit a built-in function call. Returns Some(temp_name) if handled.
-    fn try_emit_builtin(&mut self, name: &str, arguments: &[Box<Expr>]) -> Option<String> {
+    fn try_emit_builtin(
+        &mut self,
+        name: &str,
+        arguments: &[Box<Spannable<Expr>>],
+    ) -> Option<String> {
         let result = match name {
             "корень" | "sqrt" => {
                 let arg = self.emit_expression(&arguments[0]);
@@ -1556,7 +1648,19 @@ impl Codegen {
         result
     }
 
-    fn emit_tuple_construct(&mut self, items: &[Box<Expr>]) -> String {
+    fn emit_tuple_construct(&mut self, items: &[Box<Spannable<Expr>>]) -> String {
+        self.emit_line(&format!(
+            "RAP_current_pos_start={};",
+            items[0].position_start
+        ));
+        self.emit_line(&format!(
+            "RAP_current_pos_end={};",
+            items
+                .last()
+                .map(|i| i.position_end)
+                .unwrap_or(items[0].position_start)
+        ));
+
         let item_temps: Vec<String> = items
             .iter()
             .map(|item| self.emit_expression(item))

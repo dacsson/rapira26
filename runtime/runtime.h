@@ -4,6 +4,14 @@
 #include "rapobject.h"
 #include "rapvalue.h"
 
+// METADATA
+
+// Should be overriden by compiled module
+// TODO: this not thread safe
+extern char* RAP_curret_module_path;
+extern size_t RAP_current_pos_start;
+extern size_t RAP_current_pos_end;
+
 // CONSTRUCTORS
 
 RAP_Value RAP_create_null_obj(void);

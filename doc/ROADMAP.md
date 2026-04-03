@@ -61,13 +61,13 @@ Replace `RAP_Object*` with a tagged `uintptr_t` (V8-style). Lowest bit distingui
   - Frame variable lookup: we can statically analyze when do we actually need to save a local variable in frame, i.e. do it _only if_ there is a function in CFG that uses it in `чужие` block
   - Forbid `чужие` usage from top-level
   - Experiment with mimalloc
-- Reference counting (PUSHED TO LATER, too hard m8 :c )
+- Reference counting (==PUSHED TO LATER==, too hard m8 :c )
   - idk look at Perceus?
   - escape-analysis?
   - Каунтер надо сделать гораздо меньше, хедер объекта у нас какой-то безумный
   - Фикс залипания счётчика ссылок, переполнения каунтера
 
-### Step 5 - Errors tied to file source instead of C and Semcheck
+### ✓ Step 5 - Errors tied to file source instead of C ✓
 If an error hapens emit source file line, not C error
 
 ### Step 6 - Add new features from big spec and change container syntax
@@ -93,6 +93,7 @@ Fetures to add:
 пенделей := 10 \ переменная
 пенделей :: 10 \ константа
 ```
+- Unicode support
 
 We probably should change symbols `<` to use something more ergonomic for RU keyborads, something like:
 - Structs: `(имя: "иван", фамилия: "петров")`

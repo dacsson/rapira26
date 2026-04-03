@@ -19,34 +19,14 @@ use crate::lexer::{Lexer, LexerError, Token};
 pub enum ParseError {
     LexerError(LexerError),
     UnexpectedToken {
-        position: usize,
+        position_start: usize,
+        position_end: usize,
         found: Token,
         expected: String,
     },
     UnexpectedEof {
         expected: String,
     },
-}
-
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParseError::LexerError(error) => write!(formatter, "{error}"),
-            ParseError::UnexpectedToken {
-                position,
-                found,
-                expected,
-            } => {
-                write!(
-                    formatter,
-                    "at byte {position}: expected {expected}, found {found:?}"
-                )
-            }
-            ParseError::UnexpectedEof { expected } => {
-                write!(formatter, "unexpected end of input, expected {expected}")
-            }
-        }
-    }
 }
 
 pub struct Parser<'input> {
@@ -80,11 +60,11 @@ impl<'input> Parser<'input> {
         self.current.as_ref().map(|(_, token, _)| token)
     }
 
-    fn position(&self) -> usize {
+    fn positions(&self) -> (usize, usize) {
         self.current
             .as_ref()
-            .map(|(position, _, _)| *position)
-            .unwrap_or(0)
+            .map(|(st, _, end)| (*st, *end))
+            .unwrap_or((0, 0))
     }
 
     fn eat(&mut self, expected: &Token) -> bool {
@@ -101,13 +81,14 @@ impl<'input> Parser<'input> {
             Ok(self.advance().unwrap())
         } else {
             match &self.current {
-                Some((position, found, _)) => Err(ParseError::UnexpectedToken {
-                    position: *position,
+                Some((position_start, found, position_end)) => Err(ParseError::UnexpectedToken {
+                    position_start: *position_start,
+                    position_end: *position_end,
                     found: found.clone(),
-                    expected: format!("{expected:?}"),
+                    expected: format!("{expected}"),
                 }),
                 None => Err(ParseError::UnexpectedEof {
-                    expected: format!("{expected:?}"),
+                    expected: format!("{expected}"),
                 }),
             }
         }
@@ -123,11 +104,12 @@ impl<'input> Parser<'input> {
                 }
             }
             Some(_) => {
-                let (position, found, _) = self.current.as_ref().unwrap();
+                let (position_start, found, position_end) = self.current.as_ref().unwrap();
                 Err(ParseError::UnexpectedToken {
-                    position: *position,
+                    position_start: *position_start,
+                    position_end: *position_end,
                     found: found.clone(),
-                    expected: "identifier".to_string(),
+                    expected: "индентификатор".to_string(),
                 })
             }
             None => Err(ParseError::UnexpectedEof {
@@ -155,7 +137,6 @@ impl<'input> Parser<'input> {
                     | Token::KwПи
                     | Token::KwPi
                     | Token::LParen
-                    | Token::TupleOpen
                     | Token::Minus
                     | Token::Plus
                     | Token::Hash
@@ -185,7 +166,7 @@ impl<'input> Parser<'input> {
     }
 
     /// Parse an indented block: Newline Indent stmt* Dedent
-    fn parse_block(&mut self) -> Result<Vec<Statement>, ParseError> {
+    fn parse_block(&mut self) -> Result<Vec<Spannable<Statement>>, ParseError> {
         self.expect(&Token::Newline)?;
         self.expect(&Token::Indent)?;
         let statements = self.parse_statement_list_until(&Token::Dedent)?;
@@ -195,7 +176,7 @@ impl<'input> Parser<'input> {
 
     /// Parse either a block (Newline + Indent...Dedent) or a single statement
     /// on the same line. Used after block openers like `то`, `цикл`, `иначе`.
-    fn parse_block_or_single_statement(&mut self) -> Result<Vec<Statement>, ParseError> {
+    fn parse_block_or_single_statement(&mut self) -> Result<Vec<Spannable<Statement>>, ParseError> {
         if self.peek() == Some(&Token::Newline) {
             self.parse_block()
         } else {
@@ -228,8 +209,8 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_procedure_definition(&mut self) -> Result<ProcedureDefinition, ParseError> {
-        self.expect(&Token::KwПроц)?;
+    fn parse_procedure_definition(&mut self) -> Result<Spannable<ProcedureDefinition>, ParseError> {
+        let (pos_start, _, _) = self.expect(&Token::KwПроц)?;
 
         let name = if matches!(self.peek(), Some(Token::Ident(_))) {
             Some(self.expect_ident()?)
@@ -249,17 +230,20 @@ impl<'input> Parser<'input> {
         let body = self.parse_statement_list_until(&Token::Dedent)?;
         self.expect(&Token::Dedent)?;
 
-        Ok(ProcedureDefinition {
-            name,
-            parameters,
-            name_declarations,
-            body,
-            variables_need_saving: HashSet::new(),
-        })
+        Ok(Spannable::new(
+            ProcedureDefinition {
+                name,
+                parameters,
+                name_declarations,
+                body,
+                variables_need_saving: HashSet::new(),
+            },
+            (pos_start, self.positions().1),
+        ))
     }
 
-    fn parse_function_definition(&mut self) -> Result<FunctionDefinition, ParseError> {
-        self.expect(&Token::KwФунк)?;
+    fn parse_function_definition(&mut self) -> Result<Spannable<FunctionDefinition>, ParseError> {
+        let (pos_start, _, _) = self.expect(&Token::KwФунк)?;
 
         let name = if matches!(self.peek(), Some(Token::Ident(_))) {
             Some(self.expect_ident()?)
@@ -279,13 +263,16 @@ impl<'input> Parser<'input> {
         let body = self.parse_statement_list_until(&Token::Dedent)?;
         self.expect(&Token::Dedent)?;
 
-        Ok(FunctionDefinition {
-            name,
-            parameters,
-            name_declarations,
-            body,
-            variables_need_saving: HashSet::new(),
-        })
+        Ok(Spannable::new(
+            FunctionDefinition {
+                name,
+                parameters,
+                name_declarations,
+                body,
+                variables_need_saving: HashSet::new(),
+            },
+            (pos_start, self.positions().1),
+        ))
     }
 
     fn parse_proc_parameter_list(&mut self) -> Result<Vec<ProcParameter>, ParseError> {
@@ -362,7 +349,7 @@ impl<'input> Parser<'input> {
     fn parse_statement_list_until(
         &mut self,
         terminator: &Token,
-    ) -> Result<Vec<Statement>, ParseError> {
+    ) -> Result<Vec<Spannable<Statement>>, ParseError> {
         let mut statements = Vec::new();
         loop {
             self.skip_newlines();
@@ -377,8 +364,9 @@ impl<'input> Parser<'input> {
         Ok(statements)
     }
 
-    fn parse_statement(&mut self) -> Result<Statement, ParseError> {
-        match self.peek() {
+    fn parse_statement(&mut self) -> Result<Spannable<Statement>, ParseError> {
+        let (pos_start, _) = self.positions();
+        let stmt = match self.peek() {
             Some(Token::KwВывод) => self.parse_output_statement(),
             Some(Token::KwВвод) => self.parse_input_statement(),
             Some(Token::KwЕсли) => self.parse_conditional(),
@@ -389,28 +377,35 @@ impl<'input> Parser<'input> {
             | Some(Token::KwЦикл) => self.parse_loop(),
             Some(Token::KwВыход) => {
                 self.advance();
-                Ok(Statement::ExitLoop)
+                Ok(Spannable::new(Statement::ExitLoop, self.positions()))
             }
             Some(Token::KwВозврат) => self.parse_return(),
             Some(Token::KwВызов) => self.parse_procedure_call_with_keyword(),
             Some(Token::Ident(_)) => self.parse_ident_statement(),
             Some(_) => {
-                let (position, found, _) = self.current.as_ref().unwrap();
+                let (position_start, found, position_end) = self.current.as_ref().unwrap();
                 Err(ParseError::UnexpectedToken {
-                    position: *position,
+                    position_start: *position_start,
+                    position_end: *position_end,
                     found: found.clone(),
-                    expected: "statement".to_string(),
+                    expected: "утверждение (функцию, процедуру, объявление переменной...)"
+                        .to_string(),
                 })
             }
             None => Err(ParseError::UnexpectedEof {
                 expected: "statement".to_string(),
             }),
-        }
+        }?;
+
+        let (_, pos_end) = self.positions();
+
+        Ok(Spannable::new(stmt.node, (pos_start, pos_end)))
     }
 
     /// Parse a statement starting with an identifier: assignment or procedure call.
-    fn parse_ident_statement(&mut self) -> Result<Statement, ParseError> {
+    fn parse_ident_statement(&mut self) -> Result<Spannable<Statement>, ParseError> {
         let name = self.expect_ident()?;
+        let start_pos = self.positions().0;
 
         match self.peek() {
             // NAME(args) — procedure call by name
@@ -418,19 +413,27 @@ impl<'input> Parser<'input> {
                 self.advance(); // consume (
                 let arguments = self.parse_call_argument_list()?;
                 self.expect(&Token::RParen)?;
-                Ok(Statement::ProcedureCall {
-                    procedure: Box::new(Expr::Name(name)),
-                    arguments,
-                })
+                let end_pos = self.positions().1;
+                Ok(Spannable::new(
+                    Statement::ProcedureCall {
+                        procedure: Box::new(Spannable::new(Expr::Name(name), (start_pos, end_pos))),
+                        arguments,
+                    },
+                    (start_pos, end_pos),
+                ))
             }
             // NAME := expr — simple assignment
             Some(Token::Assign) => {
                 self.advance();
                 let value = self.parse_expression()?;
-                Ok(Statement::Assignment {
-                    target: LValue::Name(name),
-                    value: Box::new(value),
-                })
+                let end_pos = self.positions().1;
+                Ok(Spannable::new(
+                    Statement::Assignment {
+                        target: Spannable::new(LValue::Name(name), (start_pos, end_pos)),
+                        value: Box::new(value),
+                    },
+                    (start_pos, end_pos),
+                ))
             }
             // NAME[...] := expr — subscript/slice assignment
             Some(Token::LBracket) => {
@@ -438,18 +441,23 @@ impl<'input> Parser<'input> {
                 let target = self.parse_lvalue_subscript_or_slice(name)?;
                 self.expect(&Token::Assign)?;
                 let value = self.parse_expression()?;
-                Ok(Statement::Assignment {
-                    target,
-                    value: Box::new(value),
-                })
+                let end_pos = self.positions().1;
+                Ok(Spannable::new(
+                    Statement::Assignment {
+                        target,
+                        value: Box::new(value),
+                    },
+                    (start_pos, end_pos),
+                ))
             }
             other => {
-                let expected = "':=', '(', or '['".to_string();
+                let expected = "':=', '(', или '['".to_string();
                 match other {
                     Some(_) => {
-                        let (position, found, _) = self.current.as_ref().unwrap();
+                        let (position_start, found, position_end) = self.current.as_ref().unwrap();
                         Err(ParseError::UnexpectedToken {
-                            position: *position,
+                            position_start: *position_start,
+                            position_end: *position_end,
                             found: found.clone(),
                             expected,
                         })
@@ -461,8 +469,12 @@ impl<'input> Parser<'input> {
     }
 
     /// After consuming `NAME [`, parse subscript or slice target.
-    fn parse_lvalue_subscript_or_slice(&mut self, name: String) -> Result<LValue, ParseError> {
-        let collection = Box::new(Expr::Name(name));
+    fn parse_lvalue_subscript_or_slice(
+        &mut self,
+        name: String,
+    ) -> Result<Spannable<LValue>, ParseError> {
+        let collection = Box::new(Spannable::new(Expr::Name(name), self.positions()));
+        let start_pos = self.positions().0;
 
         // Check for [:...] (slice with no `from`)
         if self.eat(&Token::Colon) {
@@ -472,11 +484,15 @@ impl<'input> Parser<'input> {
                 None
             };
             self.expect(&Token::RBracket)?;
-            return Ok(LValue::Slice {
-                collection,
-                from: None,
-                to,
-            });
+            let end_pos = self.positions().1;
+            return Ok(Spannable::new(
+                LValue::Slice {
+                    collection,
+                    from: None,
+                    to,
+                },
+                (start_pos, end_pos),
+            ));
         }
 
         let first_expr = self.parse_expression()?;
@@ -489,22 +505,31 @@ impl<'input> Parser<'input> {
                 None
             };
             self.expect(&Token::RBracket)?;
-            Ok(LValue::Slice {
-                collection,
-                from: Some(Box::new(first_expr)),
-                to,
-            })
+            let end_pos = self.positions().1;
+            Ok(Spannable::new(
+                LValue::Slice {
+                    collection,
+                    from: Some(Box::new(first_expr)),
+                    to,
+                },
+                (start_pos, end_pos),
+            ))
         } else {
             // Subscript: NAME[index]
             self.expect(&Token::RBracket)?;
-            Ok(LValue::Subscript {
-                collection,
-                index: Box::new(first_expr),
-            })
+            let end_pos = self.positions().1;
+            Ok(Spannable::new(
+                LValue::Subscript {
+                    collection,
+                    index: Box::new(first_expr),
+                },
+                (start_pos, end_pos),
+            ))
         }
     }
 
-    fn parse_output_statement(&mut self) -> Result<Statement, ParseError> {
+    fn parse_output_statement(&mut self) -> Result<Spannable<Statement>, ParseError> {
+        let start_pos = self.positions().0;
         self.expect(&Token::KwВывод)?;
         let no_newline = self.eat(&Token::KwБпс);
         self.expect(&Token::Colon)?;
@@ -517,10 +542,16 @@ impl<'input> Parser<'input> {
             }
         }
 
-        Ok(Statement::Output { no_newline, values })
+        let end_pos = self.positions().1;
+
+        Ok(Spannable::new(
+            Statement::Output { no_newline, values },
+            (start_pos, end_pos),
+        ))
     }
 
-    fn parse_input_statement(&mut self) -> Result<Statement, ParseError> {
+    fn parse_input_statement(&mut self) -> Result<Spannable<Statement>, ParseError> {
+        let start_pos = self.positions().0;
         self.expect(&Token::KwВвод)?;
         let text_mode = self.eat(&Token::KwТекста);
         self.expect(&Token::Colon)?;
@@ -530,23 +561,31 @@ impl<'input> Parser<'input> {
             variables.push(self.parse_lvalue()?);
         }
 
-        Ok(Statement::Input {
-            text_mode,
-            variables,
-        })
+        let end_pos = self.positions().1;
+
+        Ok(Spannable::new(
+            Statement::Input {
+                text_mode,
+                variables,
+            },
+            (start_pos, end_pos),
+        ))
     }
 
-    fn parse_lvalue(&mut self) -> Result<LValue, ParseError> {
+    fn parse_lvalue(&mut self) -> Result<Spannable<LValue>, ParseError> {
+        let start_pos = self.positions().0;
         let name = self.expect_ident()?;
 
         if self.eat(&Token::LBracket) {
             self.parse_lvalue_subscript_or_slice(name)
         } else {
-            Ok(LValue::Name(name))
+            let end_pos = self.positions().1;
+            Ok(Spannable::new(LValue::Name(name), (start_pos, end_pos)))
         }
     }
 
-    fn parse_conditional(&mut self) -> Result<Statement, ParseError> {
+    fn parse_conditional(&mut self) -> Result<Spannable<Statement>, ParseError> {
+        let start_pos = self.positions().0;
         self.expect(&Token::KwЕсли)?;
         let condition = Box::new(self.parse_expression()?);
         self.expect(&Token::KwТо)?;
@@ -564,14 +603,19 @@ impl<'input> Parser<'input> {
             None
         };
 
-        Ok(Statement::Conditional {
-            condition,
-            then_body,
-            else_body,
-        })
+        let end_pos = self.positions().1;
+
+        Ok(Spannable::new(
+            Statement::Conditional {
+                condition,
+                then_body,
+                else_body,
+            },
+            (start_pos, end_pos),
+        ))
     }
 
-    fn parse_selection(&mut self) -> Result<Statement, ParseError> {
+    fn parse_selection(&mut self) -> Result<Spannable<Statement>, ParseError> {
         self.expect(&Token::KwВыбор)?;
 
         // Check if this is form 2 (condition list): выбор followed by Newline+Indent+при
@@ -589,7 +633,8 @@ impl<'input> Parser<'input> {
 
             // Shouldn't happen — выбор block should start with при
             return Err(ParseError::UnexpectedToken {
-                position: self.position(),
+                position_end: self.positions().0,
+                position_start: self.positions().1,
                 found: self.peek().cloned().unwrap_or(Token::Newline),
                 expected: "при".to_string(),
             });
@@ -605,8 +650,9 @@ impl<'input> Parser<'input> {
 
     fn parse_selection_value_match_in_block(
         &mut self,
-        expression: Box<Expr>,
-    ) -> Result<Statement, ParseError> {
+        expression: Box<Spannable<Expr>>,
+    ) -> Result<Spannable<Statement>, ParseError> {
+        let start_pos = self.positions().0;
         let mut cases = Vec::new();
         while self.peek() == Some(&Token::KwПри) {
             cases.push(self.parse_value_match_case()?);
@@ -619,16 +665,22 @@ impl<'input> Parser<'input> {
             None
         };
 
+        let end_pos = self.positions().1;
+
         self.skip_newlines();
         self.expect(&Token::Dedent)?;
-        Ok(Statement::Selection(SelectionStatement::ValueMatch {
-            expression,
-            cases,
-            else_body,
-        }))
+        Ok(Spannable::new(
+            Statement::Selection(SelectionStatement::ValueMatch {
+                expression,
+                cases,
+                else_body,
+            }),
+            (start_pos, end_pos),
+        ))
     }
 
-    fn parse_value_match_case(&mut self) -> Result<ValueMatchCase, ParseError> {
+    fn parse_value_match_case(&mut self) -> Result<Spannable<ValueMatchCase>, ParseError> {
+        let start_pos = self.positions().0;
         self.expect(&Token::KwПри)?;
         let mut values = vec![Box::new(self.parse_expression()?)];
         while self.eat(&Token::Comma) {
@@ -638,18 +690,31 @@ impl<'input> Parser<'input> {
 
         let body = self.parse_block_or_single_statement()?;
 
-        Ok(ValueMatchCase { values, body })
+        let end_pos = self.positions().1;
+
+        Ok(Spannable::new(
+            ValueMatchCase { values, body },
+            (start_pos, end_pos),
+        ))
     }
 
-    fn parse_selection_condition_list_in_block(&mut self) -> Result<Statement, ParseError> {
+    fn parse_selection_condition_list_in_block(
+        &mut self,
+    ) -> Result<Spannable<Statement>, ParseError> {
+        let start_pos = self.positions().0;
+
         let mut cases = Vec::new();
         while self.peek() == Some(&Token::KwПри) {
+            let start_pos_case = self.positions().0;
             self.advance(); // consume при
             let condition = Box::new(self.parse_expression()?);
             self.expect(&Token::Colon)?;
 
             let body = self.parse_block_or_single_statement()?;
-            cases.push(ConditionCase { condition, body });
+            cases.push(Spannable::new(
+                ConditionCase { condition, body },
+                (start_pos_case, self.positions().1),
+            ));
             self.skip_newlines();
         }
 
@@ -659,15 +724,18 @@ impl<'input> Parser<'input> {
             None
         };
 
+        let end_pos = self.positions().1;
+
         self.skip_newlines();
         self.expect(&Token::Dedent)?;
-        Ok(Statement::Selection(SelectionStatement::ConditionList {
-            cases,
-            else_body,
-        }))
+        Ok(Spannable::new(
+            Statement::Selection(SelectionStatement::ConditionList { cases, else_body }),
+            (start_pos, end_pos),
+        ))
     }
 
-    fn parse_loop(&mut self) -> Result<Statement, ParseError> {
+    fn parse_loop(&mut self) -> Result<Spannable<Statement>, ParseError> {
+        let start_pos = self.positions().0;
         let header = self.parse_loop_header()?;
 
         let while_condition = if self.eat(&Token::KwПока) {
@@ -691,12 +759,17 @@ impl<'input> Parser<'input> {
             None
         };
 
-        Ok(Statement::Loop(LoopStatement {
-            header,
-            while_condition,
-            body,
-            post_condition,
-        }))
+        let end_pos = self.positions().1;
+
+        Ok(Spannable::new(
+            Statement::Loop(LoopStatement {
+                header,
+                while_condition,
+                body,
+                post_condition,
+            }),
+            (start_pos, end_pos),
+        ))
     }
 
     fn parse_loop_header(&mut self) -> Result<LoopHeader, ParseError> {
@@ -733,27 +806,39 @@ impl<'input> Parser<'input> {
     }
 
     /// Parse `возврат` — greedy: parse expression if one can follow.
-    fn parse_return(&mut self) -> Result<Statement, ParseError> {
+    fn parse_return(&mut self) -> Result<Spannable<Statement>, ParseError> {
+        let start_pos = self.positions().0;
         self.expect(&Token::KwВозврат)?;
         if self.can_start_expression() {
             let value = self.parse_expression()?;
-            Ok(Statement::ReturnFromFunction(Box::new(value)))
+            Ok(Spannable::new(
+                Statement::ReturnFromFunction(Box::new(value)),
+                (start_pos, self.positions().1),
+            ))
         } else {
-            Ok(Statement::ReturnFromProcedure)
+            Ok(Spannable::new(
+                Statement::ReturnFromProcedure,
+                (start_pos, self.positions().1),
+            ))
         }
     }
 
-    fn parse_procedure_call_with_keyword(&mut self) -> Result<Statement, ParseError> {
+    fn parse_procedure_call_with_keyword(&mut self) -> Result<Spannable<Statement>, ParseError> {
+        let start_pos = self.positions().0;
         self.expect(&Token::KwВызов)?;
         // Parse the callable (name or expression producing a procedure)
         let procedure = Box::new(self.parse_expr_primary()?);
         self.expect(&Token::LParen)?;
         let arguments = self.parse_call_argument_list()?;
         self.expect(&Token::RParen)?;
-        Ok(Statement::ProcedureCall {
-            procedure,
-            arguments,
-        })
+        let end_pos = self.positions().1;
+        Ok(Spannable::new(
+            Statement::ProcedureCall {
+                procedure,
+                arguments,
+            },
+            (start_pos, end_pos),
+        ))
     }
 
     fn parse_call_argument_list(&mut self) -> Result<Vec<CallArgument>, ParseError> {
@@ -782,53 +867,67 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_expression(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expression(&mut self) -> Result<Spannable<Expr>, ParseError> {
         self.parse_expr_or()
     }
 
     // или (lowest precedence, left-associative)
-    fn parse_expr_or(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr_or(&mut self) -> Result<Spannable<Expr>, ParseError> {
         let mut left = self.parse_expr_and()?;
         while self.eat(&Token::KwИли) {
             let right = self.parse_expr_and()?;
-            left = Expr::BinaryOp {
-                operator: BinaryOperator::Or,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            let start_pos = left.position_start;
+            let end_pos = right.position_end;
+            left = Spannable::new(
+                Expr::BinaryOp {
+                    operator: BinaryOperator::Or,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                (start_pos, end_pos),
+            );
         }
         Ok(left)
     }
 
     // и
-    fn parse_expr_and(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr_and(&mut self) -> Result<Spannable<Expr>, ParseError> {
         let mut left = self.parse_expr_not()?;
         while self.eat(&Token::KwИ) {
             let right = self.parse_expr_not()?;
-            left = Expr::BinaryOp {
-                operator: BinaryOperator::And,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            let start_pos = left.position_start;
+            let end_pos = right.position_end;
+            left = Spannable::new(
+                Expr::BinaryOp {
+                    operator: BinaryOperator::And,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                (start_pos, end_pos),
+            );
         }
         Ok(left)
     }
 
     // не (unary prefix, right-associative)
-    fn parse_expr_not(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr_not(&mut self) -> Result<Spannable<Expr>, ParseError> {
         if self.eat(&Token::KwНе) {
             let operand = self.parse_expr_not()?;
-            Ok(Expr::UnaryOp {
-                operator: UnaryOperator::Not,
-                operand: Box::new(operand),
-            })
+            let pos = (operand.position_start, operand.position_end);
+            Ok(Spannable::new(
+                Expr::UnaryOp {
+                    operator: UnaryOperator::Not,
+                    operand: Box::new(operand),
+                },
+                pos,
+            ))
         } else {
             self.parse_expr_equality()
         }
     }
 
     // = /= (non-associative)
-    fn parse_expr_equality(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr_equality(&mut self) -> Result<Spannable<Expr>, ParseError> {
         let left = self.parse_expr_ordering()?;
         let operator = match self.peek() {
             Some(Token::Equal) => BinaryOperator::Equal,
@@ -837,15 +936,20 @@ impl<'input> Parser<'input> {
         };
         self.advance();
         let right = self.parse_expr_ordering()?;
-        Ok(Expr::BinaryOp {
-            operator,
-            left: Box::new(left),
-            right: Box::new(right),
-        })
+        let start_pos = left.position_start;
+        let end_pos = right.position_end;
+        Ok(Spannable::new(
+            Expr::BinaryOp {
+                operator,
+                left: Box::new(left),
+                right: Box::new(right),
+            },
+            (start_pos, end_pos),
+        ))
     }
 
     // > < >= <= (non-associative)
-    fn parse_expr_ordering(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr_ordering(&mut self) -> Result<Spannable<Expr>, ParseError> {
         let left = self.parse_expr_add()?;
         let operator = match self.peek() {
             Some(Token::Greater) => BinaryOperator::Greater,
@@ -856,15 +960,20 @@ impl<'input> Parser<'input> {
         };
         self.advance();
         let right = self.parse_expr_add()?;
-        Ok(Expr::BinaryOp {
-            operator,
-            left: Box::new(left),
-            right: Box::new(right),
-        })
+        let start_pos = left.position_start;
+        let end_pos = right.position_end;
+        Ok(Spannable::new(
+            Expr::BinaryOp {
+                operator,
+                left: Box::new(left),
+                right: Box::new(right),
+            },
+            (start_pos, end_pos),
+        ))
     }
 
     // + - (left-associative)
-    fn parse_expr_add(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr_add(&mut self) -> Result<Spannable<Expr>, ParseError> {
         let mut left = self.parse_expr_mul()?;
         loop {
             let operator = match self.peek() {
@@ -874,17 +983,22 @@ impl<'input> Parser<'input> {
             };
             self.advance();
             let right = self.parse_expr_mul()?;
-            left = Expr::BinaryOp {
-                operator,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            let start_pos = left.position_start;
+            let end_pos = right.position_end;
+            left = Spannable::new(
+                Expr::BinaryOp {
+                    operator,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                (start_pos, end_pos),
+            );
         }
         Ok(left)
     }
 
     // * / // /% (left-associative)
-    fn parse_expr_mul(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr_mul(&mut self) -> Result<Spannable<Expr>, ParseError> {
         let mut left = self.parse_expr_unary()?;
         loop {
             let operator = match self.peek() {
@@ -896,64 +1010,88 @@ impl<'input> Parser<'input> {
             };
             self.advance();
             let right = self.parse_expr_power()?;
-            left = Expr::BinaryOp {
-                operator,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            let start_pos = left.position_start;
+            let end_pos = right.position_end;
+            left = Spannable::new(
+                Expr::BinaryOp {
+                    operator,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                (start_pos, end_pos),
+            );
         }
         Ok(left)
     }
 
     // ** (right-associative)
-    fn parse_expr_power(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr_power(&mut self) -> Result<Spannable<Expr>, ParseError> {
         let base = self.parse_expr_length()?;
         if self.eat(&Token::StarStar) {
             let exponent = self.parse_expr_power()?; // right-recursive for right-associativity
-            Ok(Expr::BinaryOp {
-                operator: BinaryOperator::Power,
-                left: Box::new(base),
-                right: Box::new(exponent),
-            })
+            let pos = (base.position_start, exponent.position_end);
+            Ok(Spannable::new(
+                Expr::BinaryOp {
+                    operator: BinaryOperator::Power,
+                    left: Box::new(base),
+                    right: Box::new(exponent),
+                },
+                pos,
+            ))
         } else {
             Ok(base)
         }
     }
 
     // unary - + (prefix)
-    fn parse_expr_unary(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr_unary(&mut self) -> Result<Spannable<Expr>, ParseError> {
         if self.eat(&Token::Minus) {
             let operand = self.parse_expr_unary()?;
-            Ok(Expr::UnaryOp {
-                operator: UnaryOperator::Negate,
-                operand: Box::new(operand),
-            })
+            let end_pos = operand.position_end;
+            let start_pos = operand.position_start;
+            Ok(Spannable::new(
+                Expr::UnaryOp {
+                    operator: UnaryOperator::Negate,
+                    operand: Box::new(operand),
+                },
+                (start_pos, end_pos),
+            ))
         } else if self.eat(&Token::Plus) {
             let operand = self.parse_expr_unary()?;
-            Ok(Expr::UnaryOp {
-                operator: UnaryOperator::Plus,
-                operand: Box::new(operand),
-            })
+            let end_pos = operand.position_end;
+            let start_pos = operand.position_start;
+            Ok(Spannable::new(
+                Expr::UnaryOp {
+                    operator: UnaryOperator::Plus,
+                    operand: Box::new(operand),
+                },
+                (start_pos, end_pos),
+            ))
         } else {
             self.parse_expr_power()
         }
     }
 
     // # (length, unary prefix)
-    fn parse_expr_length(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr_length(&mut self) -> Result<Spannable<Expr>, ParseError> {
         if self.eat(&Token::Hash) {
             let operand = self.parse_expr_postfix()?;
-            Ok(Expr::UnaryOp {
-                operator: UnaryOperator::Length,
-                operand: Box::new(operand),
-            })
+            let end_pos = operand.position_end;
+            let start_pos = operand.position_start;
+            Ok(Spannable::new(
+                Expr::UnaryOp {
+                    operator: UnaryOperator::Length,
+                    operand: Box::new(operand),
+                },
+                (start_pos, end_pos),
+            ))
         } else {
             self.parse_expr_postfix()
         }
     }
 
     // Postfix: subscript f[i], slice f[a:b], function call f(args)
-    fn parse_expr_postfix(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr_postfix(&mut self) -> Result<Spannable<Expr>, ParseError> {
         let mut expr = self.parse_expr_primary()?;
 
         loop {
@@ -966,10 +1104,14 @@ impl<'input> Parser<'input> {
                     self.advance(); // consume (
                     let arguments = self.parse_func_arg_list()?;
                     self.expect(&Token::RParen)?;
-                    expr = Expr::FunctionCall {
-                        function: Box::new(expr),
-                        arguments,
-                    };
+                    let pos = (expr.position_start, self.positions().1);
+                    expr = Spannable::new(
+                        Expr::FunctionCall {
+                            function: Box::new(expr),
+                            arguments,
+                        },
+                        pos,
+                    );
                 }
                 _ => break,
             }
@@ -979,7 +1121,11 @@ impl<'input> Parser<'input> {
     }
 
     /// After consuming `[`, parse subscript or slice.
-    fn parse_subscript_or_slice(&mut self, collection: Expr) -> Result<Expr, ParseError> {
+    fn parse_subscript_or_slice(
+        &mut self,
+        collection: Spannable<Expr>,
+    ) -> Result<Spannable<Expr>, ParseError> {
+        let start_pos = self.positions().0;
         let collection = Box::new(collection);
 
         // [:...] — slice with no from
@@ -990,11 +1136,15 @@ impl<'input> Parser<'input> {
                 None
             };
             self.expect(&Token::RBracket)?;
-            return Ok(Expr::Slice {
-                collection,
-                from: None,
-                to,
-            });
+            let end_pos = self.positions().1;
+            return Ok(Spannable::new(
+                Expr::Slice {
+                    collection,
+                    from: None,
+                    to,
+                },
+                (start_pos, end_pos),
+            ));
         }
 
         let first_expr = self.parse_expression()?;
@@ -1007,22 +1157,30 @@ impl<'input> Parser<'input> {
                 None
             };
             self.expect(&Token::RBracket)?;
-            Ok(Expr::Slice {
-                collection,
-                from: Some(Box::new(first_expr)),
-                to,
-            })
+            let end_pos = self.positions().1;
+            Ok(Spannable::new(
+                Expr::Slice {
+                    collection,
+                    from: Some(Box::new(first_expr)),
+                    to,
+                },
+                (start_pos, end_pos),
+            ))
         } else {
             // [index]
             self.expect(&Token::RBracket)?;
-            Ok(Expr::Subscript {
-                collection,
-                index: Box::new(first_expr),
-            })
+            let end_pos = self.positions().1;
+            Ok(Spannable::new(
+                Expr::Subscript {
+                    collection,
+                    index: Box::new(first_expr),
+                },
+                (start_pos, end_pos),
+            ))
         }
     }
 
-    fn parse_func_arg_list(&mut self) -> Result<Vec<Box<Expr>>, ParseError> {
+    fn parse_func_arg_list(&mut self) -> Result<Vec<Box<Spannable<Expr>>>, ParseError> {
         let mut arguments = Vec::new();
         if self.peek() == Some(&Token::RParen) {
             return Ok(arguments);
@@ -1036,77 +1194,121 @@ impl<'input> Parser<'input> {
     }
 
     // Primary expressions: literals, identifiers, parens, tuples
-    fn parse_expr_primary(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr_primary(&mut self) -> Result<Spannable<Expr>, ParseError> {
         match self.peek() {
             Some(Token::Integer(_)) => {
                 let (_, token, _) = self.advance().unwrap();
                 match token {
-                    Token::Integer(value) => Ok(Expr::Literal(Literal::Integer(value))),
+                    Token::Integer(value) => Ok(Spannable::new(
+                        Expr::Literal(Literal::Integer(value)),
+                        self.positions(),
+                    )),
                     _ => unreachable!(),
                 }
             }
             Some(Token::Real(_)) => {
                 let (_, token, _) = self.advance().unwrap();
                 match token {
-                    Token::Real(value) => Ok(Expr::Literal(Literal::Real(value))),
+                    Token::Real(value) => Ok(Spannable::new(
+                        Expr::Literal(Literal::Real(value)),
+                        self.positions(),
+                    )),
                     _ => unreachable!(),
                 }
             }
             Some(Token::Text(_)) => {
                 let (_, token, _) = self.advance().unwrap();
                 match token {
-                    Token::Text(value) => Ok(Expr::Literal(Literal::Text(value))),
+                    Token::Text(value) => Ok(Spannable::new(
+                        Expr::Literal(Literal::Text(value)),
+                        self.positions(),
+                    )),
                     _ => unreachable!(),
                 }
             }
             Some(Token::KwПусто) => {
                 self.advance();
-                Ok(Expr::Literal(Literal::Null))
+                Ok(Spannable::new(
+                    Expr::Literal(Literal::Null),
+                    self.positions(),
+                ))
             }
             Some(Token::KwДа) => {
                 self.advance();
-                Ok(Expr::Literal(Literal::Boolean(true)))
+                Ok(Spannable::new(
+                    Expr::Literal(Literal::Boolean(true)),
+                    self.positions(),
+                ))
             }
             Some(Token::KwНет) => {
                 self.advance();
-                Ok(Expr::Literal(Literal::Boolean(false)))
+                Ok(Spannable::new(
+                    Expr::Literal(Literal::Boolean(false)),
+                    self.positions(),
+                ))
             }
             Some(Token::KwПс) => {
                 self.advance();
-                Ok(Expr::Literal(Literal::Text("\n".to_string())))
+                Ok(Spannable::new(
+                    Expr::Literal(Literal::Text("\n".to_string())),
+                    self.positions(),
+                ))
             }
             Some(Token::KwПи) | Some(Token::KwPi) => {
                 self.advance();
-                Ok(Expr::Literal(Literal::Real(std::f64::consts::PI)))
+                Ok(Spannable::new(
+                    Expr::Literal(Literal::Real(std::f64::consts::PI)),
+                    self.positions(),
+                ))
             }
             Some(Token::Ident(_)) => {
                 let name = self.expect_ident()?;
-                Ok(Expr::Name(name))
+                Ok(Spannable::new(Expr::Name(name), self.positions()))
             }
             Some(Token::LParen) => {
+                let start_pos = self.positions().0;
                 self.advance();
+
+                // Empty tuple `()`
+                if self.peek() == Some(&Token::RParen) {
+                    self.advance();
+                    return Ok(Spannable::new(
+                        Expr::TupleConstruct(vec![]),
+                        self.positions(),
+                    ));
+                }
+
                 let inner = self.parse_expression()?;
+
+                // Tuple case
+                // Note: single element tuples should be `(<el>,)` with comma
+                if self.peek() == Some(&Token::Comma) {
+                    self.advance();
+                    let mut elements = vec![Box::new(inner)];
+                    if self.peek() != Some(&Token::RParen) {
+                        elements.push(Box::new(self.parse_expression()?));
+                        while self.eat(&Token::Comma) {
+                            elements.push(Box::new(self.parse_expression()?));
+                        }
+                    }
+                    self.expect(&Token::RParen)?;
+                    let end_pos = self.positions().1;
+                    return Ok(Spannable::new(
+                        Expr::TupleConstruct(elements),
+                        (start_pos, end_pos),
+                    ));
+                }
+
                 self.expect(&Token::RParen)?;
                 Ok(inner)
             }
-            Some(Token::TupleOpen) => {
-                self.advance();
-                let mut elements = Vec::new();
-                if self.peek() != Some(&Token::TupleClose) {
-                    elements.push(Box::new(self.parse_expression()?));
-                    while self.eat(&Token::Comma) {
-                        elements.push(Box::new(self.parse_expression()?));
-                    }
-                }
-                self.expect(&Token::TupleClose)?;
-                Ok(Expr::TupleConstruct(elements))
-            }
             Some(_) => {
-                let (position, found, _) = self.current.as_ref().unwrap();
+                let (position_start, found, position_end) = self.current.as_ref().unwrap();
                 Err(ParseError::UnexpectedToken {
-                    position: *position,
+                    position_start: *position_start,
+                    position_end: *position_end,
                     found: found.clone(),
-                    expected: "expression".to_string(),
+                    expected: "выражение".to_string(),
                 })
             }
             None => Err(ParseError::UnexpectedEof {

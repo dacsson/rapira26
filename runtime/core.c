@@ -1,11 +1,50 @@
+#include "raperr/include/raperr.h"
 #include "rapobject.h"
 #include "rapvalue.h"
 #include "runtime.h"
 #include "runtime_internal.h"
 
+#ifndef _SOURCE_
+#define _SOURCE_ "не удалось получить исходный текст файла"
+#endif
+
+#ifndef MODULE_PATH
+#define MODULE_PATH "не удалось получить путь к файлу модуля"
+#endif
+
+/// Read overriden `__FILE__` contents
+static char *readcontent(const char *filename) {
+  char *fcontent = NULL;
+  int fsize = 0;
+  FILE *fp;
+
+  fp = fopen(filename, "r");
+  if (fp) {
+    fseek(fp, 0, SEEK_END);
+    fsize = ftell(fp);
+    rewind(fp);
+
+    fcontent = (char *)malloc(sizeof(char) * fsize);
+    fread(fcontent, 1, fsize, fp);
+
+    fclose(fp);
+  }
+  return fcontent;
+}
+
 // Fatal error - print a message and exit.
 void RAP_fatal_error(const char *message) {
-  fprintf(stderr, "Упс, ошибка: %s\n", message);
+  char *cnts = readcontent(RAP_curret_module_path);
+  if (cnts == NULL) {
+    fprintf(stderr, "Упс, ошибка, не нашёл исходный файл %s\n",
+            RAP_curret_module_path);
+    exit(1);
+  }
+
+  runtime_error_description(cnts, RAP_curret_module_path, RAP_current_pos_start,
+                            RAP_current_pos_end, message);
+
+  free(cnts);
   exit(1);
 }
 
@@ -161,8 +200,7 @@ char *RAP_stringify_object(RAP_Value obj) {
     double abs_fractional_part = fabs(fractional_part);
     bool has_only_zeros = abs_fractional_part < DBL_EPSILON;
     if (has_only_zeros) {
-      size_t needed_size =
-          snprintf(NULL, 0, "%.1f", obj_ptr->float_val);
+      size_t needed_size = snprintf(NULL, 0, "%.1f", obj_ptr->float_val);
       char *str = malloc(needed_size + 1);
       snprintf(str, needed_size + 1, "%.1f", obj_ptr->float_val);
       return str;
@@ -186,11 +224,11 @@ char *RAP_stringify_object(RAP_Value obj) {
   }
   case RAP_OBJECT_TAG_TUPLE: {
     if (obj_ptr->tuple_val->count == 0) {
-      return strdup("<* *>");
+      return strdup("( )");
     }
     size_t len = 0, cap = 0;
     char *buf = NULL;
-    buf = rap_strbuf_append(buf, &len, &cap, "<* ");
+    buf = rap_strbuf_append(buf, &len, &cap, "( ");
     for (uint32_t i = 0; i < obj_ptr->tuple_val->count; i++) {
       if (i > 0) {
         buf = rap_strbuf_append(buf, &len, &cap, ", ");
@@ -199,7 +237,7 @@ char *RAP_stringify_object(RAP_Value obj) {
       buf = rap_strbuf_append(buf, &len, &cap, item_str);
       free(item_str);
     }
-    buf = rap_strbuf_append(buf, &len, &cap, " *>");
+    buf = rap_strbuf_append(buf, &len, &cap, " )");
     return buf;
   }
   case RAP_OBJECT_TAG_SLICE: {

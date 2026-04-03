@@ -8,6 +8,7 @@
 
 use rapira26::opt::deframe::DeframePass;
 use rapira26::opt::opt_pass::{OptimizationPassOpts, run_optimizations};
+use rapira26::pretty::pretty_parse_error;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -69,7 +70,7 @@ fn run_rap_file(rap_path: &Path) -> Result<String, String> {
     let parser = rapira26::parser::Parser::new(token_stream);
     let mut program = parser
         .parse_program()
-        .map_err(|e| format!("parse error: {e}"))?;
+        .map_err(|e| pretty_parse_error(&source, rap_path.to_str().unwrap(), e))?;
 
     // Apply optimizations
     run_optimizations(
@@ -83,7 +84,7 @@ fn run_rap_file(rap_path: &Path) -> Result<String, String> {
     });
 
     let codegen = rapira26::codegen::Codegen::new();
-    let c_code = codegen.generate(&program);
+    let c_code = codegen.generate(&program, rap_path.canonicalize().unwrap().to_str().unwrap());
 
     // Write C to a temp file
     let temp_dir = std::env::temp_dir().join("rapira26_e2e");
@@ -101,9 +102,12 @@ fn run_rap_file(rap_path: &Path) -> Result<String, String> {
         .arg(&c_path)
         .arg("-o")
         .arg(&bin_path)
-        .arg(format!("-I{}", rt.display()))
+        .arg(format!("-I{}", rt.display())) // runtime C library
+        .arg(format!("-I{}", rt.join("raperr/include").display())) // runtime error C library
         .arg(format!("-L{}", rt.join("lib").display()))
+        .arg(format!("-L{}", rt.join("raperr/target/release").display()))
         .arg("-lrapruntime")
+        .arg("-lraperr")
         .arg("-lm")
         .output()
         .map_err(|e| format!("gcc launch: {e}"))?;
