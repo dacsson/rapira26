@@ -34,13 +34,15 @@ static char *readcontent(const char *filename) {
 
 // Fatal error - print a message and exit.
 void RAP_fatal_error(const char *message) {
-  char* cnts = readcontent(RAP_curret_module_path);
+  char *cnts = readcontent(RAP_curret_module_path);
   if (cnts == NULL) {
-    fprintf(stderr, "Упс, ошибка, не нашёл исходный файл %s\n", RAP_curret_module_path);
+    fprintf(stderr, "Упс, ошибка, не нашёл исходный файл %s\n",
+            RAP_curret_module_path);
     exit(1);
   }
 
-  runtime_error_description(cnts, RAP_curret_module_path, 0, 0, message);
+  runtime_error_description(cnts, RAP_curret_module_path, RAP_current_pos_start,
+                            RAP_current_pos_end, message);
 
   free(cnts);
   exit(1);

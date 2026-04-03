@@ -182,9 +182,10 @@ impl Codegen {
         result.push_str("#include <string.h>\n");
         result.push('\n');
         result.push_str(&format!(
-            "char* RAP_curret_module_path = \"{}\";\n\n",
+            "char* RAP_curret_module_path = \"{}\";\n",
             filename
         ));
+        result.push_str("size_t RAP_current_pos_start=0;\nsize_t RAP_current_pos_end=0;\n\n");
         result.push_str(&self.forward_decls);
         result.push_str("int main(void) {\n");
         result.push_str("  struct RAP_CallFrame _main_frame = {NULL, NULL, 0};\n");
@@ -308,6 +309,15 @@ impl Codegen {
     }
 
     fn emit_function_def(&mut self, func_def_span: &Spannable<FunctionDefinition>) {
+        self.emit_line(&format!(
+            "RAP_current_pos_start={};",
+            func_def_span.position_start
+        ));
+        self.emit_line(&format!(
+            "RAP_current_pos_end={};",
+            func_def_span.position_end
+        ));
+
         let func_def = &func_def_span.node;
         let name = func_def.name.as_deref().unwrap_or("_anon");
         let c_func_name = self.mangle_func_name(name);
@@ -400,6 +410,15 @@ impl Codegen {
     }
 
     fn emit_procedure_def(&mut self, proc_def_span: &Spannable<ProcedureDefinition>) {
+        self.emit_line(&format!(
+            "RAP_current_pos_start={};",
+            proc_def_span.position_start
+        ));
+        self.emit_line(&format!(
+            "RAP_current_pos_end={};",
+            proc_def_span.position_end
+        ));
+
         let proc_def = &proc_def_span.node;
         let name = proc_def.name.as_deref().unwrap_or("_anon");
         let c_func_name = self.mangle_func_name(name);
@@ -558,6 +577,12 @@ impl Codegen {
 
     fn emit_statement(&mut self, stmt_span: &Spannable<Statement>) {
         let stmt = &stmt_span.node;
+
+        self.emit_line(&format!(
+            "RAP_current_pos_start={};",
+            stmt_span.position_start
+        ));
+        self.emit_line(&format!("RAP_current_pos_end={};", stmt_span.position_end));
 
         // Each statement gets its own temp tracking context.
         // Inner statements (in if/loop bodies) save and restore, so they don't
@@ -1120,6 +1145,12 @@ impl Codegen {
     /// Flushes its own temps since they're inside the C loop block.
     fn emit_while_condition(&mut self, while_cond: &Option<Box<Spannable<Expr>>>) {
         if let Some(cond_expr) = while_cond {
+            self.emit_line(&format!(
+                "RAP_current_pos_start={};",
+                cond_expr.position_start
+            ));
+            self.emit_line(&format!("RAP_current_pos_end={};", cond_expr.position_end));
+
             let saved = std::mem::take(&mut self.statement_temps);
             let cond_temp = self.emit_expression(cond_expr);
             self.emit_line(&format!("if (!RAP_BOOL_VALUE({})) {{", cond_temp));
@@ -1142,6 +1173,12 @@ impl Codegen {
     /// Flushes its own temps since they're inside the C loop block.
     fn emit_post_condition(&mut self, post_cond: &Option<Box<Spannable<Expr>>>) {
         if let Some(cond_expr) = post_cond {
+            self.emit_line(&format!(
+                "RAP_current_pos_start={};",
+                cond_expr.position_start
+            ));
+            self.emit_line(&format!("RAP_current_pos_end={};", cond_expr.position_end));
+
             let saved = std::mem::take(&mut self.statement_temps);
             let cond_temp = self.emit_expression(cond_expr);
             self.emit_line(&format!("if (RAP_BOOL_VALUE({})) break;", cond_temp));
@@ -1153,6 +1190,12 @@ impl Codegen {
     /// Emit code for an expression. Returns the temp variable name holding the result.
     fn emit_expression(&mut self, expr_node: &Spannable<Expr>) -> String {
         let expr = &expr_node.node;
+
+        self.emit_line(&format!(
+            "RAP_current_pos_start={};",
+            expr_node.position_start
+        ));
+        self.emit_line(&format!("RAP_current_pos_end={};", expr_node.position_end));
 
         match expr {
             Expr::Literal(lit) => self.emit_literal(lit),
@@ -1342,6 +1385,18 @@ impl Codegen {
         arguments: &[Box<Spannable<Expr>>],
     ) -> String {
         let function = &function_node.node;
+
+        self.emit_line(&format!(
+            "RAP_current_pos_start={};",
+            function_node.position_start
+        ));
+        self.emit_line(&format!(
+            "RAP_current_pos_end={};",
+            arguments
+                .last()
+                .map(|i| i.position_end)
+                .unwrap_or(function_node.position_start)
+        ));
 
         // Check for built-in functions by name
         if let Expr::Name(name) = function {
@@ -1594,6 +1649,18 @@ impl Codegen {
     }
 
     fn emit_tuple_construct(&mut self, items: &[Box<Spannable<Expr>>]) -> String {
+        self.emit_line(&format!(
+            "RAP_current_pos_start={};",
+            items[0].position_start
+        ));
+        self.emit_line(&format!(
+            "RAP_current_pos_end={};",
+            items
+                .last()
+                .map(|i| i.position_end)
+                .unwrap_or(items[0].position_start)
+        ));
+
         let item_temps: Vec<String> = items
             .iter()
             .map(|item| self.emit_expression(item))
