@@ -4,6 +4,7 @@ LIB_DIR = lib
 SRCS = core.c text.c tuple.c callable.c arithmetic.c builtins.c io.c
 OBJS = $(SRCS:%.c=$(BUILD_DIR)/%.o)
 HEADERS = rapobject.h runtime.h runtime_internal.h rapvalue.h
+CFLAGS = "-Lraperr/target/release -Lraperr -Iraperr/include"
 
 all: $(LIB_DIR)/librapruntime.a
 

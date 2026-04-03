@@ -1,13 +1,15 @@
 use rapira26::ast::*;
 use rapira26::lexer::Lexer;
 use rapira26::parser::Parser;
+use rapira26::pretty::pretty_parse_error;
 
 fn parse(source: &str) -> Program {
     let lexer = Lexer::new(source);
     let parser = Parser::new(lexer);
-    parser
-        .parse_program()
-        .unwrap_or_else(|error| panic!("parse error in {source:?}: {error}"))
+    parser.parse_program().unwrap_or_else(|e| {
+        let err = pretty_parse_error(source, &"", e);
+        panic!("{err}")
+    })
 }
 
 fn parse_first_statement(source: &str) -> Statement {
@@ -581,7 +583,7 @@ fn parse_return_from_function() {
 
 #[test]
 fn parse_empty_tuple() {
-    let statement = parse_first_statement("вывод: <* *>");
+    let statement = parse_first_statement("вывод: ()");
     match statement {
         Statement::Output { values, .. } => {
             assert!(matches!(&*values[0], Expr::TupleConstruct(elements) if elements.is_empty()));
@@ -592,7 +594,7 @@ fn parse_empty_tuple() {
 
 #[test]
 fn parse_tuple_with_elements() {
-    let statement = parse_first_statement("вывод: <* 1, 2, 3 *>");
+    let statement = parse_first_statement("вывод: (1, 2, 3)");
     match statement {
         Statement::Output { values, .. } => match &*values[0] {
             Expr::TupleConstruct(elements) => assert_eq!(elements.len(), 3),

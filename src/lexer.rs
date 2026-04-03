@@ -1,4 +1,4 @@
-//! WARNING: this lexer is 99% written by AI
+//! WARNING: this lexer is 95% written by AI
 //! Indentation-aware lexer for the Rapira language (spec Препринт 767).
 //!
 //! Produces `(byte_start, Token, byte_end)` triples.

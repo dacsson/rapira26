@@ -16,7 +16,7 @@ pub fn pretty_parse_error(source: &str, path: &str, err: ParseError) -> String {
                 .element(
                     Snippet::source(source).path(path).annotation(
                         AnnotationKind::Primary
-                            .span(position - 16..position)
+                            .span(position..position)
                             .label(format!("{message}")),
                     ),
                 )];

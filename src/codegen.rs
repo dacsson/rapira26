@@ -164,7 +164,7 @@ impl Codegen {
     }
 
     /// Main entry point: walk the whole program, return generated C source.
-    pub fn generate(mut self, program: &Program) -> String {
+    pub fn generate(mut self, program: &Program, filename: &str) -> String {
         self.create_scope(); // main scope
         for unit in &program.units {
             self.emit_program_unit(unit);
@@ -181,6 +181,10 @@ impl Codegen {
         result.push_str("#include <stdlib.h>\n");
         result.push_str("#include <string.h>\n");
         result.push('\n');
+        result.push_str(&format!(
+            "char* RAP_curret_module_path = \"{}\";\n\n",
+            filename
+        ));
         result.push_str(&self.forward_decls);
         result.push_str("int main(void) {\n");
         result.push_str("  struct RAP_CallFrame _main_frame = {NULL, NULL, 0};\n");

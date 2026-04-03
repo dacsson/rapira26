@@ -12,16 +12,13 @@ fn tokenize(source: &str) -> Vec<Token> {
 
 #[test]
 fn lex_control_flow_keywords() {
-    let tokens = tokenize("если то иначе все");
-    assert_eq!(
-        tokens,
-        vec![Token::KwЕсли, Token::KwТо, Token::KwИначе, Token::KwВсе]
-    );
+    let tokens = tokenize("если то иначе");
+    assert_eq!(tokens, vec![Token::KwЕсли, Token::KwТо, Token::KwИначе]);
 }
 
 #[test]
 fn lex_loop_keywords() {
-    let tokens = tokenize("для от до шаг пока повтор цикл кц по выход");
+    let tokens = tokenize("для от до шаг пока повтор цикл по выход");
     assert_eq!(
         tokens,
         vec![
@@ -32,7 +29,6 @@ fn lex_loop_keywords() {
             Token::KwПока,
             Token::KwПовтор,
             Token::KwЦикл,
-            Token::KwКц,
             Token::KwПо,
             Token::KwВыход,
         ]
@@ -41,13 +37,12 @@ fn lex_loop_keywords() {
 
 #[test]
 fn lex_definition_keywords() {
-    let tokens = tokenize("проц функ конец возврат чужие свои");
+    let tokens = tokenize("проц функ возврат чужие свои");
     assert_eq!(
         tokens,
         vec![
             Token::KwПроц,
             Token::KwФунк,
-            Token::KwКонец,
             Token::KwВозврат,
             Token::KwЧужие,
             Token::KwСвои,
@@ -285,12 +280,6 @@ fn lex_punctuation() {
     );
 }
 
-#[test]
-fn lex_tuple_brackets() {
-    let tokens = tokenize("<* *>");
-    assert_eq!(tokens, vec![Token::TupleOpen, Token::TupleClose]);
-}
-
 // ── Whitespace and comments ─────────────────────────────────────────────────
 
 #[test]
@@ -425,17 +414,17 @@ fn lex_function_call() {
 
 #[test]
 fn lex_tuple_literal() {
-    let tokens = tokenize("<* 1, 2, 3 *>");
+    let tokens = tokenize("( 1, 2, 3 )");
     assert_eq!(
         tokens,
         vec![
-            Token::TupleOpen,
+            Token::LParen,
             Token::Integer(1),
             Token::Comma,
             Token::Integer(2),
             Token::Comma,
             Token::Integer(3),
-            Token::TupleClose,
+            Token::RParen,
         ]
     );
 }
