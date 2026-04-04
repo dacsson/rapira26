@@ -4,39 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::*;
-
-/// Escape a string for embedding in a C string literal.
-fn escape_c_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\0' => out.push_str("\\0"),
-            c if c.is_ascii_control() => {
-                // Emit as octal escape for other control chars
-                for byte in c.to_string().bytes() {
-                    out.push_str(&format!("\\{:03o}", byte));
-                }
-            }
-            c if c.is_ascii_whitespace() => out.push(' '),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-/// Info needed to create a callable object at any call site.
-struct CallableInfo {
-    c_func_name: String,
-    /// (rapira_param_name, c_mode_constant)
-    params: Vec<(String, String)>,
-    is_function: bool,
-}
+use crate::{ast::*, pretty::pretty_parse_warning};
 
 /// A stack of declared variables in scope
 type ScopeVariablesStack = Vec<HashSet<String>>;
@@ -74,6 +42,7 @@ pub struct Codegen {
     inside_function: bool,
     /// Emit RAP_check_leaks() call and #define RAP_TEST_LEAKS
     check_leaks: bool,
+    filepath: String,
 }
 
 impl Codegen {
@@ -93,6 +62,7 @@ impl Codegen {
             foreign_vars: HashSet::new(),
             inside_function: false,
             check_leaks: false,
+            filepath: String::new(),
         }
     }
 
@@ -164,7 +134,9 @@ impl Codegen {
     }
 
     /// Main entry point: walk the whole program, return generated C source.
-    pub fn generate(mut self, program: &Program, filename: &str) -> String {
+    pub fn generate(mut self, program: &Program, filepath: &str) -> String {
+        self.filepath = filepath.to_string();
+
         self.create_scope(); // main scope
         for unit in &program.units {
             self.emit_program_unit(unit);
@@ -183,7 +155,7 @@ impl Codegen {
         result.push('\n');
         result.push_str(&format!(
             "char* RAP_curret_module_path = \"{}\";\n",
-            filename
+            filepath
         ));
         result.push_str("size_t RAP_current_pos_start=0;\nsize_t RAP_current_pos_end=0;\n\n");
         result.push_str(&self.forward_decls);
@@ -242,39 +214,72 @@ impl Codegen {
         let mut result = String::new();
         for ch in rapira_name.chars() {
             let mapped = match ch {
-                'А' | 'а' => "A",
-                'Б' | 'б' => "B",
-                'В' | 'в' => "V",
-                'Г' | 'г' => "G",
-                'Д' | 'д' => "D",
-                'Е' | 'е' => "E",
-                'Ё' | 'ё' => "YO",
-                'Ж' | 'ж' => "ZH",
-                'З' | 'з' => "Z",
-                'И' | 'и' => "I",
-                'Й' | 'й' => "J",
-                'К' | 'к' => "K",
-                'Л' | 'л' => "L",
-                'М' | 'м' => "M",
-                'Н' | 'н' => "N",
-                'О' | 'о' => "O",
-                'П' | 'п' => "P",
-                'Р' | 'р' => "R",
-                'С' | 'с' => "S",
-                'Т' | 'т' => "T",
-                'У' | 'у' => "U",
-                'Ф' | 'ф' => "F",
-                'Х' | 'х' => "KH",
-                'Ц' | 'ц' => "TS",
-                'Ч' | 'ч' => "CH",
-                'Ш' | 'ш' => "SH",
-                'Щ' | 'щ' => "SHCH",
-                'Ъ' | 'ъ' => "",
-                'Ы' | 'ы' => "Y",
-                'Ь' | 'ь' => "",
-                'Э' | 'э' => "E",
-                'Ю' | 'ю' => "YU",
-                'Я' | 'я' => "YA",
+                'А' => "A",
+                'а' => "a",
+                'Б' => "B",
+                'б' => "b",
+                'В' => "V",
+                'в' => "v",
+                'Г' => "G",
+                'г' => "g",
+                'Д' => "D",
+                'д' => "d",
+                'Е' => "E",
+                'е' => "e",
+                'Ё' => "YO",
+                'ё' => "yo",
+                'Ж' => "ZH",
+                'ж' => "zh",
+                'З' => "Z",
+                'з' => "z",
+                'И' => "I",
+                'и' => "i",
+                'Й' => "J",
+                'й' => "j",
+                'К' => "K",
+                'к' => "k",
+                'Л' => "L",
+                'л' => "l",
+                'М' => "M",
+                'м' => "m",
+                'Н' => "N",
+                'н' => "n",
+                'О' => "O",
+                'о' => "o",
+                'П' => "P",
+                'п' => "p",
+                'Р' => "R",
+                'р' => "r",
+                'С' => "S",
+                'с' => "s",
+                'Т' => "T",
+                'т' => "t",
+                'У' => "U",
+                'у' => "u",
+                'Ф' => "F",
+                'ф' => "f",
+                'Х' => "KH",
+                'х' => "kh",
+                'Ц' => "TS",
+                'ц' => "ts",
+                'Ч' => "CH",
+                'ч' => "ch",
+                'Ш' => "SH",
+                'ш' => "sh",
+                'Щ' => "SHCH",
+                'щ' => "shch",
+                'Ъ' => "",
+                'ъ' => "",
+                'Ы' => "Y",
+                'ы' => "y",
+                'Ь' => "",
+                'ь' => "",
+                'Э' => "E",
+                'э' => "e",
+                'Ю' => "YU",
+                'ю' => "yu",
+                'Я' => "YA",
+                'я' => "ya",
                 _ if ch.is_ascii_alphanumeric() || ch == '_' => {
                     result.push(ch);
                     continue;
@@ -1227,6 +1232,20 @@ impl Codegen {
                                 temp, self.current_frame, name
                             ));
                         } else {
+                            // Issue warning
+                            println!(
+                                "{}",
+                                pretty_parse_warning(
+                                    &std::fs::read_to_string(&self.filepath).unwrap(),
+                                    &self.filepath,
+                                    CodegenWarning::UndeclaredVariable(
+                                        expr_node.position_start,
+                                        name.clone(),
+                                        expr_node.position_end
+                                    )
+                                )
+                            );
+
                             // Undeclared variables are NULL by default
                             let mangled = self.mangle_name(name);
                             if !self.is_var_in_scope(&mangled) {
@@ -1649,17 +1668,19 @@ impl Codegen {
     }
 
     fn emit_tuple_construct(&mut self, items: &[Box<Spannable<Expr>>]) -> String {
-        self.emit_line(&format!(
-            "RAP_current_pos_start={};",
-            items[0].position_start
-        ));
-        self.emit_line(&format!(
-            "RAP_current_pos_end={};",
-            items
-                .last()
-                .map(|i| i.position_end)
-                .unwrap_or(items[0].position_start)
-        ));
+        if !items.is_empty() {
+            self.emit_line(&format!(
+                "RAP_current_pos_start={};",
+                items[0].position_start
+            ));
+            self.emit_line(&format!(
+                "RAP_current_pos_end={};",
+                items
+                    .last()
+                    .map(|i| i.position_end)
+                    .unwrap_or(items[0].position_start)
+            ));
+        }
 
         let item_temps: Vec<String> = items
             .iter()
@@ -1681,4 +1702,40 @@ impl Codegen {
         self.track_temp(&result);
         result
     }
+}
+
+/// Escape a string for embedding in a C string literal.
+fn escape_c_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\0"),
+            c if c.is_ascii_control() => {
+                // Emit as octal escape for other control chars
+                for byte in c.to_string().bytes() {
+                    out.push_str(&format!("\\{:03o}", byte));
+                }
+            }
+            c if c.is_ascii_whitespace() => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Info needed to create a callable object at any call site.
+struct CallableInfo {
+    c_func_name: String,
+    /// (rapira_param_name, c_mode_constant)
+    params: Vec<(String, String)>,
+    is_function: bool,
+}
+
+pub enum CodegenWarning {
+    UndeclaredVariable(usize, String, usize),
 }

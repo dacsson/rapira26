@@ -94,6 +94,7 @@ Fetures to add:
 пенделей :: 10 \ константа
 ```
 - Unicode support
+- Изменить синтаксис индексирования 
 
 We probably should change symbols `<` to use something more ergonomic for RU keyborads, something like:
 - Structs: `(имя: "иван", фамилия: "петров")`
