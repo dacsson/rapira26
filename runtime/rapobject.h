@@ -10,7 +10,6 @@
 // Tag identifies the type of a [RAP_Object]
 typedef enum {
   RAP_OBJECT_TAG_NULL,
-  RAP_OBJECT_TAG_LOGICAL,
   RAP_OBJECT_TAG_CALLABLE, // unifies proc and func
   RAP_OBJECT_TAG_INT,
   RAP_OBJECT_TAG_FLOAT,
@@ -30,7 +29,6 @@ typedef struct {
   RAP_ObjectTag tag;
   int refcount;
   union {
-    bool logical_val;
     int64_t int_val;
     double float_val;
     struct RAP_Tuple *text_val;

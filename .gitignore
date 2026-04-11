@@ -1,4 +1,5 @@
 /target
+/runtime/raperr/target
 /runtime/translated
 /*.o
 /*.a
