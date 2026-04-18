@@ -16,6 +16,7 @@ typedef enum {
   RAP_OBJECT_TAG_TEXT,
   RAP_OBJECT_TAG_TUPLE,
   RAP_OBJECT_TAG_SLICE,
+  RAP_OBJECT_TAG_VARIANT, // of user-defined type
 } RAP_ObjectTag;
 
 struct RAP_Tuple;
@@ -35,6 +36,7 @@ typedef struct {
     struct RAP_Tuple *tuple_val;
     struct RAP_Callable *callable_val;
     struct RAP_Slice *slice_val;
+    struct RAP_Variant *variant_val;
   };
 } RAP_Object;
 
@@ -95,6 +97,12 @@ struct RAP_Slice {
   RAP_Object *parent; // the tuple/text we're viewing
   int64_t from;       // inclusive start
   int64_t to;         // exclusive end
+};
+
+/// User-defined variant type
+struct RAP_Variant {
+  const char* name; // type name
+  void* payload;    // variant data
 };
 
 #endif // RAPIRA_OBJECT_H

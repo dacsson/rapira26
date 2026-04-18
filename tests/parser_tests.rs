@@ -353,17 +353,6 @@ fn parse_selection_value_match() {
     }
 }
 
-#[test]
-fn parse_selection_condition_list() {
-    let statement = parse_first_statement("выбор\n  при да: вывод: 1\n  при нет: вывод: 2");
-    match statement {
-        Statement::Selection(SelectionStatement::ConditionList { cases, .. }) => {
-            assert_eq!(cases.len(), 2);
-        }
-        other => panic!("expected Selection(ConditionList), got {other:?}"),
-    }
-}
-
 // ── Loops ───────────────────────────────────────────────────────────────────
 
 #[test]
@@ -682,6 +671,95 @@ fn parse_mixed_definitions_and_statements() {
     assert!(matches!(&program.units[1], ProgramUnit::Statement(_)));
 }
 
+#[test]
+fn parse_type_definition() {
+    let program = parse("тип Сезон\n Зима\n Весна\n Лето\n Осень");
+    assert_eq!(program.units.len(), 1);
+    assert!(matches!(&program.units[0], ProgramUnit::TypeDefinition(_)));
+    let ProgramUnit::TypeDefinition(Spannable {
+        node: TypeDefinition { name, variants },
+        ..
+    }) = &program.units[0]
+    else {
+        panic!("Expected a TypeDefinition unit");
+    };
+    assert_eq!(name, "Сезон");
+    assert_eq!(variants.len(), 4);
+    assert!(variants.contains_key("Зима"));
+    assert!(variants.contains_key("Весна"));
+    assert!(variants.contains_key("Лето"));
+    assert!(variants.contains_key("Осень"));
+}
+
+#[test]
+fn parse_complex_type_definition() {
+    let program = parse("тип ШкольныйЧел\n Ученик(имя, класс)\n Учитель(имя)\n Никто");
+    assert_eq!(program.units.len(), 1);
+    assert!(matches!(&program.units[0], ProgramUnit::TypeDefinition(_)));
+    let ProgramUnit::TypeDefinition(Spannable {
+        node: TypeDefinition { name, variants },
+        ..
+    }) = &program.units[0]
+    else {
+        panic!("Expected a TypeDefinition unit");
+    };
+    assert_eq!(name, "ШкольныйЧел");
+    assert_eq!(variants.len(), 3);
+    assert!(variants.contains_key("Ученик"));
+    assert!(variants.get("Ученик").unwrap().len() == 2);
+    assert!(variants.get("Ученик").unwrap().get(0).unwrap() == "имя");
+    assert!(variants.get("Ученик").unwrap().get(1).unwrap() == "класс");
+    assert!(variants.get("Учитель").unwrap().len() == 1);
+    assert!(variants.get("Учитель").unwrap().get(0).unwrap() == "имя");
+}
+
+#[test]
+fn parse_field_access() {
+    let program = parse("х := точечка.х");
+    assert_eq!(program.units.len(), 1);
+    let ProgramUnit::Statement(Spannable {
+        node: Statement::Assignment { target: _, value },
+        ..
+    }) = &program.units[0]
+    else {
+        panic!("Expected a Statement unit");
+    };
+
+    let Spannable {
+        node:
+            Expr::BinaryOp {
+                ref operator,
+                ref left,
+                ref right,
+            },
+        position_start: _,
+        position_end: _,
+    } = **value
+    else {
+        panic!("Expected a BinaryOp in the value");
+    };
+
+    let Spannable {
+        node: Expr::Name(ref lh),
+        ..
+    } = **left
+    else {
+        panic!("Expected a Name in the target");
+    };
+
+    let Spannable {
+        node: Expr::Name(ref rh),
+        ..
+    } = **right
+    else {
+        panic!("Expected a Name in the right-hand side");
+    };
+
+    assert_eq!(operator, &BinaryOperator::Dot);
+    assert_eq!(lh, "точечка");
+    assert_eq!(rh, "х");
+}
+
 // ── Example .rap files ──────────────────────────────────────────────────────
 
 #[test]
@@ -753,5 +831,17 @@ fn parse_example_11_type_checks() {
 #[test]
 fn parse_example_12_spec_examples() {
     let source = std::fs::read_to_string("tests/examples/12_spec_examples.rap").unwrap();
+    let _program = parse(&source);
+}
+
+#[test]
+fn parse_example_13_input() {
+    let source = std::fs::read_to_string("tests/examples/13_input.rap").unwrap();
+    let _program = parse(&source);
+}
+
+#[test]
+fn parse_example_14_user_types() {
+    let source = std::fs::read_to_string("tests/examples/14_user_types.rap").unwrap();
     let _program = parse(&source);
 }

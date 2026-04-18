@@ -1,3 +1,4 @@
+use rapira26::ast::{ProgramUnit, Spannable, TypeDefinition};
 use rapira26::lexer::{Lexer, Token};
 
 /// Collect all tokens from source, panicking on lexer errors.
@@ -442,6 +443,18 @@ fn lex_complex_expression() {
             Token::Integer(0),
         ]
     );
+}
+
+#[test]
+fn lex_type_definition() {
+    let program = tokenize("тип Сезон\n Зима\n Весна\n Лето\n Осень\n");
+    println!("{:?}", program);
+}
+
+#[test]
+fn parse_complex_type_definition() {
+    let program = tokenize("тип ШкольныйЧел\n Ученик(имя, класс)\n Учитель(имя)\n Никто");
+    println!("{:?}", program);
 }
 
 // ── Error cases ─────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Top-level program: an ordered sequence of definitions and statements
 /// (called "единица_общения_с_системой" in the spec §2.1).
@@ -12,9 +12,17 @@ pub enum ProgramUnit {
     Statement(Spannable<Statement>),
     ProcedureDefinition(Spannable<ProcedureDefinition>),
     FunctionDefinition(Spannable<FunctionDefinition>),
+    TypeDefinition(Spannable<TypeDefinition>),
 }
 
-/// проц NAME (params) ;; [name_decls] body конец
+/// тип NAME ;; NAME(params)+
+#[derive(Debug, Clone)]
+pub struct TypeDefinition {
+    pub name: String,
+    pub variants: HashMap<String, Vec<String>>,
+}
+
+/// проц NAME (params) ;; [name_decls] body
 #[derive(Debug, Clone)]
 pub struct ProcedureDefinition {
     pub name: Option<String>, // spec allows anonymous procedures as values
@@ -25,7 +33,7 @@ pub struct ProcedureDefinition {
     pub variables_need_saving: HashSet<String>,
 }
 
-/// функ NAME (params) ;; [name_decls] body конец
+/// функ NAME (params) ;; [name_decls] body
 #[derive(Debug, Clone)]
 pub struct FunctionDefinition {
     pub name: Option<String>,
@@ -129,6 +137,11 @@ pub enum LValue {
         from: Option<Box<Spannable<Expr>>>,
         to: Option<Box<Spannable<Expr>>>,
     },
+    /// Field:       X.field
+    Field {
+        left: Box<Spannable<Expr>>,
+        field: String,
+    },
 }
 
 /// Argument in a procedure call (spec §2.1 "факт_парам_проц")
@@ -142,15 +155,10 @@ pub enum CallArgument {
 
 #[derive(Debug, Clone)]
 pub enum SelectionStatement {
-    /// выбор expr при v1,v2: body ... [иначе body] все
+    /// выбор expr при v1,v2: body ... [иначе body]
     ValueMatch {
         expression: Box<Spannable<Expr>>,
         cases: Vec<Spannable<ValueMatchCase>>,
-        else_body: Option<Vec<Spannable<Statement>>>,
-    },
-    /// выбор при cond: body ... [иначе body] все
-    ConditionList {
-        cases: Vec<Spannable<ConditionCase>>,
         else_body: Option<Vec<Spannable<Statement>>>,
     },
 }
@@ -227,6 +235,7 @@ pub enum Expr {
         left: Box<Spannable<Expr>>,
         right: Box<Spannable<Expr>>,
     },
+
     UnaryOp {
         operator: UnaryOperator,
         operand: Box<Spannable<Expr>>,
@@ -261,6 +270,7 @@ pub enum BinaryOperator {
     NotEqual,       // /=
     And,            // и
     Or,             // или
+    Dot,            // .
 }
 
 #[derive(Debug, Clone, PartialEq)]

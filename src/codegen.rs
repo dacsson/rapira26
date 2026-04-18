@@ -42,6 +42,11 @@ pub struct Codegen {
     inside_function: bool,
     /// Emit RAP_check_leaks() call and #define RAP_TEST_LEAKS
     check_leaks: bool,
+    /// User declared types in current module,
+    /// we reuse AST defined typed since its just strings,
+    /// might change later
+    declared_types: Vec<TypeDefinition>,
+    /// Path to the source file being compiled
     filepath: String,
 }
 
@@ -62,6 +67,7 @@ impl Codegen {
             foreign_vars: HashSet::new(),
             inside_function: false,
             check_leaks: false,
+            declared_types: Vec::new(),
             filepath: String::new(),
         }
     }
@@ -81,6 +87,12 @@ impl Codegen {
 
     fn is_var_in_scope(&self, var: &str) -> bool {
         self.declared_vars.iter().any(|scope| scope.contains(var))
+    }
+
+    fn is_known_type(&self, var: &str) -> bool {
+        self.declared_types
+            .iter()
+            .any(|t| t.variants.contains_key(var))
     }
 
     /// Record a temp as needing dec_ref at statement end.
@@ -299,6 +311,18 @@ impl Codegen {
         format!("RAP_FUNC_{}", Self::transliterate(rapira_name))
     }
 
+    fn mangle_type_name(&self, rapira_name: &str) -> String {
+        format!("RAP_TYPE_{}", Self::transliterate(rapira_name))
+    }
+
+    fn mangle_type_variant_name(&self, type_name: &str, variant_name: &str) -> String {
+        format!(
+            "RAP_TYPE_CTR_{}_{}",
+            Self::transliterate(type_name),
+            Self::transliterate(variant_name)
+        )
+    }
+
     fn emit_statement_list(&mut self, stmts: &[Spannable<Statement>]) {
         for stmt in stmts {
             self.emit_statement(stmt);
@@ -310,7 +334,58 @@ impl Codegen {
             ProgramUnit::FunctionDefinition(func_def) => self.emit_function_def(func_def),
             ProgramUnit::ProcedureDefinition(proc_def) => self.emit_procedure_def(proc_def),
             ProgramUnit::Statement(stmt) => self.emit_statement(stmt),
+            ProgramUnit::TypeDefinition(type_def) => self.emit_type_def(type_def),
         }
+    }
+
+    fn emit_type_def(&mut self, type_def_span: &Spannable<TypeDefinition>) {
+        self.emit_line(&format!(
+            "RAP_current_pos_start={};",
+            type_def_span.position_start
+        ));
+        self.emit_line(&format!(
+            "RAP_current_pos_end={};",
+            type_def_span.position_end
+        ));
+
+        let saved_output = std::mem::take(&mut self.output);
+        let saved_indent = self.indent_level;
+
+        self.indent_level = 0;
+
+        // Define a struct for each variant
+        let type_def = &type_def_span.node;
+        for (variant_name, fields) in &type_def.variants {
+            self.emit_line(&format!("typedef struct {{"));
+            for field in fields {
+                self.emit_line(&format!("    RAP_Value {};", Self::transliterate(field)));
+            }
+            self.emit_line(&format!(
+                "}} {};\n",
+                self.mangle_type_variant_name(&type_def.name, variant_name)
+            ));
+        }
+
+        // Now create the custom tagged type
+        self.emit_line(&format!("typedef struct {{"));
+        self.emit_line(&format!("  uint16_t tag;"));
+        self.emit_line(&format!("  union {{"));
+        for (variant_name, _) in &type_def.variants {
+            self.emit_line(&format!(
+                "    {} {};",
+                self.mangle_type_variant_name(&type_def.name, variant_name),
+                Self::transliterate(variant_name)
+            ));
+        }
+        self.emit_line(&format!("  }};"));
+        self.emit_line(&format!("}} {};\n", self.mangle_type_name(&type_def.name)));
+
+        self.forward_decls.push_str(&self.output);
+
+        self.output = saved_output;
+        self.indent_level = saved_indent;
+
+        self.declared_types.push(type_def.clone());
     }
 
     fn emit_function_def(&mut self, func_def_span: &Spannable<FunctionDefinition>) {
@@ -939,6 +1014,7 @@ impl Codegen {
                     self.emit_line(&format!("RAP_dec_ref({});", value_temp));
                 }
             }
+            LValue::Field { left, field } => {}
         }
     }
 
@@ -994,33 +1070,15 @@ impl Codegen {
                 {
                     let conditions: Vec<String> = val_temps
                         .iter()
-                        .map(|vt| format!("RAP_BOOL_VALUE(RAP_equal({}, {}))", sel_temp, vt))
+                        .map(|vt| {
+                            format!(
+                                "RAP_get_variant_tag({}) == RAP_get_variant_tag({})",
+                                sel_temp, vt
+                            )
+                        })
                         .collect();
                     let keyword = if i == 0 { "if" } else { "} else if" };
                     self.emit_line(&format!("{} ({}) {{", keyword, conditions.join(" || ")));
-                    self.indent_level += 1;
-                    self.emit_statement_list(&case.node.body);
-                    self.indent_level -= 1;
-                }
-                if let Some(else_stmts) = else_body {
-                    self.emit_line("} else {");
-                    self.indent_level += 1;
-                    self.emit_statement_list(else_stmts);
-                    self.indent_level -= 1;
-                }
-                self.emit_line("}");
-            }
-
-            SelectionStatement::ConditionList { cases, else_body } => {
-                // Pre-evaluate all conditions before the if-else chain.
-                let cond_temps: Vec<String> = cases
-                    .iter()
-                    .map(|case| self.emit_expression(&case.node.condition))
-                    .collect();
-
-                for (i, (case, cond_temp)) in cases.iter().zip(cond_temps.iter()).enumerate() {
-                    let keyword = if i == 0 { "if" } else { "} else if" };
-                    self.emit_line(&format!("{} (RAP_BOOL_VALUE({})) {{", keyword, cond_temp));
                     self.indent_level += 1;
                     self.emit_statement_list(&case.node.body);
                     self.indent_level -= 1;
@@ -1192,6 +1250,60 @@ impl Codegen {
         }
     }
 
+    fn emit_type_constructor_call(
+        &mut self,
+        name: &str,
+        temp: &str,
+        arguments: &[Box<Spannable<Expr>>],
+    ) {
+        let type_def = self
+            .declared_types
+            .iter()
+            .find(|t| t.variants.contains_key(name))
+            .unwrap()
+            .clone();
+        let mangled_type_name = self.mangle_type_name(&type_def.name);
+        let ctr_tag = type_def
+            .variants
+            .iter()
+            .position(|(k, _)| k == name)
+            .unwrap();
+        let ctor_fields = type_def.variants.get(name).unwrap();
+
+        // First create the payload
+        self.emit_line(&format!(
+            "{} {}_{}_payload = {{",
+            mangled_type_name,
+            temp,
+            Self::transliterate(name)
+        ));
+        self.emit_line(&format!("  .tag = {},", ctr_tag));
+        self.emit_line(&format!("  .{} = {{", Self::transliterate(name)));
+
+        let arg_temps: Vec<String> = arguments
+            .iter()
+            .map(|arg| self.emit_expression(arg))
+            .collect();
+
+        for (i, field) in ctor_fields.iter().enumerate() {
+            self.emit_line(&format!(
+                "    .{} = {},",
+                Self::transliterate(field),
+                arg_temps[i]
+            ));
+        }
+
+        self.emit_line(&"  },");
+        self.emit_line(&format!("}};"));
+
+        self.emit_line(&format!(
+            "RAP_Value {} = RAP_create_custom_typed_obj(\"{}\", &{});",
+            temp.clone(),
+            mangled_type_name,
+            temp.clone().to_string() + "_" + &Self::transliterate(name) + "_payload"
+        ));
+    }
+
     /// Emit code for an expression. Returns the temp variable name holding the result.
     fn emit_expression(&mut self, expr_node: &Spannable<Expr>) -> String {
         let expr = &expr_node.node;
@@ -1224,6 +1336,8 @@ impl Codegen {
                             "RAP_Value {} = RAP_frame_get_foreign({}, \"{}\");",
                             temp, self.current_frame, name
                         ));
+                    } else if self.is_known_type(name) {
+                        self.emit_type_constructor_call(name, &temp, &[]);
                     } else {
                         // Variable needs saving in frame
                         if self.variables_need_saving.contains(name) {
@@ -1282,7 +1396,22 @@ impl Codegen {
             Expr::FunctionCall {
                 function,
                 arguments,
-            } => self.emit_function_call(function, arguments),
+            } => {
+                // Rules:
+                // - Function calls start with a lower letter
+                // - Type constructors start with a capital letter
+                if let Expr::Name(name) = &function.node {
+                    if self.is_known_type(name) {
+                        let temp = self.fresh_temp();
+                        self.emit_type_constructor_call(name, &temp, arguments);
+                        temp
+                    } else {
+                        self.emit_function_call(function, arguments)
+                    }
+                } else {
+                    self.emit_function_call(function, arguments)
+                }
+            }
 
             Expr::TupleConstruct(items) => self.emit_tuple_construct(items),
 
@@ -1376,6 +1505,7 @@ impl Codegen {
                 "RAP_create_logical_obj(RAP_BOOL_VALUE({}) || RAP_BOOL_VALUE({}))",
                 left, right
             ),
+            BinaryOperator::Dot => format!("RAP_get_field({}, {})", left, right),
         };
         self.emit_line(&format!("RAP_Value {} = {};", temp, rhs));
         self.track_temp(&temp);

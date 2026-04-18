@@ -24,6 +24,7 @@ RAP_Value RAP_create_callable_obj(struct RAP_CallFrame *frame_parent,
                                   uint32_t params_count, bool is_function);
 RAP_Parameter *RAP_create_parameter(RAP_ParameterMode mode, const char *name);
 RAP_Value RAP_create_logical_obj(bool value);
+RAP_Value RAP_create_custom_typed_obj(const char* name, void *value);
 
 // OBJECTS UTILITIES
 
@@ -104,6 +105,7 @@ void RAP_frame_set_foreign(struct RAP_CallFrame *frame, const char *name,
 #define RAP_GET_TUPLE_VAL(obj) (RAP_PTR_VALUE(obj)->tuple_val)
 #define RAP_GET_CALLABLE_VAL(obj) (RAP_PTR_VALUE(obj)->callable_val)
 #define RAP_GET_SLICE_VAL(obj) (RAP_PTR_VALUE(obj)->slice_val)
+#define RAP_GET_VARIANT_VAL(obj) (RAP_PTR_VALUE(obj)->variant_val)
 
 #define RAP_IS_FLOAT(v)                                                        \
   (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_FLOAT)
@@ -115,6 +117,8 @@ void RAP_frame_set_foreign(struct RAP_CallFrame *frame, const char *name,
   (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_SLICE)
 #define RAP_IS_NULL(v)                                                         \
   (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_NULL)
+#define RAP_IS_VARIANT(v)                                                      \
+  (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_VARIANT)
 
 char *RAP_stringify_object(RAP_Value obj);
 
@@ -137,6 +141,10 @@ RAP_Value RAP_sign(RAP_Value a);
 RAP_Value RAP_input_text(void);
 /// Read a line from stdin, parse as int/float/text. Returns typed object.
 RAP_Value RAP_input_value(void);
+
+// CUSTOM TYPES
+
+uint16_t RAP_get_variant_tag(RAP_Value val);
 
 // REFERENCE COUNTING
 

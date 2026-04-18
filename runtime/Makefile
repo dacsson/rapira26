@@ -1,7 +1,7 @@
 CC = gcc
 BUILD_DIR = build
 LIB_DIR = lib
-SRCS = core.c text.c tuple.c callable.c arithmetic.c builtins.c io.c
+SRCS = core.c text.c tuple.c callable.c arithmetic.c builtins.c io.c variant.c
 OBJS = $(SRCS:%.c=$(BUILD_DIR)/%.o)
 HEADERS = rapobject.h runtime.h runtime_internal.h rapvalue.h
 DEFAULT_CFLAGS = "-Lraperr/target/release -Lraperr -Iraperr/include"

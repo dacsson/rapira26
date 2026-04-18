@@ -87,6 +87,7 @@ pub enum Token {
     Less,           // <
     Greater,        // >
     InputArrow,     // =>  (input parameter marker)
+    Dot,            // .
 
     // ── Punctuation ───────────────────────────────────────────────────────
     LParen,   // (
@@ -95,6 +96,9 @@ pub enum Token {
     RBracket, // ]
     Colon,    // :
     Comma,    // ,
+
+    // Custom types
+    KwТип, // тип
 }
 
 impl std::fmt::Display for Token {
@@ -162,6 +166,8 @@ impl std::fmt::Display for Token {
             Token::RBracket => write!(f, "`]`"),
             Token::Colon => write!(f, "`:`"),
             Token::Comma => write!(f, "`,`"),
+            Token::Dot => write!(f, "`.`"),
+            Token::KwТип => write!(f, "тип"),
         }
     }
 }
@@ -416,6 +422,7 @@ impl<'input> Lexer<'input> {
             "пс" => Token::KwПс,
             "пи" => Token::KwПи,
             "pi" => Token::KwPi,
+            "тип" => Token::KwТип,
             other => Token::Ident(other.to_string()),
         }
     }
@@ -686,6 +693,7 @@ impl<'input> Lexer<'input> {
             '[' => Ok(Token::LBracket),
             ']' => Ok(Token::RBracket),
             ',' => Ok(Token::Comma),
+            '.' => Ok(Token::Dot),
 
             unknown => Err(LexerError {
                 position: token_start,
