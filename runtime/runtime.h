@@ -146,6 +146,9 @@ RAP_Value RAP_input_value(void);
 
 uint16_t RAP_get_variant_tag(RAP_Value val);
 
+#define RAP_GET_FIELD(typename, val, field) \
+  ((typename*)RAP_PTR_VALUE(val)->variant_val->payload)->field
+
 // REFERENCE COUNTING
 
 // RAP_inc_ref takes a RAP_Value, no-op for inline values (SMI, bool, double)
