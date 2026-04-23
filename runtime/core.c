@@ -183,9 +183,6 @@ char *RAP_stringify_object(RAP_Value obj) {
   case RAP_OBJECT_TAG_NULL: {
     return strdup("пусто");
   }
-  case RAP_OBJECT_TAG_LOGICAL: {
-    return strdup(obj_ptr->logical_val ? "да" : "нет");
-  }
   // TODO: re-introduce when BigInt is supported
   // case RAP_OBJECT_TAG_INT: {
   //   size_t needed_size =

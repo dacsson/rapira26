@@ -94,11 +94,13 @@ Fetures to add:
 пенделей :: 10 \ константа
 ```
 - Unicode support
+- Изменить синтаксис индексирования 
 
 We probably should change symbols `<` to use something more ergonomic for RU keyborads, something like:
 - Structs: `(имя: "иван", фамилия: "петров")`
 - tuple: `(1, 2, 3)`
 - Sets: `(1; 1+1; <1, 5>)`
+- Out params: `проц трансформер(имя, вых транс)`; `вых` вместо <=
 
 ### Step 7 - Semantic analysis
 
@@ -110,8 +112,9 @@ possible errors to find (at this stage):
 - Function call arity
 - Tuple bound checks (?)
 - Check for existence of requested "чужие" variables
+- Types and ctrs should start with big letters 
 
-General semantic anal. idea:
+General semantic anal. idea maybe for way way later:
 - Have N levels of checks/strictness/safety/...
   - 1st if Prototyping, no type checking minimal semcheck
   - 2nd is Refactoring, type checking for TYPED MODULES, check for unknown vars
@@ -119,11 +122,11 @@ General semantic anal. idea:
   - 3d is Safety, type checking, check for unknown and unititalized (?) vars, disables refcounting, enables manual memory handling (?)
     - Maybe some sort of safety feature like borrow checking or whatever
 
-### Step 8 — Optional type hints with flow typing
-Leverage `тип_*` checks for static type narrowing. When the compiler can prove a variable's type from a guard (`если тип_цел(X) то ...`), emit direct typed operations instead of polymorphic dispatch. Optional type annotations on parameters and variables.
-
-### Step 9 — Module system
+### Step 10 — Module system
 Import/export mechanism for splitting programs across files. Spec §1.6 sketches modules and devices — design a modern take that supports namespacing and selective imports.
+
+### Step 9 — Optional type hints with flow typing
+Leverage `тип_*` checks for static type narrowing. When the compiler can prove a variable's type from a guard (`если тип_цел(X) то ...`), emit direct typed operations instead of polymorphic dispatch. Optional type annotations on parameters and variables.
 
 ### Step 10 — OOP / Object system
 User-defined object types with fields and methods. Design TBD — could be prototype-based (like Lua) or class-based.

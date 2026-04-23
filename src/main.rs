@@ -1,80 +1,62 @@
 use std::env;
 use std::path::PathBuf;
-use std::process::Command;
 
 use clap::Parser;
+use rapira26::codegen::{CodegenTargetName, run_codegen};
 use rapira26::opt::deframe::DeframePass;
 use rapira26::opt::opt_pass::{OptimizationPassOpts, run_optimizations};
 use rapira26::pretty::pretty_parse_error;
 
 #[derive(Parser)]
-#[command(name = "rapira26", about = "Rapira language compiler")]
+#[command(name = "рапик", about = "Компилятор языка рапира26")]
 struct Cli {
-    /// Source file (.rap)
-    source: PathBuf,
+    /// Исходный файл (.рап/.rap)
+    файл: PathBuf,
 
-    /// Dump the AST and exit
+    /// Вывести AST и выйти
     #[arg(long)]
-    dump_ast: bool,
+    дамп_аст: bool,
 
-    /// Emit generated C code to stdout and exit
+    /// Вывести сгенерированный C код и выйти
     #[arg(long)]
-    emit_c: bool,
+    дамп_си: bool,
 
-    /// Compile and run the program
+    /// Скомпилировать и запустить программу
     #[arg(long)]
-    run: bool,
+    запуск: bool,
 
-    /// Run in REPL mode
+    /// Запуск в режиме ПИВИС/REPL
     #[arg(long)]
-    repl: bool,
+    пивис: bool,
 
-    /// Enable leak checking (compile with RAP_TEST_LEAKS)
+    /// Включить проверку утечек (компилируй с RAP_TEST_LEAKS)
     #[arg(long)]
-    check_leaks: bool,
+    вкл_проверку_утечек: bool,
 
-    /// Flags to be passed to C compiler
+    /// Флаги для передачи компилятору бэкенда
     #[arg(long)]
-    cflags: Vec<String>,
+    флаги: Vec<String>,
 
-    /// Dump optimization passes debug info
+    /// Вывести отладочную информацию о проходах оптимизации
     #[arg(long)]
-    dump_opts: bool,
+    дамп_опт_дебаг: bool,
+
+    /// Выбор бэкенда для генерации кода
+    #[arg(long, value_enum, default_value_t = CodegenTargetName::C)]
+    бэкенд: CodegenTargetName,
 }
-
-// TODO:
-/// Repl mode works like this:
-/// - Reads a line of input from the user
-/// - Parses and compiles the input
-/// - Executes the compiled code
-/// - The next line user has entered is added to the program and compiled again
-///     Therefore we need to save all input as a single program
-/// - Loops until the user exits
-// fn repl_mode() {
-//     let mut source = String::new();
-//     loop {
-//         let mut input = String::new();
-//         std::io::stdin().read_line(&mut input).unwrap();
-//         // source.push_str(&input);
-
-//         let token_stream = rapira26::lexer::Lexer::new(&input);
-//         let parser = rapira26::parser::Parser::new(token_stream);
-
-//         let
-//     }
-// }
 
 fn main() {
     let cli = Cli::parse();
 
-    if cli.repl {
+    if cli.пивис {
         // repl_mode();
         println!("До новых встреч!");
         return;
     }
 
-    let source = std::fs::read_to_string(&cli.source).unwrap_or_else(|error| {
-        eprintln!("error reading {:?}: {error}", cli.source);
+    let source = std::fs::read_to_string(&cli.файл).unwrap_or_else(|error| {
+        eprintln!("error reading {:?}: {error}", cli.файл);
         std::process::exit(1);
     });
 
@@ -86,13 +68,13 @@ fn main() {
         Err(error) => {
             eprintln!(
                 "{}",
-                pretty_parse_error(&source, cli.source.to_str().unwrap(), error)
+                pretty_parse_error(&source, cli.файл.to_str().unwrap(), error)
             );
             std::process::exit(1);
         }
     };
 
-    if cli.dump_ast {
+    if cli.дамп_аст {
         println!("{program:#?}");
         return;
     }
@@ -102,7 +84,7 @@ fn main() {
         &mut program,
         &[&DeframePass],
         &OptimizationPassOpts {
-            dump: cli.dump_opts,
+            dump: cli.дамп_опт_дебаг,
         },
     )
     .unwrap_or_else(|error| {
@@ -111,114 +93,20 @@ fn main() {
     });
 
     // Run codegen
-    let codegen = rapira26::codegen::Codegen::new().with_check_leaks(cli.check_leaks);
-    let c_code = codegen.generate(
-        &program,
-        cli.source.canonicalize().unwrap().to_str().unwrap(),
-    );
-
-    if cli.emit_c {
-        print!("{c_code}");
-        return;
-    }
-
-    let file_name = cli
-        .source
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("a");
-    let c_path = env::current_dir()
-        .unwrap()
-        .join(PathBuf::from(file_name).with_extension("c"));
-
-    let binary_path = env::current_dir()
-        .unwrap()
-        .join(PathBuf::from(file_name).with_extension(""));
-
-    std::fs::write(&c_path, &c_code).unwrap_or_else(|error| {
-        eprintln!("error writing {:?}: {error}", c_path);
-        std::process::exit(1);
-    });
-
-    let runtime_dir = find_runtime_dir();
-
-    let status = Command::new("gcc")
-        .arg(&c_path)
-        .arg("-o")
-        .arg(&binary_path)
-        .arg(format!("-I{}", runtime_dir.display())) // runtime C library
-        .arg(format!(
-            "-I{}",
-            runtime_dir.join("raperr/include").display()
-        )) // runtime error C library
-        .arg(format!("-L{}", runtime_dir.join("lib").display()))
-        .arg(format!(
-            "-L{}",
-            runtime_dir.join("raperr/target/release").display()
-        ))
-        .arg("-lrapruntime")
-        .arg("-lraperr")
-        .arg("-lm")
-        .args(cli.cflags)
-        .status()
-        .unwrap_or_else(|error| {
-            eprintln!("failed to run gcc: {error}");
-            std::process::exit(1);
-        });
-
-    if !status.success() {
-        eprintln!("gcc failed with {status}");
-        std::process::exit(1);
-    }
-
-    // Clean up generated C file
-    if let Err(error) = std::fs::remove_file(&c_path) {
-        eprintln!("failed to remove {:?}: {error}", c_path);
-    }
-
-    if cli.run {
-        let status = Command::new(&binary_path).status().unwrap_or_else(|error| {
-            eprintln!("failed to run {:?}: {error}", binary_path);
-            std::process::exit(1);
-        });
-
-        // Clean up generated binary
-        if let Err(error) = std::fs::remove_file(&binary_path) {
-            eprintln!("failed to remove {:?}: {error}", binary_path);
-        }
-
-        std::process::exit(status.code().unwrap_or(1));
-    }
-}
-
-/// Find the runtime/ directory containing librapruntime.a and headers.
-/// Checks:
-/// 1. $RAPIRA_RUNTIME env var
-/// 2. Next to the compiler binary
-/// 3. ./runtime/ in cwd (development)
-fn find_runtime_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("RAPIRA_RUNTIME") {
-        let candidate = PathBuf::from(dir);
-        if candidate.join("lib/librapruntime.a").exists() {
-            return candidate;
+    match cli.бэкенд {
+        CodegenTargetName::C => {
+            run_codegen(
+                &mut rapira26::codegen::cgen::CGen::new().with_check_leaks(cli.вкл_проверку_утечек),
+                &program,
+                &cli.файл.canonicalize().unwrap(),
+                &env::current_dir().unwrap(),
+                cli.флаги.as_slice(),
+                cli.запуск,
+            )
+            .unwrap_or_else(|error| {
+                eprintln!("Кодоген не справился: {error}");
+                std::process::exit(1);
+            });
         }
     }
-
-    if let Ok(exe) = std::env::current_exe() {
-        let candidate = exe.parent().unwrap().join("runtime");
-        if candidate.join("lib/librapruntime.a").exists() {
-            return candidate;
-        }
-    }
-
-    let candidate = PathBuf::from("runtime");
-    if candidate.join("lib/librapruntime.a").exists() {
-        return candidate;
-    }
-
-    eprintln!(
-        "error: cannot find librapruntime.a (tried $RAPIRA_RUNTIME, next to binary, and ./runtime/)\n\
-         hint: run 'make' in the runtime/ directory first"
-    );
-    std::process::exit(1);
 }

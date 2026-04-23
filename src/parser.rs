@@ -10,7 +10,7 @@
 //! The `возврат` ambiguity (bare `возврат` vs `возврат expr`) is resolved greedily:
 //! if the next token can start an expression, we parse an expression.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::lexer::{Lexer, LexerError, Token};
@@ -205,8 +205,40 @@ impl<'input> Parser<'input> {
             Some(Token::KwФунк) => Ok(ProgramUnit::FunctionDefinition(
                 self.parse_function_definition()?,
             )),
+            Some(Token::KwТип) => Ok(ProgramUnit::TypeDefinition(self.parse_type_definition()?)),
             _ => Ok(ProgramUnit::Statement(self.parse_statement()?)),
         }
+    }
+
+    fn parse_type_definition(&mut self) -> Result<Spannable<TypeDefinition>, ParseError> {
+        let (pos_start, _, _) = self.expect(&Token::KwТип)?;
+        let name = self.expect_ident()?;
+        self.skip_newlines();
+        self.expect(&Token::Indent)?;
+
+        // Now parser all variants
+        let mut variants = HashMap::new();
+        while self.peek() != Some(&Token::Dedent) {
+            let name = self.expect_ident()?;
+            let parameters = if self.peek() == Some(&Token::LParen) {
+                self.advance();
+                let params = self.parse_func_parameter_list()?;
+                self.expect(&Token::RParen)?;
+                params
+            } else {
+                vec![]
+            };
+            variants.insert(name, parameters);
+            self.skip_newlines();
+        }
+
+        self.expect(&Token::Dedent)?;
+
+        Ok(Spannable {
+            node: TypeDefinition { name, variants },
+            position_start: pos_start,
+            position_end: self.positions().1,
+        })
     }
 
     fn parse_procedure_definition(&mut self) -> Result<Spannable<ProcedureDefinition>, ParseError> {
@@ -435,6 +467,27 @@ impl<'input> Parser<'input> {
                     (start_pos, end_pos),
                 ))
             }
+            // EXPR.FIELD := expr - mutating a field
+            Some(Token::Dot) => {
+                self.advance();
+                let field = self.expect_ident()?;
+                self.expect(&Token::Assign)?;
+                let value = self.parse_expression()?;
+                let end_pos = self.positions().1;
+                Ok(Spannable::new(
+                    Statement::Assignment {
+                        target: Spannable::new(
+                            LValue::Field {
+                                left: Box::new(Spannable::new(Expr::Name(name), self.positions())),
+                                field,
+                            },
+                            (start_pos, end_pos),
+                        ),
+                        value: Box::new(value),
+                    },
+                    (start_pos, end_pos),
+                ))
+            }
             // NAME[...] := expr — subscript/slice assignment
             Some(Token::LBracket) => {
                 self.advance(); // consume [
@@ -626,11 +679,6 @@ impl<'input> Parser<'input> {
             self.expect(&Token::Indent)?;
             self.skip_newlines();
 
-            if self.peek() == Some(&Token::KwПри) {
-                // Form 2: condition list (no expression before при)
-                return self.parse_selection_condition_list_in_block();
-            }
-
             // Shouldn't happen — выбор block should start with при
             return Err(ParseError::UnexpectedToken {
                 position_end: self.positions().0,
@@ -694,42 +742,6 @@ impl<'input> Parser<'input> {
 
         Ok(Spannable::new(
             ValueMatchCase { values, body },
-            (start_pos, end_pos),
-        ))
-    }
-
-    fn parse_selection_condition_list_in_block(
-        &mut self,
-    ) -> Result<Spannable<Statement>, ParseError> {
-        let start_pos = self.positions().0;
-
-        let mut cases = Vec::new();
-        while self.peek() == Some(&Token::KwПри) {
-            let start_pos_case = self.positions().0;
-            self.advance(); // consume при
-            let condition = Box::new(self.parse_expression()?);
-            self.expect(&Token::Colon)?;
-
-            let body = self.parse_block_or_single_statement()?;
-            cases.push(Spannable::new(
-                ConditionCase { condition, body },
-                (start_pos_case, self.positions().1),
-            ));
-            self.skip_newlines();
-        }
-
-        let else_body = if self.eat(&Token::KwИначе) {
-            Some(self.parse_block_or_single_statement()?)
-        } else {
-            None
-        };
-
-        let end_pos = self.positions().1;
-
-        self.skip_newlines();
-        self.expect(&Token::Dedent)?;
-        Ok(Spannable::new(
-            Statement::Selection(SelectionStatement::ConditionList { cases, else_body }),
             (start_pos, end_pos),
         ))
     }
@@ -1075,7 +1087,7 @@ impl<'input> Parser<'input> {
     // # (length, unary prefix)
     fn parse_expr_length(&mut self) -> Result<Spannable<Expr>, ParseError> {
         if self.eat(&Token::Hash) {
-            let operand = self.parse_expr_postfix()?;
+            let operand = self.parse_expr_field()?;
             let end_pos = operand.position_end;
             let start_pos = operand.position_start;
             Ok(Spannable::new(
@@ -1086,8 +1098,28 @@ impl<'input> Parser<'input> {
                 (start_pos, end_pos),
             ))
         } else {
-            self.parse_expr_postfix()
+            self.parse_expr_field()
         }
+    }
+
+    /// expr.field
+    fn parse_expr_field(&mut self) -> Result<Spannable<Expr>, ParseError> {
+        let mut expr = self.parse_expr_postfix()?;
+
+        if self.eat(&Token::Dot) {
+            let field = self.expect_ident()?;
+            let pos = (expr.position_start, self.positions().1);
+            expr = Spannable::new(
+                Expr::BinaryOp {
+                    operator: BinaryOperator::Dot,
+                    left: Box::new(expr),
+                    right: Box::new(Spannable::new(Expr::Name(field), pos)),
+                },
+                pos,
+            );
+        }
+
+        Ok(expr)
     }
 
     // Postfix: subscript f[i], slice f[a:b], function call f(args)

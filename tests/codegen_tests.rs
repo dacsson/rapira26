@@ -6,6 +6,7 @@
 //!   `\ => (empty line)` — an empty line is expected
 //!   `\ => (empty string)` — same as empty line
 
+use rapira26::codegen::CodegenTarget;
 use rapira26::opt::deframe::DeframePass;
 use rapira26::opt::opt_pass::{OptimizationPassOpts, run_optimizations};
 use rapira26::pretty::pretty_parse_error;
@@ -83,7 +84,7 @@ fn run_rap_file(rap_path: &Path) -> Result<String, String> {
         std::process::exit(1);
     });
 
-    let codegen = rapira26::codegen::Codegen::new();
+    let mut codegen = rapira26::codegen::cgen::CGen::new();
     let c_code = codegen.generate(&program, rap_path.canonicalize().unwrap().to_str().unwrap());
 
     // Write C to a temp file

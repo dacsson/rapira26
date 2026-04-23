@@ -166,6 +166,7 @@ impl CallGraph {
                         _ => {}
                     }
                 }
+                _ => {}
             }
         }
 
@@ -263,9 +264,6 @@ impl CallGraph {
             Statement::Conditional { condition, .. } => vec![condition],
             Statement::Selection(selection) => match selection {
                 SelectionStatement::ValueMatch { expression, .. } => vec![expression],
-                SelectionStatement::ConditionList { cases, .. } => {
-                    cases.iter().map(|c| &c.node.condition).collect()
-                }
             },
             Statement::Loop(loop_) => {
                 let mut expressions = Vec::new();
