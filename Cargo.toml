@@ -3,6 +3,10 @@ name = "rapira26"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "рапик"
+path = "src/main.rs"
+
 [dependencies]
 annotate-snippets = "0.12.13"
 clap = { version = "4.6.0", features = ["derive"] }
