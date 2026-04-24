@@ -177,4 +177,8 @@ RAP_Value RAP_get_objects_refcount(RAP_Value obj);
 
 void RAP_free_main_frame(struct RAP_CallFrame *frame);
 
+const char* RAP_get_type_name(RAP_Value val);
+
+const char* RAP_type_to_string(RAP_ObjectTag tag);
+
 #endif // RAPIRA_RUNTIME_H

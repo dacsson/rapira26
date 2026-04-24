@@ -1,3 +1,4 @@
+#include "rapobject.h"
 #include "rapvalue.h"
 #include "runtime.h"
 #include "runtime_internal.h"
@@ -24,16 +25,16 @@ RAP_Value RAP_set_tuple_item(RAP_Value container, uint32_t index,
   }
 
   if (RAP_PTR_VALUE(container)->tag != RAP_OBJECT_TAG_TUPLE &&
-      RAP_PTR_VALUE(container)->tag != RAP_OBJECT_TAG_TEXT) {
+      RAP_PTR_VALUE(container)->tag != RAP_OBJECT_TAG_TEXT &&
+      RAP_PTR_VALUE(container)->tag != RAP_OBJECT_TAG_SLICE) {
     RAP_fatal_error("Объект не является кортежем или текстом");
   }
 
   if (RAP_PTR_VALUE(container)->tag == RAP_OBJECT_TAG_TEXT) {
     // When assigning to a text element, unwrap single-char TEXT to its
     // codepoint int
-    if (RAP_IS_TEXT(item) &&
-        RAP_GET_TEXT_VAL(item)->count == 1) {
-      item =  RAP_GET_TEXT_VAL(item)->items[0];
+    if (RAP_IS_TEXT(item) && RAP_GET_TEXT_VAL(item)->count == 1) {
+      item = RAP_GET_TEXT_VAL(item)->items[0];
     }
     RAP_dec_ref(RAP_PTR_VALUE(container)->text_val->items[index]);
     RAP_PTR_VALUE(container)->text_val->items[index] = item;
@@ -51,7 +52,8 @@ RAP_Value RAP_get_tuple_item(RAP_Value container, uint32_t index) {
     RAP_fatal_error("Первый аргумент должен быть указателем на объект");
   }
   if (RAP_PTR_VALUE(container)->tag != RAP_OBJECT_TAG_TUPLE &&
-      RAP_PTR_VALUE(container)->tag != RAP_OBJECT_TAG_TEXT) {
+      RAP_PTR_VALUE(container)->tag != RAP_OBJECT_TAG_TEXT &&
+      RAP_PTR_VALUE(container)->tag != RAP_OBJECT_TAG_SLICE) {
     printf("container: %s\n", RAP_stringify_object(container));
     RAP_fatal_error("Объект не является кортежем или текстом");
   }
@@ -64,10 +66,22 @@ RAP_Value RAP_get_tuple_item(RAP_Value container, uint32_t index) {
     result->text_val = malloc(sizeof(struct RAP_Tuple));
     result->text_val->count = 1;
     result->text_val->items = malloc(sizeof(RAP_Object *));
-    result->text_val->items[0] =
-         RAP_GET_TEXT_VAL(container)->items[index];
+    result->text_val->items[0] = RAP_GET_TEXT_VAL(container)->items[index];
     result->refcount = 1;
     return RAP_CREATE_PTR(result);
+  } else if (RAP_PTR_VALUE(container)->tag == RAP_OBJECT_TAG_SLICE) {
+    size_t rel_from = RAP_PTR_VALUE(container)->slice_val->from + index;
+    size_t rel_to = RAP_PTR_VALUE(container)->slice_val->to + index;
+    if (rel_from >= rel_to || index < 0) {
+      RAP_fatal_error("Индекс вне диапазона слайса");
+    }
+
+    RAP_Object *parent = RAP_PTR_VALUE(container)->slice_val->parent;
+    RAP_inc_ref(parent->tuple_val->items[rel_from]);
+    return parent->tuple_val->items[rel_from];
+  }
+  if (index >= RAP_PTR_VALUE(container)->tuple_val->count || index < 0) {
+    RAP_fatal_error("Индекс вне диапазона кортежа");
   }
 
   RAP_inc_ref(RAP_PTR_VALUE(container)->tuple_val->items[index]);

@@ -3,6 +3,15 @@
 #include "runtime.h"
 #include "runtime_internal.h"
 
+#define RAP_FATAL_TYPE_OP_ERR(opname, a, b) do { \
+  const char* type_a = RAP_get_type_name(a); \
+  const char* type_b = RAP_get_type_name(b); \
+  char err_buf[256]; \
+  snprintf(err_buf, sizeof(err_buf), \
+    "Неподдерживаемые типы для " opname ": %s и %s", type_a, type_b); \
+  RAP_fatal_error(err_buf); \
+} while(0)
+
 // Integer operations
 
 inline RAP_Value RAP_integer_less_than(RAP_Value a, RAP_Value b) {
@@ -99,6 +108,15 @@ RAP_Value RAP_add(RAP_Value a, RAP_Value b) {
   if (RAP_IS_TUPLE(a) && RAP_IS_TUPLE(b)) {
     return RAP_append_tuple(a_ptr, b_ptr);
   }
+  // SLICE CONCAT
+  else if (RAP_IS_SLICE(a) && RAP_IS_SLICE(b)) {
+    RAP_Value materialized_a = RAP_materialize_slice(RAP_PTR_VALUE(a));
+    RAP_Value materialized_b = RAP_materialize_slice(RAP_PTR_VALUE(b));
+    RAP_Value result = RAP_append_tuple(RAP_PTR_VALUE(materialized_a), RAP_PTR_VALUE(materialized_b));
+    RAP_free_object(RAP_PTR_VALUE(materialized_a));
+    RAP_free_object(RAP_PTR_VALUE(materialized_b));
+    return result;
+  }
   // TEXT CONCAT
   if (RAP_IS_TEXT(a) && RAP_IS_TEXT(b)) {
     struct RAP_Tuple *at = a_ptr->text_val;
@@ -124,7 +142,8 @@ RAP_Value RAP_add(RAP_Value a, RAP_Value b) {
     result->refcount = 1;
     return RAP_CREATE_PTR(result);
   }
-  RAP_fatal_error("Неподдерживаемые типы для сложения");
+
+  RAP_FATAL_TYPE_OP_ERR("сложения", a, b);
 }
 
 RAP_Value RAP_subtract(RAP_Value a, RAP_Value b) {
@@ -133,7 +152,8 @@ RAP_Value RAP_subtract(RAP_Value a, RAP_Value b) {
   } else if (RAP_IS_FLOAT(a) && RAP_IS_FLOAT(b)) {
     return RAP_float_subtract(a, b);
   }
-  RAP_fatal_error("Неподдерживаемые типы для вычитания");
+
+  RAP_FATAL_TYPE_OP_ERR("вычитания", a, b);
 }
 
 RAP_Value RAP_multiply(RAP_Value a, RAP_Value b) {
@@ -202,7 +222,8 @@ RAP_Value RAP_multiply(RAP_Value a, RAP_Value b) {
     result->text_val->items = items;
     return RAP_CREATE_PTR(result);
   }
-  RAP_fatal_error("Неподдерживаемые типы для умножения");
+
+  RAP_FATAL_TYPE_OP_ERR("умножения", a, b);
 }
 
 RAP_Value RAP_divide(RAP_Value a, RAP_Value b) {
@@ -225,7 +246,8 @@ RAP_Value RAP_divide(RAP_Value a, RAP_Value b) {
     return RAP_create_float_obj((double)RAP_SMI_VALUE(a) /
                                 RAP_GET_FLOAT_VAL(b));
   }
-  RAP_fatal_error("Неподдерживаемые типы для деления");
+
+  RAP_FATAL_TYPE_OP_ERR("деления", a, b);
 }
 
 RAP_Value RAP_less_than(RAP_Value a, RAP_Value b) {
@@ -234,7 +256,8 @@ RAP_Value RAP_less_than(RAP_Value a, RAP_Value b) {
   } else if (RAP_IS_FLOAT(a) && RAP_IS_FLOAT(b)) {
     return RAP_float_less_than(a, b);
   }
-  RAP_fatal_error("Неподдерживаемые типы для сравнения");
+
+  RAP_FATAL_TYPE_OP_ERR("сравнения", a, b);
 }
 
 RAP_Value RAP_less_or_equal(RAP_Value a, RAP_Value b) {
@@ -243,7 +266,8 @@ RAP_Value RAP_less_or_equal(RAP_Value a, RAP_Value b) {
   } else if (RAP_IS_FLOAT(a) && RAP_IS_FLOAT(b)) {
     return RAP_create_logical_obj(RAP_GET_FLOAT_VAL(a) <= RAP_GET_FLOAT_VAL(b));
   }
-  RAP_fatal_error("Неподдерживаемые типы для сравнения");
+
+  RAP_FATAL_TYPE_OP_ERR("сравнения", a, b);
 }
 
 RAP_Value RAP_greater_than(RAP_Value a, RAP_Value b) {
@@ -252,7 +276,8 @@ RAP_Value RAP_greater_than(RAP_Value a, RAP_Value b) {
   } else if (RAP_IS_FLOAT(a) && RAP_IS_FLOAT(b)) {
     return RAP_float_greater_than(a, b);
   }
-  RAP_fatal_error("Неподдерживаемые типы для сравнения");
+
+  RAP_FATAL_TYPE_OP_ERR("сравнения", a, b);
 }
 
 RAP_Value RAP_greater_or_equal(RAP_Value a, RAP_Value b) {
@@ -261,7 +286,8 @@ RAP_Value RAP_greater_or_equal(RAP_Value a, RAP_Value b) {
   } else if (RAP_IS_FLOAT(a) && RAP_IS_FLOAT(b)) {
     return RAP_create_logical_obj(RAP_GET_FLOAT_VAL(a) >= RAP_GET_FLOAT_VAL(b));
   }
-  RAP_fatal_error("Неподдерживаемые типы для сравнения");
+
+  RAP_FATAL_TYPE_OP_ERR("сравнения", a, b);
 }
 
 RAP_Value RAP_equal(RAP_Value a, RAP_Value b) {
@@ -317,7 +343,8 @@ RAP_Value RAP_equal(RAP_Value a, RAP_Value b) {
     }
     return RAP_create_logical_obj(true);
   }
-  RAP_fatal_error("Неподдерживаемые типы для сравнения");
+
+  RAP_FATAL_TYPE_OP_ERR("сравнения", a, b);
 }
 
 RAP_Value RAP_not_equal(RAP_Value a, RAP_Value b) {
@@ -329,7 +356,7 @@ RAP_Value RAP_modulo(RAP_Value a, RAP_Value b) {
   if (RAP_IS_SMI(a) && RAP_IS_SMI(b)) {
     return RAP_integer_modulo(a, b);
   }
-  RAP_fatal_error("Неподдерживаемые типы для модуля");
+  RAP_FATAL_TYPE_OP_ERR("модуля", a, b);
 }
 
 RAP_Value RAP_negate(RAP_Value a) {
@@ -338,7 +365,7 @@ RAP_Value RAP_negate(RAP_Value a) {
   } else if (RAP_IS_FLOAT(a)) {
     return RAP_create_float_obj(-1.0 * RAP_GET_FLOAT_VAL(a));
   }
-  RAP_fatal_error("Неподдерживаемые типы для отрицания");
+  RAP_FATAL_TYPE_OP_ERR("отрицания", a, a);
 }
 
 RAP_Value RAP_length(RAP_Value a) {
@@ -353,13 +380,14 @@ RAP_Value RAP_length(RAP_Value a) {
     return RAP_create_int_obj(RAP_GET_SLICE_VAL(a)->to -
                               RAP_GET_SLICE_VAL(a)->from);
   }
-  RAP_fatal_error("Неподдерживаемые типы для длины");
+
+  RAP_FATAL_TYPE_OP_ERR("длины", a, a);
 }
 
 RAP_Value RAP_power(RAP_Value a, RAP_Value b) {
   bool result_is_float = RAP_IS_FLOAT(a) || RAP_IS_FLOAT(b);
   if (!RAP_IS_SMI(b) && !RAP_IS_FLOAT(b)) {
-    RAP_fatal_error("Неподдерживаемые типы для возведения в степень");
+    RAP_FATAL_TYPE_OP_ERR("возведения в степень", a, b);
   }
   double power_value = RAP_IS_SMI(b) ? RAP_SMI_VALUE(b) : RAP_GET_FLOAT_VAL(b);
   if (RAP_IS_SMI(a)) {
@@ -376,5 +404,5 @@ RAP_Value RAP_power(RAP_Value a, RAP_Value b) {
     }
   }
 
-  RAP_fatal_error("Неподдерживаемые типы для возведения в степень");
+  RAP_FATAL_TYPE_OP_ERR("возведения в степень", a, b);
 }

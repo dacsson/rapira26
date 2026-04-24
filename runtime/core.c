@@ -350,3 +350,24 @@ void RAP_free_main_frame(struct RAP_CallFrame *frame) {
   }
   free(frame->slots);
 }
+
+const char* RAP_type_to_string(RAP_ObjectTag tag) {
+  switch (tag) {
+    case RAP_OBJECT_TAG_SLICE: return "отрезок";
+    case RAP_OBJECT_TAG_TUPLE: return "кортеж";
+    case RAP_OBJECT_TAG_VARIANT: return "тип";
+    case RAP_OBJECT_TAG_TEXT: return "текст";
+    case RAP_OBJECT_TAG_CALLABLE: return "функция";
+    case RAP_OBJECT_TAG_NULL: return "null";
+    default: return "неизвестный тип";
+  }
+}
+
+const char* RAP_get_type_name(RAP_Value val) {
+  if (RAP_IS_SMI(val))
+    return "число";
+  else if (RAP_IS_BOOL(val))
+    return "логическое значение";
+
+  return RAP_type_to_string(RAP_PTR_VALUE(val)->tag);
+}
