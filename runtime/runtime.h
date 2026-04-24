@@ -8,7 +8,7 @@
 
 // Should be overriden by compiled module
 // TODO: this not thread safe
-extern char* RAP_curret_module_path;
+extern char *RAP_curret_module_path;
 extern size_t RAP_current_pos_start;
 extern size_t RAP_current_pos_end;
 
@@ -24,7 +24,9 @@ RAP_Value RAP_create_callable_obj(struct RAP_CallFrame *frame_parent,
                                   uint32_t params_count, bool is_function);
 RAP_Parameter *RAP_create_parameter(RAP_ParameterMode mode, const char *name);
 RAP_Value RAP_create_logical_obj(bool value);
-RAP_Value RAP_create_custom_typed_obj(const char* name, void *value);
+RAP_Value RAP_create_custom_typed_obj(const char *name,
+                                      const char **field_names,
+                                      size_t field_count, void *value);
 
 // OBJECTS UTILITIES
 
@@ -35,6 +37,9 @@ RAP_Value RAP_set_tuple_item(RAP_Value tuple, uint32_t index, RAP_Value value);
 // Joins two tuples into a new tuple
 RAP_Value RAP_append_tuple(RAP_Object *a, RAP_Object *b);
 RAP_Value RAP_index_of(RAP_Value needle, RAP_Value haystack);
+RAP_Value RAP_get_variant_field(RAP_Value val, const char *field_name);
+void RAP_set_variant_field(RAP_Value val, const char *field_name,
+                           RAP_Value field_val);
 
 // SLICE OPERATIONS
 
@@ -146,8 +151,8 @@ RAP_Value RAP_input_value(void);
 
 uint16_t RAP_get_variant_tag(RAP_Value val);
 
-#define RAP_GET_FIELD(typename, val, field) \
-  ((typename*)RAP_PTR_VALUE(val)->variant_val->payload)->field
+#define RAP_GET_FIELD(typename, val, field)                                    \
+  ((typename *)RAP_PTR_VALUE(val)->variant_val->payload)->field
 
 // REFERENCE COUNTING
 

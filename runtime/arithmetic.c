@@ -300,6 +300,22 @@ RAP_Value RAP_equal(RAP_Value a, RAP_Value b) {
       }
     }
     return RAP_create_logical_obj(true);
+  } else if (RAP_IS_VARIANT(a) && RAP_IS_VARIANT(b)) {
+    if (strcmp(RAP_PTR_VALUE(a)->variant_val->name,
+               RAP_PTR_VALUE(b)->variant_val->name) != 0) {
+      return RAP_create_logical_obj(false);
+    }
+    for (uint32_t i = 0; i < RAP_PTR_VALUE(a)->variant_val->field_count; i++) {
+      RAP_Value eq =
+          RAP_equal(RAP_get_variant_field(
+                        a, RAP_PTR_VALUE(a)->variant_val->field_names[i]),
+                    RAP_get_variant_field(
+                        b, RAP_PTR_VALUE(b)->variant_val->field_names[i]));
+      if (!RAP_BOOL_VALUE(eq)) {
+        return RAP_create_logical_obj(false);
+      }
+    }
+    return RAP_create_logical_obj(true);
   }
   RAP_fatal_error("Неподдерживаемые типы для сравнения");
 }

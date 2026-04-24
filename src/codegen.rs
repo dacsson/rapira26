@@ -39,13 +39,19 @@ pub fn run_codegen(
     current_dir: &PathBuf,
     flags: &[String],
     run: bool,
+    dump: bool,
 ) -> Result<(), RunError> {
     let Some(filepath_str) = filepath.to_str() else {
         return Err(RunError::NoSuchFile);
     };
 
     let code = target.generate(program, filepath_str);
-    target.compile(code, filepath, current_dir, flags, run)
+    if dump {
+        println!("{}", code);
+        Ok(())
+    } else {
+        target.compile(code, filepath, current_dir, flags, run)
+    }
 }
 
 /// Find the runtime/ directory containing librapruntime.a and headers.

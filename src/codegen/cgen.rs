@@ -328,8 +328,21 @@ impl CGen {
             ));
         }
 
+        // Define field names for each variant
+        for (variant_name, fields) in &type_def.variants {
+            self.emit_line(&format!(
+                "const char* {}_field_names[] = {{",
+                Self::transliterate(variant_name)
+            ));
+
+            for field in fields {
+                self.emit_line(&format!("  \"{}\",", field));
+            }
+            self.emit_line("};");
+        }
+
         // Now create the custom tagged type
-        self.emit_line(&format!("typedef struct {{"));
+        self.emit_line(&format!("\ntypedef struct {{"));
         self.emit_line(&format!("  uint16_t tag;"));
         self.emit_line(&format!("  union {{"));
         for (variant_name, _) in &type_def.variants {
@@ -340,7 +353,10 @@ impl CGen {
             ));
         }
         self.emit_line(&format!("  }};"));
-        self.emit_line(&format!("}} {};\n", self.mangle_type_name(&type_def.name)));
+        self.emit_line(&format!(
+            "}} __attribute__((packed)) {};\n",
+            self.mangle_type_name(&type_def.name)
+        ));
 
         self.forward_decls.push_str(&self.output);
 
@@ -976,7 +992,16 @@ impl CGen {
                     self.emit_line(&format!("RAP_dec_ref({});", value_temp));
                 }
             }
-            LValue::Field { left, field } => {}
+            LValue::Field { left, field } => {
+                // Just an identifier
+                let left_temp = self.emit_expression(&left);
+
+                self.emit_line(&format!(
+                    "RAP_set_variant_field({}, \"{}\", {});",
+                    left_temp, field, value_temp
+                ));
+                self.track_temp(&value_temp);
+            }
         }
     }
 
@@ -1380,8 +1405,12 @@ impl CGen {
         self.emit_line("};");
 
         self.emit_line(&format!(
-            "RAP_Value {} = RAP_create_custom_typed_obj(\"{}\", &{});",
-            temp, mangled_type_name, payload_name
+            "RAP_Value {} = RAP_create_custom_typed_obj(\"{}\", {}_field_names, {}, &{});",
+            temp,
+            mangled_type_name,
+            Self::transliterate(name),
+            ctor_fields.len(),
+            payload_name
         ));
     }
 
@@ -1464,7 +1493,12 @@ impl CGen {
                 right,
             } => {
                 let left_temp = self.emit_expression(left);
-                let right_temp = self.emit_expression(right);
+                let right_temp = match (operator, &right.node) {
+                    // Special case for field access where `right` is
+                    // just a string rather than an expression
+                    (BinaryOperator::Dot, Expr::Name(name)) => name.clone(),
+                    _ => self.emit_expression(right),
+                };
 
                 self.emit_binary_op(operator, &left_temp, &right_temp)
             }
@@ -1586,7 +1620,7 @@ impl CGen {
                 "RAP_create_logical_obj(RAP_BOOL_VALUE({}) || RAP_BOOL_VALUE({}))",
                 left, right
             ),
-            BinaryOperator::Dot => format!("RAP_get_field({}, {})", left, right),
+            BinaryOperator::Dot => format!("RAP_get_variant_field({}, \"{}\")", left, right),
         };
         self.emit_line(&format!("RAP_Value {} = {};", temp, rhs));
         self.track_temp(&temp);

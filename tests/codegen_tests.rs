@@ -261,6 +261,11 @@ fn e2e_13_input() {
     assert_rap_output("13_input.rap");
 }
 
+#[test]
+fn e2e_14_user_types() {
+    assert_rap_output("14_user_types.rap");
+}
+
 // ── Unit tests for the expected-output parser ──────────────────
 
 #[cfg(test)]

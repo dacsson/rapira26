@@ -102,6 +102,7 @@ fn main() {
                 &env::current_dir().unwrap(),
                 cli.флаги.as_slice(),
                 cli.запуск,
+                cli.дамп_си,
             )
             .unwrap_or_else(|error| {
                 eprintln!("Кодоген не справился: {error}");

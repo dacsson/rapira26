@@ -74,11 +74,18 @@ If an error hapens emit source file line, not C error
 - Source: https://ershov.iis.nsk.su/ru/node/772596
 
 Fetures to add:
-- Structs: `<$ имя: "иван", фамилия: "петров" $>`
+#### Structs: `<$ имя: "иван", фамилия: "петров" $>`
   - Dont forget about cycle references in refcounting alg.
-- Change tuple syntax: `< 1, 2, 3 >`
-- Sets: `<* 1, 1+1, <1, 5> *>`
-- ИЗ — проверка принадлежности:
+
+#### Change tuple syntax: `< 1, 2, 3 >`
+
+#### Improve IO 
+- Args, Kwargs
+- File/Dir reader
+
+#### Sets: `<* 1, 1+1, <1, 5> *>`
+
+#### ИЗ — проверка принадлежности:
 ```
 «м» ИЗ «микроскоп» истинно;
 ```
@@ -87,14 +94,18 @@ Fetures to add:
 ДЛЯ Буква ИЗ Книга :: ЕСЛИ Буква=«А» ТО Сч+1->Сч ВСЕ ВСЕ;
 ВЫВОД: «В тексте Книга », Сч, " букв <А>";
 ```
-- `КОНТРОЛЬ` - asserts
-- `::` - consts (Jai inspired):
+
+#### `КОНТРОЛЬ` - asserts
+
+#### `::` - consts (Jai inspired):
 ```
 пенделей := 10 \ переменная
 пенделей :: 10 \ константа
 ```
-- Unicode support
-- Изменить синтаксис индексирования 
+
+#### Unicode support
+
+#### Изменить синтаксис индексирования 
 
 We probably should change symbols `<` to use something more ergonomic for RU keyborads, something like:
 - Structs: `(имя: "иван", фамилия: "петров")`

@@ -305,6 +305,18 @@ void RAP_free_object(RAP_Object *obj) {
     free(obj->slice_val);
     break;
   }
+  case RAP_OBJECT_TAG_VARIANT: {
+    struct RAP_Variant *v = obj->variant_val;
+    size_t field_offset = sizeof(uint16_t);
+    for (size_t i = 0; i < v->field_count; i++) {
+      RAP_Value *field = (RAP_Value *)((char *)v->payload + field_offset);
+      RAP_dec_ref(*field);
+      field_offset += sizeof(RAP_Value);
+    }
+    free(v->payload);
+    free(v);
+    break;
+  }
   case RAP_OBJECT_TAG_CALLABLE: {
     struct RAP_Callable *c = obj->callable_val;
     free(c->name);

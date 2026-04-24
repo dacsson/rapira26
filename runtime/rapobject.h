@@ -102,6 +102,8 @@ struct RAP_Slice {
 /// User-defined variant type
 struct RAP_Variant {
   const char* name; // type name
+  const char** field_names;
+  size_t field_count;
   void* payload;    // variant data
 };
 
