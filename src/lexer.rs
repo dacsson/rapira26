@@ -98,6 +98,8 @@ pub enum Token {
 
     KwВых, // вых (output parameter)
 
+    KwПодкл, // подкл (import)
+
     // Custom types
     KwТип, // тип
 }
@@ -169,6 +171,7 @@ impl std::fmt::Display for Token {
             Token::Comma => write!(f, "`,`"),
             Token::Dot => write!(f, "`.`"),
             Token::KwТип => write!(f, "тип"),
+            Token::KwПодкл => write!(f, "подкл"),
         }
     }
 }
@@ -425,6 +428,7 @@ impl<'input> Lexer<'input> {
             "pi" => Token::KwPi,
             "тип" => Token::KwТип,
             "вых" => Token::KwВых,
+            "подкл" => Token::KwПодкл,
             other => Token::Ident(other.to_string()),
         }
     }

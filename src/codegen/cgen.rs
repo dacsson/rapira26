@@ -11,6 +11,7 @@ use std::{
 use crate::{
     ast::*,
     codegen::{CodegenTarget, CodegenWarning, RunError, find_runtime_dir},
+    module::Module,
     pretty::pretty_parse_warning,
 };
 
@@ -288,15 +289,6 @@ impl CGen {
     fn emit_statement_list(&mut self, stmts: &[Spannable<Statement>]) {
         for stmt in stmts {
             self.emit_statement(stmt);
-        }
-    }
-
-    fn emit_program_unit(&mut self, unit: &ProgramUnit) {
-        match unit {
-            ProgramUnit::FunctionDefinition(func_def) => self.emit_function_def(func_def),
-            ProgramUnit::ProcedureDefinition(proc_def) => self.emit_procedure_def(proc_def),
-            ProgramUnit::Statement(stmt) => self.emit_statement(stmt),
-            ProgramUnit::TypeDefinition(type_def) => self.emit_type_def(type_def),
         }
     }
 
@@ -905,6 +897,8 @@ impl CGen {
                 self.emit_epilogue(Some(&result_temp));
                 self.emit_line(&format!("return {};", result_temp));
             }
+
+            Statement::Import { .. } => todo!(),
         }
 
         self.statement_temps = saved_temps;
@@ -1951,12 +1945,22 @@ impl CGen {
 
 impl CodegenTarget for CGen {
     /// Main entry point: walk the whole program, return generated C source.
-    fn generate(&mut self, program: &Program, filepath: &str) -> String {
+    fn generate(&mut self, module: &Module, filepath: &str) -> String {
         self.filepath = filepath.to_string();
 
         self.create_scope(); // main scope
-        for unit in &program.units {
-            self.emit_program_unit(unit);
+
+        for type_def in &module.types {
+            self.emit_type_def(type_def);
+        }
+        for func in &module.functions {
+            self.emit_function_def(func);
+        }
+        for proc in &module.procedures {
+            self.emit_procedure_def(proc);
+        }
+        for stmt in &module.toplevel {
+            self.emit_statement(stmt);
         }
 
         // Assemble: prelude → forward decls → main() { body }

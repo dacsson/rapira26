@@ -126,6 +126,7 @@ possible errors to find (at this stage):
 - Tuple bound checks (?)
 - Check for existence of requested "чужие" variables
 - Types and ctrs should start with big letters 
+- Check calls for functions that accept inout pararms (they should provide inout args)
 
 General semantic anal. idea maybe for way way later:
 - Have N levels of checks/strictness/safety/...

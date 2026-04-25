@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::lexer::{Lexer, LexerError, Token};
+use crate::module::Module;
 
 #[derive(Debug)]
 pub enum ParseError {
@@ -32,12 +33,17 @@ pub enum ParseError {
 pub struct Parser<'input> {
     lexer: Lexer<'input>,
     current: Option<(usize, Token, usize)>,
+    module_name: &'input str,
 }
 
 impl<'input> Parser<'input> {
-    pub fn new(mut lexer: Lexer<'input>) -> Self {
+    pub fn new(mut lexer: Lexer<'input>, module_name: &'input str) -> Self {
         let current = Self::advance_lexer(&mut lexer);
-        Self { lexer, current }
+        Self {
+            lexer,
+            current,
+            module_name,
+        }
     }
 
     fn advance_lexer(lexer: &mut Lexer<'input>) -> Option<(usize, Token, usize)> {
@@ -185,29 +191,40 @@ impl<'input> Parser<'input> {
         }
     }
 
-    pub fn parse_program(mut self) -> Result<Program, ParseError> {
-        let mut units = Vec::new();
+    pub fn parse_program(&mut self) -> Result<Module, ParseError> {
+        let mut module = Module::new(self.module_name.to_string());
+
         loop {
             self.skip_newlines();
             if self.peek().is_none() {
                 break;
             }
-            units.push(self.parse_program_unit()?);
-        }
-        Ok(Program { units })
-    }
 
-    fn parse_program_unit(&mut self) -> Result<ProgramUnit, ParseError> {
-        match self.peek() {
-            Some(Token::KwПроц) => Ok(ProgramUnit::ProcedureDefinition(
-                self.parse_procedure_definition()?,
-            )),
-            Some(Token::KwФунк) => Ok(ProgramUnit::FunctionDefinition(
-                self.parse_function_definition()?,
-            )),
-            Some(Token::KwТип) => Ok(ProgramUnit::TypeDefinition(self.parse_type_definition()?)),
-            _ => Ok(ProgramUnit::Statement(self.parse_statement()?)),
+            match self.peek() {
+                Some(Token::KwПроц) => {
+                    let def = self.parse_procedure_definition()?;
+                    module.add_procedure(def);
+                }
+                Some(Token::KwФунк) => {
+                    let def = self.parse_function_definition()?;
+                    module.add_function(def);
+                }
+                Some(Token::KwПодкл) => {
+                    let def = self.parse_import()?;
+                    module.add_import(def);
+                }
+                Some(Token::KwТип) => {
+                    let def = self.parse_type_definition()?;
+                    module.add_type(def);
+                }
+                _ => {
+                    let statement = self.parse_statement()?;
+                    module.add_toplevel(statement);
+                }
+            }
         }
+
+        Ok(module)
     }
 
     fn parse_type_definition(&mut self) -> Result<Spannable<TypeDefinition>, ParseError> {
@@ -280,7 +297,7 @@ impl<'input> Parser<'input> {
         let name = if matches!(self.peek(), Some(Token::Ident(_))) {
             Some(self.expect_ident()?)
         } else {
-            None
+            None // anonymous functions? what?
         };
 
         self.expect(&Token::LParen)?;
@@ -305,6 +322,36 @@ impl<'input> Parser<'input> {
             },
             (pos_start, self.positions().1),
         ))
+    }
+
+    /// подкл "имя" (деф1, деф2, ...)
+    fn parse_import(&mut self) -> Result<Spannable<Statement>, ParseError> {
+        let (pos_start, _, _) = self.expect(&Token::KwПодкл)?;
+        let (_, name, _) = self.advance().unwrap();
+
+        let Token::Text(modname) = name else {
+            return Err(ParseError::UnexpectedToken {
+                position_start: pos_start,
+                position_end: self.positions().1,
+                found: name,
+                expected: "имя модуля в формате \"имя\"".to_string(),
+            });
+        };
+
+        self.expect(&Token::LParen)?;
+
+        let defs_imports = self.parse_func_parameter_list()?;
+
+        self.expect(&Token::RParen)?;
+
+        Ok(Spannable {
+            node: Statement::Import {
+                name: modname,
+                definitions: defs_imports,
+            },
+            position_start: pos_start,
+            position_end: self.positions().1,
+        })
     }
 
     fn parse_proc_parameter_list(&mut self) -> Result<Vec<ProcParameter>, ParseError> {
