@@ -61,7 +61,13 @@ fn main() {
     });
 
     let token_stream = rapira26::lexer::Lexer::new(&source);
-    let parser = rapira26::parser::Parser::new(token_stream);
+    let mut parser = rapira26::parser::Parser::new(
+        token_stream,
+        cli.файл
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("<неизвестный модуль>"),
+    );
 
     let mut program = match parser.parse_program() {
         Ok(program) => program,

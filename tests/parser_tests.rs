@@ -1,11 +1,12 @@
 use rapira26::ast::*;
 use rapira26::lexer::Lexer;
+use rapira26::module::Module;
 use rapira26::parser::Parser;
 use rapira26::pretty::pretty_parse_error;
 
-fn parse(source: &str) -> Program {
+fn parse(source: &str) -> Module {
     let lexer = Lexer::new(source);
-    let parser = Parser::new(lexer);
+    let mut parser = Parser::new(lexer, "");
     parser.parse_program().unwrap_or_else(|e| {
         let err = pretty_parse_error(source, &"", e);
         panic!("{err}")
@@ -15,29 +16,38 @@ fn parse(source: &str) -> Program {
 fn parse_first_statement(source: &str) -> Statement {
     let program = parse(source);
     assert!(
-        !program.units.is_empty(),
+        !program.toplevel.is_empty(),
         "expected at least one program unit"
     );
-    match program.units.into_iter().next().unwrap() {
-        ProgramUnit::Statement(statement) => statement.node,
-        other => panic!("expected statement, got {other:?}"),
-    }
+    program.toplevel.into_iter().next().unwrap().node
 }
 
 fn parse_first_procedure(source: &str) -> ProcedureDefinition {
     let program = parse(source);
-    match program.units.into_iter().next().unwrap() {
-        ProgramUnit::ProcedureDefinition(def) => def.node,
-        other => panic!("expected procedure definition, got {other:?}"),
-    }
+    program.procedures.into_iter().next().unwrap().node
 }
 
 fn parse_first_function(source: &str) -> FunctionDefinition {
     let program = parse(source);
-    match program.units.into_iter().next().unwrap() {
-        ProgramUnit::FunctionDefinition(def) => def.node,
-        other => panic!("expected function definition, got {other:?}"),
-    }
+    program.functions.into_iter().next().unwrap().node
+}
+
+// Top-level
+
+#[test]
+fn parse_import() {
+    let program = parse("подкл \"мод\" (функция, ПРОЦЕДУРА)");
+
+    // TODO:
+    // let import_stmt = Statement::Import {
+    //     name: "мод".to_string(),
+    //     definitions: vec!["функция".to_string(), "ПРОЦЕДУРА".to_string()],
+    // };
+    assert_eq!(program.imports.iter().next().unwrap().0, "мод");
+    assert_eq!(
+        program.imports.iter().next().unwrap().1,
+        &vec!["функция".to_string(), "ПРОЦЕДУРА".to_string()]
+    );
 }
 
 // ── Literals ────────────────────────────────────────────────────────────────
@@ -657,32 +667,24 @@ fn parse_exit_loop() {
 #[test]
 fn parse_multiple_statements() {
     let program = parse("X := 1\nY := 2\nвывод: X + Y");
-    assert_eq!(program.units.len(), 3);
+    assert_eq!(program.toplevel.len(), 3);
 }
 
 #[test]
 fn parse_mixed_definitions_and_statements() {
     let program = parse("функ Ф ()\n  возврат 1\nвывод: Ф()");
-    assert_eq!(program.units.len(), 2);
+    assert!(program.functions.len() == 1);
     assert!(matches!(
-        &program.units[0],
-        ProgramUnit::FunctionDefinition(_)
+        &program.toplevel[0].node,
+        Statement::Output { .. }
     ));
-    assert!(matches!(&program.units[1], ProgramUnit::Statement(_)));
 }
 
 #[test]
 fn parse_type_definition() {
     let program = parse("тип Сезон\n Зима\n Весна\n Лето\n Осень");
-    assert_eq!(program.units.len(), 1);
-    assert!(matches!(&program.units[0], ProgramUnit::TypeDefinition(_)));
-    let ProgramUnit::TypeDefinition(Spannable {
-        node: TypeDefinition { name, variants },
-        ..
-    }) = &program.units[0]
-    else {
-        panic!("Expected a TypeDefinition unit");
-    };
+    assert_eq!(program.types.len(), 1);
+    let TypeDefinition { name, variants } = &program.types[0].node;
     assert_eq!(name, "Сезон");
     assert_eq!(variants.len(), 4);
     assert!(variants.contains_key("Зима"));
@@ -694,15 +696,14 @@ fn parse_type_definition() {
 #[test]
 fn parse_complex_type_definition() {
     let program = parse("тип ШкольныйЧел\n Ученик(имя, класс)\n Учитель(имя)\n Никто");
-    assert_eq!(program.units.len(), 1);
-    assert!(matches!(&program.units[0], ProgramUnit::TypeDefinition(_)));
-    let ProgramUnit::TypeDefinition(Spannable {
-        node: TypeDefinition { name, variants },
-        ..
-    }) = &program.units[0]
-    else {
-        panic!("Expected a TypeDefinition unit");
-    };
+    assert_eq!(program.types.len(), 1);
+    let TypeDefinition { name, variants } = &program.types[0].node;
+    assert_eq!(name, "ШкольныйЧел");
+    assert_eq!(variants.len(), 3);
+    assert!(variants.contains_key("Ученик"));
+    assert!(variants.contains_key("Учитель"));
+    assert!(variants.contains_key("Никто"));
+    let TypeDefinition { name, variants } = &program.types[0].node;
     assert_eq!(name, "ШкольныйЧел");
     assert_eq!(variants.len(), 3);
     assert!(variants.contains_key("Ученик"));
@@ -716,12 +717,8 @@ fn parse_complex_type_definition() {
 #[test]
 fn parse_field_access() {
     let program = parse("х := точечка.х");
-    assert_eq!(program.units.len(), 1);
-    let ProgramUnit::Statement(Spannable {
-        node: Statement::Assignment { target: _, value },
-        ..
-    }) = &program.units[0]
-    else {
+    assert_eq!(program.toplevel.len(), 1);
+    let Statement::Assignment { target: _, value } = &program.toplevel[0].node else {
         panic!("Expected a Statement unit");
     };
 

@@ -1,4 +1,3 @@
-use rapira26::ast::{ProgramUnit, Spannable, TypeDefinition};
 use rapira26::lexer::{Lexer, Token};
 
 /// Collect all tokens from source, panicking on lexer errors.
@@ -447,17 +446,72 @@ fn lex_complex_expression() {
 #[test]
 fn lex_type_definition() {
     let program = tokenize("тип Сезон\n Зима\n Весна\n Лето\n Осень\n");
-    println!("{:?}", program);
+    assert_eq!(
+        program,
+        vec![
+            Token::KwТип,
+            Token::Ident("Сезон".to_string()),
+            Token::Newline,
+            Token::Indent,
+            Token::Ident("Зима".to_string()),
+            Token::Newline,
+            Token::Ident("Весна".to_string()),
+            Token::Newline,
+            Token::Ident("Лето".to_string()),
+            Token::Newline,
+            Token::Ident("Осень".to_string()),
+            Token::Newline,
+            Token::Dedent,
+        ]
+    );
 }
 
 #[test]
-fn parse_complex_type_definition() {
+fn lex_complex_type_definition() {
     let program = tokenize("тип ШкольныйЧел\n Ученик(имя, класс)\n Учитель(имя)\n Никто");
-    println!("{:?}", program);
+    assert_eq!(
+        program,
+        vec![
+            Token::KwТип,
+            Token::Ident("ШкольныйЧел".to_string()),
+            Token::Newline,
+            Token::Indent,
+            Token::Ident("Ученик".to_string()),
+            Token::LParen,
+            Token::Ident("имя".to_string()),
+            Token::Comma,
+            Token::Ident("класс".to_string()),
+            Token::RParen,
+            Token::Newline,
+            Token::Ident("Учитель".to_string()),
+            Token::LParen,
+            Token::Ident("имя".to_string()),
+            Token::RParen,
+            Token::Newline,
+            Token::Ident("Никто".to_string()),
+            Token::Dedent,
+        ]
+    );
+}
+
+#[test]
+fn lex_imports() {
+    let program = tokenize("подкл \"мод\" (функция, ПРОЦЕДУРА)");
+    assert_eq!(
+        program,
+        vec![
+            Token::KwПодкл,
+            Token::Text("мод".to_string()),
+            Token::LParen,
+            Token::Ident("функция".to_string()),
+            Token::Comma,
+            Token::Ident("ПРОЦЕДУРА".to_string()),
+            Token::RParen,
+        ]
+    );
 }
 
 // ── Error cases ─────────────────────────────────────────────────────────────
-
 #[test]
 fn lex_unterminated_text_is_error() {
     let results: Vec<_> = Lexer::new("\"hello").collect();

@@ -1,20 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-/// Top-level program: an ordered sequence of definitions and statements
-/// (called "единица_общения_с_системой" in the spec §2.1).
-#[derive(Debug, Clone)]
-pub struct Program {
-    pub units: Vec<ProgramUnit>,
-}
-
-#[derive(Debug, Clone)]
-pub enum ProgramUnit {
-    Statement(Spannable<Statement>),
-    ProcedureDefinition(Spannable<ProcedureDefinition>),
-    FunctionDefinition(Spannable<FunctionDefinition>),
-    TypeDefinition(Spannable<TypeDefinition>),
-}
-
 /// тип NAME ;; NAME(params)+
 #[derive(Debug, Clone)]
 pub struct TypeDefinition {
@@ -69,7 +54,7 @@ impl NameDeclarations {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     /// Empty statement (bare `;` or blank line)
     Empty,
@@ -119,10 +104,16 @@ pub enum Statement {
 
     /// возврат expr  — return value from function
     ReturnFromFunction(Box<Spannable<Expr>>),
+
+    /// подкл "<name>" (<definition_name>,...)
+    Import {
+        name: String,
+        definitions: Vec<String>,
+    },
 }
 
 /// Left-hand side of an assignment (spec §2.1 "переменная")
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LValue {
     /// Plain name:  X
     Name(String),
@@ -145,7 +136,7 @@ pub enum LValue {
 }
 
 /// Argument in a procedure call (spec §2.1 "факт_парам_проц")
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CallArgument {
     /// =>expr  or just  expr  — input argument
     Input(Box<Spannable<Expr>>),
@@ -153,7 +144,7 @@ pub enum CallArgument {
     InOut(Spannable<LValue>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SelectionStatement {
     /// выбор expr при v1,v2: body ... [иначе body]
     ValueMatch {
@@ -163,13 +154,13 @@ pub enum SelectionStatement {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ValueMatchCase {
     pub values: Vec<Box<Spannable<Expr>>>,
     pub body: Vec<Spannable<Statement>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConditionCase {
     pub condition: Box<Spannable<Expr>>,
     pub body: Vec<Spannable<Statement>>,
@@ -180,7 +171,7 @@ pub struct ConditionCase {
 ///   [для i [от a] [до b] [шаг c]] | [повтор n]
 ///   [пока f]
 ///   цикл body кц [по g]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LoopStatement {
     pub header: LoopHeader,
     pub while_condition: Option<Box<Spannable<Expr>>>, // пока f
@@ -188,7 +179,7 @@ pub struct LoopStatement {
     pub post_condition: Option<Box<Spannable<Expr>>>, // кц по g
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LoopHeader {
     /// Plain цикл (infinite loop, or with пока/кц по)
     Infinite,

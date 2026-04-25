@@ -4,6 +4,7 @@
 //! in function/procedure frames.
 
 use crate::ast::*;
+use crate::module::Module;
 use petgraph::dot::{Config, Dot};
 use petgraph::graph::DiGraph;
 use std::collections::HashMap;
@@ -14,8 +15,8 @@ pub struct CallGraph {
 }
 
 impl CallGraph {
-    /// Constructs a new [`CallGraph`] from a [`crate::ast::Program`].
-    pub fn new(program: &Program) -> Self {
+    /// Constructs a new [`CallGraph`] from a module
+    pub fn new(module: &Module) -> Self {
         let mut graph = DiGraph::new();
         let mut top_level_node = CallNode {
             name: "top_level".to_string(),
@@ -28,146 +29,138 @@ impl CallGraph {
         // func_name -> (func_call_name1, func_call_name2, ...)
         let mut func_to_call: HashMap<String, Vec<String>> = HashMap::new();
 
-        for unit in &program.units {
-            match unit {
-                ProgramUnit::FunctionDefinition(Spannable {
-                    node:
-                        FunctionDefinition {
-                            name,
-                            name_declarations,
-                            body,
-                            ..
-                        },
-                    ..
-                })
-                | ProgramUnit::ProcedureDefinition(Spannable {
-                    node:
-                        ProcedureDefinition {
-                            name,
-                            name_declarations,
-                            body,
-                            ..
-                        },
-                    ..
-                }) => {
-                    let Some(func_name) = name.clone() else {
-                        continue;
-                    };
-                    let mut local_args = name_declarations.own_names.clone();
-                    let foreign_args = name_declarations.foreign_names.clone();
-                    let mut sent_as_inout_params = Vec::new();
+        let mut handle_callable =
+            |name: &Option<String>,
+             name_declarations: &NameDeclarations,
+             body: &[Spannable<Statement>]| {
+                let Some(func_name) = name.clone() else {
+                    return;
+                };
+                let mut local_args = name_declarations.own_names.clone();
+                let foreign_args = name_declarations.foreign_names.clone();
+                let mut sent_as_inout_params = Vec::new();
 
-                    // Also add local vars which are not set via `свои`
-                    local_args.extend(body.iter().filter_map(|stmt| {
-                        if let Statement::Assignment { target, .. } = &stmt.node {
-                            if let LValue::Name(name) = &target.node {
-                                Some(name.clone())
-                            } else {
-                                None
-                            }
+                // Also add local vars which are not set via `свои`
+                local_args.extend(body.iter().filter_map(|stmt| {
+                    if let Statement::Assignment { target, .. } = &stmt.node {
+                        if let LValue::Name(name) = &target.node {
+                            Some(name.clone())
                         } else {
                             None
                         }
-                    }));
+                    } else {
+                        None
+                    }
+                }));
 
-                    sent_as_inout_params.extend(
-                        body.iter()
-                            .map(|stmt| match &stmt.node {
-                                Statement::ProcedureCall { arguments, .. } => arguments
-                                    .iter()
-                                    .map(|arg| match arg {
-                                        CallArgument::InOut(Spannable {
-                                            node: LValue::Name(name),
-                                            ..
-                                        }) => Some(name.clone()),
-                                        _ => None,
-                                    })
-                                    .collect::<Vec<_>>(),
-                                _ => vec![],
-                            })
-                            .flatten()
-                            .filter(|s| s.is_some())
-                            .map(|s| s.unwrap()),
-                    );
+                sent_as_inout_params.extend(
+                    body.iter()
+                        .map(|stmt| match &stmt.node {
+                            Statement::ProcedureCall { arguments, .. } => arguments
+                                .iter()
+                                .map(|arg| match arg {
+                                    CallArgument::InOut(Spannable {
+                                        node: LValue::Name(name),
+                                        ..
+                                    }) => Some(name.clone()),
+                                    _ => None,
+                                })
+                                .collect::<Vec<_>>(),
+                            _ => vec![],
+                        })
+                        .flatten()
+                        .filter(|s| s.is_some())
+                        .map(|s| s.unwrap()),
+                );
 
-                    func_to_call.insert(
-                        func_name.clone(),
-                        body.iter()
-                            .filter_map(|stmt| match &stmt.node {
-                                Statement::ProcedureCall { procedure, .. } => {
-                                    match &procedure.node {
-                                        Expr::Name(name) => Some(name.clone()),
-                                        _ => None,
-                                    }
-                                }
+                func_to_call.insert(
+                    func_name.clone(),
+                    body.iter()
+                        .filter_map(|stmt| match &stmt.node {
+                            Statement::ProcedureCall { procedure, .. } => match &procedure.node {
+                                Expr::Name(name) => Some(name.clone()),
                                 _ => None,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
+                            },
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                );
 
-                    // Also add func calls which are epxressions
-                    let all_exprs: Vec<&Box<Spannable<Expr>>> = body
-                        .iter()
-                        .flat_map(|stmt| CallGraph::expressions_in_statement(&stmt.node))
-                        .collect();
-                    let all_func_calls_strings = all_exprs
-                        .iter()
-                        .flat_map(|expr| CallGraph::find_function_call_expr(*expr))
-                        .collect::<Vec<_>>();
+                // Also add func calls which are epxressions
+                let all_exprs: Vec<&Box<Spannable<Expr>>> = body
+                    .iter()
+                    .flat_map(|stmt| CallGraph::expressions_in_statement(&stmt.node))
+                    .collect();
+                let all_func_calls_strings = all_exprs
+                    .iter()
+                    .flat_map(|expr| CallGraph::find_function_call_expr(*expr))
+                    .collect::<Vec<_>>();
 
-                    func_to_call
-                        .get_mut(&func_name)
-                        .unwrap()
-                        .extend(all_func_calls_strings);
+                func_to_call
+                    .get_mut(&func_name)
+                    .unwrap()
+                    .extend(all_func_calls_strings);
 
-                    graph.add_node(CallNode {
-                        name: func_name,
-                        local_args,
-                        foreign_args,
-                        sent_as_inout_params,
-                    });
+                graph.add_node(CallNode {
+                    name: func_name,
+                    local_args,
+                    foreign_args,
+                    sent_as_inout_params,
+                });
+            };
+
+        for stmt in &module.toplevel {
+            let all_exprs = CallGraph::expressions_in_statement(&stmt.node);
+            let all_func_calls_strings = all_exprs
+                .iter()
+                .flat_map(|expr| CallGraph::find_function_call_expr(expr))
+                .collect::<Vec<_>>();
+            top_level_call_exprs.extend(all_func_calls_strings);
+
+            match &stmt.node {
+                Statement::Assignment { target, .. } => {
+                    if let LValue::Name(name) = &target.node {
+                        top_level_node.local_args.push(name.clone());
+                    }
                 }
-                ProgramUnit::Statement(stmt) => {
-                    let all_exprs = CallGraph::expressions_in_statement(&stmt.node);
-                    let all_func_calls_strings = all_exprs
-                        .iter()
-                        .flat_map(|expr| CallGraph::find_function_call_expr(expr))
-                        .collect::<Vec<_>>();
-                    top_level_call_exprs.extend(all_func_calls_strings);
-
-                    match &stmt.node {
-                        Statement::Assignment { target, .. } => {
-                            if let LValue::Name(name) = &target.node {
-                                top_level_node.local_args.push(name.clone());
+                Statement::ProcedureCall {
+                    procedure,
+                    arguments,
+                } => {
+                    top_level_node
+                        .sent_as_inout_params
+                        .extend(arguments.iter().filter_map(|arg| {
+                            if let CallArgument::InOut(lval) = arg {
+                                if let LValue::Name(name) = &lval.node {
+                                    Some(name.clone())
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
                             }
-                        }
-                        Statement::ProcedureCall {
-                            procedure,
-                            arguments,
-                        } => {
-                            top_level_node.sent_as_inout_params.extend(
-                                arguments.iter().filter_map(|arg| {
-                                    if let CallArgument::InOut(lval) = arg {
-                                        if let LValue::Name(name) = &lval.node {
-                                            Some(name.clone())
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                }),
-                            );
+                        }));
 
-                            if let Expr::Name(name) = &procedure.node {
-                                top_level_call_exprs.push(name.clone());
-                            }
-                        }
-                        _ => {}
+                    if let Expr::Name(name) = &procedure.node {
+                        top_level_call_exprs.push(name.clone());
                     }
                 }
                 _ => {}
             }
+        }
+
+        for funcs in &module.functions {
+            let name = &funcs.node.name;
+            let name_declarations = &funcs.node.name_declarations;
+            let body = &funcs.node.body;
+            handle_callable(name, name_declarations, body);
+        }
+
+        for procedure in &module.procedures {
+            let name = &procedure.node.name;
+            let name_declarations = &procedure.node.name_declarations;
+            let body = &procedure.node.body;
+            handle_callable(name, name_declarations, body);
         }
 
         // Append top level node
@@ -311,6 +304,7 @@ impl CallGraph {
             Statement::Output { values, .. } => values.iter().collect(),
             Statement::Input { .. } => Vec::new(),
             Statement::ExitLoop => Vec::new(),
+            Statement::Import { .. } => Vec::new(),
         }
     }
 

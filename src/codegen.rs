@@ -1,7 +1,7 @@
 pub mod cgen;
 use std::path::PathBuf;
 
-use crate::ast::*;
+use crate::module::Module;
 use clap::ValueEnum;
 
 pub enum CodegenWarning {
@@ -20,7 +20,7 @@ pub enum CodegenTargetName {
 }
 
 pub trait CodegenTarget {
-    fn generate(&mut self, program: &Program, filepath: &str) -> String;
+    fn generate(&mut self, program: &Module, filepath: &str) -> String;
     fn compile(
         &mut self,
         code: String,
@@ -34,7 +34,7 @@ pub trait CodegenTarget {
 /// Generate and compile code using the given target
 pub fn run_codegen(
     target: &mut dyn CodegenTarget,
-    program: &Program,
+    program: &Module,
     filepath: &PathBuf,
     current_dir: &PathBuf,
     flags: &[String],

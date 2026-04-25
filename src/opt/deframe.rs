@@ -8,6 +8,7 @@
 //! Only variables that are used in functions that request them as `чужие` will be stored.
 
 use crate::ast::*;
+use crate::module::Module;
 use crate::opt::call_graph::CallGraph;
 use crate::opt::opt_pass::{OptimizationPass, OptimizationPassOpts};
 use petgraph::visit::Dfs;
@@ -17,11 +18,11 @@ pub struct DeframePass;
 impl OptimizationPass for DeframePass {
     fn transform(
         &self,
-        ast: &mut Program,
+        module: &mut Module,
         opts: &OptimizationPassOpts,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // First build the call graph
-        let call_graph = CallGraph::new(ast);
+        let call_graph = CallGraph::new(module);
 
         // Walk the call graph to determine which variables are used in functions that request them as `чужие`
         for node in call_graph.graph().node_indices() {
@@ -43,36 +44,35 @@ impl OptimizationPass for DeframePass {
                     .cloned()
                     .collect();
 
-                let func_ast_node = ast
-                    .units
+                module
+                    .functions
                     .iter_mut()
                     .find(|unit| {
-                        matches!(unit, ProgramUnit::FunctionDefinition(Spannable { node: FunctionDefinition { name, .. }, ..}) | ProgramUnit::ProcedureDefinition(Spannable { node: ProcedureDefinition { name, .. }, ..}) if name.as_deref() == Some(&call_node.name))
+                        matches!(unit, Spannable { node: FunctionDefinition { name, .. }, ..} if name.as_deref() == Some(&call_node.name))
+                    })
+                    .map (|unit| {
+                        match unit {
+                            Spannable { node: FunctionDefinition { variables_need_saving, .. }, ..} => {
+                                // TODO: no clone
+                                variables_need_saving.extend(same_vars.clone());
+                            }
+                        }
                     });
 
-                if let Some(func_ast_node) = func_ast_node {
-                    match func_ast_node {
-                        ProgramUnit::FunctionDefinition(Spannable {
-                            node:
-                                FunctionDefinition {
-                                    variables_need_saving,
-                                    ..
-                                },
-                            ..
-                        })
-                        | ProgramUnit::ProcedureDefinition(Spannable {
-                            node:
-                                ProcedureDefinition {
-                                    variables_need_saving,
-                                    ..
-                                },
-                            ..
-                        }) => {
-                            variables_need_saving.extend(same_vars);
+                // Same for prodecures
+                module
+                    .procedures
+                    .iter_mut()
+                    .find(|unit| {
+                        matches!(unit, Spannable { node: ProcedureDefinition { name, .. }, ..} if name.as_deref() == Some(&call_node.name))
+                    })
+                    .map(|unit| {
+                        match unit {
+                            Spannable { node: ProcedureDefinition { variables_need_saving, .. }, ..} => {
+                                variables_need_saving.extend(same_vars);
+                            }
                         }
-                        _ => {} // TODO: err
-                    }
-                }
+                    });
             }
         }
 
@@ -80,7 +80,7 @@ impl OptimizationPass for DeframePass {
             println!("=== DOT GRAPH ===");
             call_graph.dump();
             println!("=== ПОСЛЕ DeframePass ===");
-            println!("{:#?}", ast);
+            println!("{:#?}", module);
             println!("=========================");
         }
 
