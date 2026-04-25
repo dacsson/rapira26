@@ -86,7 +86,6 @@ pub enum Token {
     GreaterOrEqual, // >=
     Less,           // <
     Greater,        // >
-    InputArrow,     // =>  (input parameter marker)
     Dot,            // .
 
     // ── Punctuation ───────────────────────────────────────────────────────
@@ -96,6 +95,8 @@ pub enum Token {
     RBracket, // ]
     Colon,    // :
     Comma,    // ,
+
+    KwВых, // вых (output parameter)
 
     // Custom types
     KwТип, // тип
@@ -159,7 +160,7 @@ impl std::fmt::Display for Token {
             Token::GreaterOrEqual => write!(f, "`>=`"),
             Token::Less => write!(f, "`<`"),
             Token::Greater => write!(f, "`>`"),
-            Token::InputArrow => write!(f, "`=>`"),
+            Token::KwВых => write!(f, "`вы`"),
             Token::LParen => write!(f, "`(`"),
             Token::RParen => write!(f, "`)`"),
             Token::LBracket => write!(f, "`[`"),
@@ -423,6 +424,7 @@ impl<'input> Lexer<'input> {
             "пи" => Token::KwПи,
             "pi" => Token::KwPi,
             "тип" => Token::KwТип,
+            "вых" => Token::KwВых,
             other => Token::Ident(other.to_string()),
         }
     }
@@ -637,14 +639,7 @@ impl<'input> Lexer<'input> {
                     Ok(Token::Colon)
                 }
             }
-            '=' => {
-                if self.peek_char() == Some('>') {
-                    self.advance();
-                    Ok(Token::InputArrow)
-                } else {
-                    Ok(Token::Equal)
-                }
-            }
+            '=' => Ok(Token::Equal),
             '/' => match self.peek_char() {
                 Some('/') => {
                     self.advance();

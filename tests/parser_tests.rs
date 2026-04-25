@@ -475,7 +475,7 @@ fn parse_procedure_call_by_name() {
 
 #[test]
 fn parse_procedure_call_inout_arg() {
-    let statement = parse_first_statement("ОБМЕН(<=X, <=Y)");
+    let statement = parse_first_statement("ОБМЕН(вых X, вых Y)");
     match statement {
         Statement::ProcedureCall { arguments, .. } => {
             assert_eq!(arguments.len(), 2);
@@ -524,7 +524,7 @@ fn parse_simple_procedure() {
 
 #[test]
 fn parse_procedure_with_params() {
-    let proc_def = parse_first_procedure("проц ТЕСТ (A, =>B, <=C)\n  возврат");
+    let proc_def = parse_first_procedure("проц ТЕСТ (A, B, вых C)\n  возврат");
     assert_eq!(proc_def.parameters.len(), 3);
     assert!(matches!(&proc_def.parameters[0], ProcParameter::Input(name) if name == "A"));
     assert!(matches!(&proc_def.parameters[1], ProcParameter::Input(name) if name == "B"));
