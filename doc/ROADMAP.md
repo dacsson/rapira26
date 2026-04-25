@@ -74,10 +74,10 @@ If an error hapens emit source file line, not C error
 - Source: https://ershov.iis.nsk.su/ru/node/772596
 
 Fetures to add:
-#### Structs: `<$ имя: "иван", фамилия: "петров" $>`
+#### ✓ Structs: `<$ имя: "иван", фамилия: "петров" $>` ✓
   - Dont forget about cycle references in refcounting alg.
 
-#### Change tuple syntax: `< 1, 2, 3 >`
+#### ✓ Change tuple syntax: `< 1, 2, 3 >` ✓
 
 #### Improve IO 
 - Args, Kwargs
@@ -107,11 +107,13 @@ Fetures to add:
 
 #### Изменить синтаксис индексирования 
 
+### Misc
+
 We probably should change symbols `<` to use something more ergonomic for RU keyborads, something like:
-- Structs: `(имя: "иван", фамилия: "петров")`
-- tuple: `(1, 2, 3)`
+- ✓ Structs: `(имя: "иван", фамилия: "петров")` ✓
+- ✓ tuple: `(1, 2, 3)` ✓
 - Sets: `(1; 1+1; <1, 5>)`
-- Out params: `проц трансформер(имя, вых транс)`; `вых` вместо <=
+- ✓ Out params: `проц трансформер(имя, вых транс)`; `вых` вместо <=✓
 
 ### Step 7 - Semantic analysis
 

@@ -321,12 +321,9 @@ impl<'input> Parser<'input> {
     }
 
     fn parse_proc_parameter(&mut self) -> Result<ProcParameter, ParseError> {
-        if self.eat(&Token::LessOrEqual) {
+        if self.eat(&Token::KwВых) {
             let name = self.expect_ident()?;
             Ok(ProcParameter::InOut(name))
-        } else if self.eat(&Token::InputArrow) {
-            let name = self.expect_ident()?;
-            Ok(ProcParameter::Input(name))
         } else {
             let name = self.expect_ident()?;
             Ok(ProcParameter::Input(name))
@@ -867,12 +864,9 @@ impl<'input> Parser<'input> {
     }
 
     fn parse_call_argument(&mut self) -> Result<CallArgument, ParseError> {
-        if self.eat(&Token::LessOrEqual) {
+        if self.eat(&Token::KwВых) {
             let target = self.parse_lvalue()?;
             Ok(CallArgument::InOut(target))
-        } else if self.eat(&Token::InputArrow) {
-            let value = self.parse_expression()?;
-            Ok(CallArgument::Input(Box::new(value)))
         } else {
             let value = self.parse_expression()?;
             Ok(CallArgument::Input(Box::new(value)))

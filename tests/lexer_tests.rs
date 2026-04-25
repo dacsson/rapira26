@@ -257,10 +257,9 @@ fn lex_hash() {
 }
 
 #[test]
-fn lex_arrows() {
-    let tokens = tokenize("=> <=");
-    // => is InputArrow; <= is LessOrEqual (InOut arrow is handled as <= token)
-    assert_eq!(tokens, vec![Token::InputArrow, Token::LessOrEqual]);
+fn lex_input_output_spec() {
+    let tokens = tokenize("вых");
+    assert_eq!(tokens, vec![Token::KwВых]);
 }
 
 // ── Punctuation ─────────────────────────────────────────────────────────────

@@ -17,8 +17,8 @@
 вызов ПЕЧАТЬ_КВАДРАТА(-3)
 \ => 9
 
-\ --- parameter prefix => is optional (spec §1.5) ---
-проц С_СТРЕЛКОЙ (=>X)
+\ --- by default paramter in just input
+проц С_СТРЕЛКОЙ (X)
   вывод: X + 1
 
 вызов С_СТРЕЛКОЙ(10)
