@@ -17,6 +17,9 @@ cd rapira26
 cargo build --release
 # Или если хочется установить на уровне системы
 cargo install --path .
+# Собери рантайм
+make -C runtime/
+export RAPIRA_RUNTIME=runtime/
 ```
 
 Запусти пример:

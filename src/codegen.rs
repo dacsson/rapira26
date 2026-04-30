@@ -1,5 +1,5 @@
 pub mod cgen;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use crate::module::Module;
 use clap::ValueEnum;
@@ -19,39 +19,39 @@ pub enum CodegenTargetName {
     C,
 }
 
+pub type ModulePath = String;
+pub type ModuleCode = String;
+/// A map of module paths to their generated code
+pub type ModuleMap = HashMap<ModulePath, ModuleCode>;
+
 pub trait CodegenTarget {
-    fn generate(&mut self, program: &Module, filepath: &str) -> String;
+    fn generate(&mut self, modules: Vec<Module>) -> ModuleMap;
     fn compile(
         &mut self,
-        code: String,
-        filepath: &PathBuf,
+        modules_codes: ModuleMap,
         current_dir: &PathBuf,
         flags: &[String],
         run: bool,
     ) -> Result<(), RunError>;
 }
 
-/// Generate and compile code using the given target
+/// Generate and compile modules using the given target
 pub fn run_codegen(
     target: &mut dyn CodegenTarget,
-    program: &Module,
-    filepath: &PathBuf,
+    modules: Vec<Module>,
     current_dir: &PathBuf,
     flags: &[String],
     run: bool,
     dump: bool,
 ) -> Result<(), RunError> {
-    let Some(filepath_str) = filepath.to_str() else {
-        return Err(RunError::NoSuchFile);
-    };
-
-    let code = target.generate(program, filepath_str);
+    let code_map = target.generate(modules);
     if dump {
-        println!("{}", code);
-        Ok(())
+        println!("{:#?}", code_map);
     } else {
-        target.compile(code, filepath, current_dir, flags, run)
+        target.compile(code_map, current_dir, flags, run)?;
     }
+
+    Ok(())
 }
 
 /// Find the runtime/ directory containing librapruntime.a and headers.

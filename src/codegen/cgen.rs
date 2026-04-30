@@ -10,7 +10,7 @@ use std::{
 
 use crate::{
     ast::*,
-    codegen::{CodegenTarget, CodegenWarning, RunError, find_runtime_dir},
+    codegen::{CodegenTarget, CodegenWarning, ModuleMap, RunError, find_runtime_dir},
     module::Module,
     pretty::pretty_parse_warning,
 };
@@ -20,6 +20,10 @@ type ScopeVariablesStack = Vec<HashSet<String>>;
 
 /// Holds codegen state while walking the AST.
 pub struct CGen {
+    /// Path to the source file of the module currently being emitted
+    current_module_path: String,
+    /// User declared types collected from all modules at the start of generate
+    declared_types: Vec<TypeDefinition>,
     /// Current scope output (main body, or function body while emitting a definition)
     output: String,
     /// File-scope C function definitions, flushed before main()
@@ -42,7 +46,7 @@ pub struct CGen {
     variables_need_saving: Vec<String>,
     /// Temps created during expression evaluation that own a new value and need dec_ref at statement end.
     statement_temps: Vec<String>,
-    /// Rapira name → callable info, so call sites can create callables inline
+    /// Rapira name -> callable info, so call sites can create callables inline
     known_callables: HashMap<String, CallableInfo>,
     /// Variables declared as чужие in current function scope (original Rapira names).
     /// Empty at top level and inside functions without чужие.
@@ -51,17 +55,13 @@ pub struct CGen {
     inside_function: bool,
     /// Emit RAP_check_leaks() call and #define RAP_TEST_LEAKS
     check_leaks: bool,
-    /// User declared types in current module,
-    /// we reuse AST defined typed since its just strings,
-    /// might change later
-    declared_types: Vec<TypeDefinition>,
-    /// Path to the source file being compiled
-    filepath: String,
 }
 
 impl CGen {
     pub fn new() -> Self {
         Self {
+            current_module_path: String::new(),
+            declared_types: Vec::new(),
             output: String::new(),
             forward_decls: String::new(),
             indent_level: 1, // inside main()
@@ -76,8 +76,6 @@ impl CGen {
             foreign_vars: HashSet::new(),
             inside_function: false,
             check_leaks: false,
-            declared_types: Vec::new(),
-            filepath: String::new(),
         }
     }
 
@@ -99,9 +97,13 @@ impl CGen {
     }
 
     fn is_known_type(&self, var: &str) -> bool {
+        self.find_type_def(var).is_some()
+    }
+
+    fn find_type_def(&self, variant_name: &str) -> Option<&TypeDefinition> {
         self.declared_types
             .iter()
-            .any(|t| t.variants.contains_key(var))
+            .find(|t| t.variants.contains_key(variant_name))
     }
 
     /// Record a temp as needing dec_ref at statement end.
@@ -354,8 +356,6 @@ impl CGen {
 
         self.output = saved_output;
         self.indent_level = saved_indent;
-
-        self.declared_types.push(type_def.clone());
     }
 
     fn emit_function_def(&mut self, func_def_span: &Spannable<FunctionDefinition>) {
@@ -1104,11 +1104,7 @@ impl CGen {
                     let keyword = if i == 0 { "if" } else { "} else if" };
 
                     let conditions: Vec<String> = if let Some((ctr_name, _)) = bp {
-                        let type_def = self
-                            .declared_types
-                            .iter()
-                            .find(|t| t.variants.contains_key(ctr_name))
-                            .unwrap();
+                        let type_def = self.find_type_def(ctr_name).unwrap();
                         let tag = type_def
                             .variants
                             .iter()
@@ -1156,12 +1152,7 @@ impl CGen {
         ctr_name: &str,
         binding_names: &[String],
     ) {
-        let type_def = self
-            .declared_types
-            .iter()
-            .find(|t| t.variants.contains_key(ctr_name))
-            .unwrap()
-            .clone();
+        let type_def = self.find_type_def(ctr_name).unwrap().clone();
         let mangled_type_name = self.mangle_type_name(&type_def.name);
         let variant_tag = Self::transliterate(ctr_name);
         let fields = type_def.variants.get(ctr_name).unwrap().clone();
@@ -1353,12 +1344,7 @@ impl CGen {
         temp: &str,
         arguments: &[Box<Spannable<Expr>>],
     ) {
-        let type_def = self
-            .declared_types
-            .iter()
-            .find(|t| t.variants.contains_key(name))
-            .unwrap()
-            .clone();
+        let type_def = self.find_type_def(name).unwrap().clone();
         let mangled_type_name = self.mangle_type_name(&type_def.name);
         let ctr_tag = type_def
             .variants
@@ -1454,8 +1440,8 @@ impl CGen {
                             println!(
                                 "{}",
                                 pretty_parse_warning(
-                                    &std::fs::read_to_string(&self.filepath).unwrap(),
-                                    &self.filepath,
+                                    &std::fs::read_to_string(&self.current_module_path).unwrap(),
+                                    &self.current_module_path,
                                     CodegenWarning::UndeclaredVariable(
                                         expr_node.position_start,
                                         name.clone(),
@@ -1945,25 +1931,47 @@ impl CGen {
 
 impl CodegenTarget for CGen {
     /// Main entry point: walk the whole program, return generated C source.
-    fn generate(&mut self, module: &Module, filepath: &str) -> String {
-        self.filepath = filepath.to_string();
+    fn generate(&mut self, modules: Vec<Module>) -> ModuleMap {
+        let mut module_map = ModuleMap::new();
 
         self.create_scope(); // main scope
 
-        for type_def in &module.types {
-            self.emit_type_def(type_def);
-        }
-        for func in &module.functions {
-            self.emit_function_def(func);
-        }
-        for proc in &module.procedures {
-            self.emit_procedure_def(proc);
-        }
-        for stmt in &module.toplevel {
-            self.emit_statement(stmt);
+        // Collect all type definitions from all modules for type lookups during codegen
+        self.declared_types = modules
+            .iter()
+            .flat_map(|m| m.types.iter())
+            .map(|t| t.node.clone())
+            .collect();
+
+        let module_count = modules.len();
+
+        for (i, module) in modules.iter().enumerate() {
+            self.current_module_path = module.path.display().to_string();
+
+            for type_def in &module.types {
+                self.emit_type_def(type_def);
+            }
+            for func in &module.functions {
+                self.emit_function_def(func);
+            }
+            for proc in &module.procedures {
+                self.emit_procedure_def(proc);
+            }
+
+            // Top level code is put into RAP_{MODULE_NAME}_MOD_ENTRY
+            // function, which executes on modules import
+            // for stmt in &module.toplevel {
+            //     self.emit_statement(stmt);
+            // }
         }
 
-        // Assemble: prelude → forward decls → main() { body }
+        let entry_path = modules
+            .last()
+            .map(|m| m.path.display().to_string())
+            .unwrap_or_default();
+
+        // The last module (entry point) emits toplevel into main()
+        // Here, "last" means "last after the topological sort of dependency graph"
         let mut result = String::new();
         if self.check_leaks {
             result.push_str("#define RAP_TEST_LEAKS\n");
@@ -1976,7 +1984,7 @@ impl CodegenTarget for CGen {
         result.push('\n');
         result.push_str(&format!(
             "char* RAP_curret_module_path = \"{}\";\n",
-            filepath
+            entry_path
         ));
         result.push_str("size_t RAP_current_pos_start=0;\nsize_t RAP_current_pos_end=0;\n\n");
         result.push_str(&self.forward_decls);
@@ -2002,56 +2010,89 @@ impl CodegenTarget for CGen {
 
     fn compile(
         &mut self,
-        code: String,
-        filepath: &PathBuf,
+        modules_map: ModuleMap,
         current_dir: &PathBuf,
         flags: &[String],
         run: bool,
     ) -> Result<(), RunError> {
-        let file_name = filepath.file_name().and_then(|n| n.to_str()).unwrap_or("a");
-        let c_path = current_dir.join(PathBuf::from(file_name).with_extension("c"));
+        // 1. Generate obj files for each module
+        for (modname, modcode) in &modules_map {
+            let entry_path = PathBuf::from(&self.current_module_path);
+            let file_name = entry_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("a");
+            let c_path = current_dir.join(PathBuf::from(file_name).with_extension("c"));
 
-        let binary_path = current_dir.join(PathBuf::from(file_name).with_extension(""));
+            let binary_path = current_dir.join(PathBuf::from(file_name).with_extension(".o"));
 
-        std::fs::write(&c_path, &code).unwrap_or_else(|error| {
-            eprintln!("error writing {:?}: {error}", c_path);
-            std::process::exit(1);
-        });
-
-        let runtime_dir = find_runtime_dir();
-
-        let status = Command::new("gcc")
-            .arg(&c_path)
-            .arg("-o")
-            .arg(&binary_path)
-            .arg(format!("-I{}", runtime_dir.display())) // runtime C library
-            .arg(format!(
-                "-I{}",
-                runtime_dir.join("raperr/include").display()
-            )) // runtime error C library
-            .arg(format!("-L{}", runtime_dir.join("lib").display()))
-            .arg(format!(
-                "-L{}",
-                runtime_dir.join("raperr/target/release").display()
-            ))
-            .arg("-lrapruntime")
-            .arg("-lraperr")
-            .arg("-lm")
-            .args(flags)
-            .status()
-            .unwrap_or_else(|error| {
-                eprintln!("failed to run gcc: {error}");
+            std::fs::write(&c_path, &modcode).unwrap_or_else(|error| {
+                eprintln!("error writing {:?}: {error}", c_path);
                 std::process::exit(1);
             });
 
-        if !status.success() {
-            eprintln!("gcc failed with {status}");
-            std::process::exit(1);
+            let runtime_dir = find_runtime_dir();
+
+            let status = Command::new("gcc")
+                .arg("-c")
+                .arg(&c_path)
+                .arg("-o")
+                .arg(&binary_path)
+                .arg(format!("-I{}", runtime_dir.display())) // runtime C library
+                .arg(format!(
+                    "-I{}",
+                    runtime_dir.join("raperr/include").display()
+                )) // runtime error C library
+                .arg(format!("-L{}", runtime_dir.join("lib").display()))
+                .arg(format!(
+                    "-L{}",
+                    runtime_dir.join("raperr/target/release").display()
+                ))
+                .arg("-lrapruntime")
+                .arg("-lraperr")
+                .arg("-lm")
+                .args(flags)
+                .status()
+                .unwrap_or_else(|error| {
+                    eprintln!("failed to run gcc: {error}");
+                    std::process::exit(1);
+                });
+
+            if !status.success() {
+                eprintln!("gcc failed with {status}");
+                std::process::exit(1);
+            }
+
+            // Clean up generated C file
+            if let Err(error) = std::fs::remove_file(&c_path) {
+                eprintln!("failed to remove {:?}: {error}", c_path);
+            }
         }
 
-        // Clean up generated C file
-        if let Err(error) = std::fs::remove_file(&c_path) {
-            eprintln!("failed to remove {:?}: {error}", c_path);
+        // 2. Link object files to create the final binary
+        let object_files = modules_map
+            .iter()
+            .map(|(path, _)| current_dir.join(PathBuf::from(path).with_extension("o")))
+            .collect::<Vec<_>>();
+
+        // Path to the final binary
+        // Name = last module
+        let binary_path =
+            current_dir.join(PathBuf::from(&self.current_module_path).with_extension(""));
+
+        let link_command = Command::new("gcc")
+            .args(object_files)
+            .arg("-o")
+            .arg(&binary_path)
+            .status()
+            .unwrap_or_else(|error| {
+                eprintln!("failed to link {:?}: {error}", binary_path);
+                std::process::exit(1);
+            });
+
+        if !link_command.success() {
+            eprintln!("linking failed: {link_command:?}");
+            std::process::exit(1);
         }
 
         if run {
@@ -2059,6 +2100,11 @@ impl CodegenTarget for CGen {
                 eprintln!("failed to run {:?}: {error}", binary_path);
                 std::process::exit(1);
             });
+
+            if !status.success() {
+                eprintln!("{} failed with {status}", binary_path.to_string_lossy());
+                std::process::exit(1);
+            }
 
             // Clean up generated binary
             if let Err(error) = std::fs::remove_file(&binary_path) {

@@ -114,6 +114,7 @@ We probably should change symbols `<` to use something more ergonomic for RU key
 - ✓ tuple: `(1, 2, 3)` ✓
 - Sets: `(1; 1+1; <1, 5>)`
 - ✓ Out params: `проц трансформер(имя, вых транс)`; `вых` вместо <=✓
+- Deep copy of structures
 
 ### Step 7 - Semantic analysis
 
