@@ -68,7 +68,11 @@ fn run_rap_file(rap_path: &Path) -> Result<String, String> {
         .map_err(|e| format!("failed to read {}: {e}", rap_path.display()))?;
 
     let token_stream = rapira26::lexer::Lexer::new(&source);
-    let mut parser = rapira26::parser::Parser::new(token_stream, rap_path.to_str().unwrap());
+    let mut parser = rapira26::parser::Parser::new(
+        token_stream,
+        rap_path.to_str().unwrap(),
+        rap_path.canonicalize().unwrap_or_default(),
+    );
     let mut program = parser
         .parse_program()
         .map_err(|e| pretty_parse_error(&source, rap_path.to_str().unwrap(), e))?;
@@ -85,7 +89,7 @@ fn run_rap_file(rap_path: &Path) -> Result<String, String> {
     });
 
     let mut codegen = rapira26::codegen::cgen::CGen::new();
-    let c_code = codegen.generate(&program, rap_path.canonicalize().unwrap().to_str().unwrap());
+    let c_code = codegen.generate(vec![program]);
 
     // Write C to a temp file
     let temp_dir = std::env::temp_dir().join("rapira26_e2e");

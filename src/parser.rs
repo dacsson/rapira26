@@ -34,15 +34,21 @@ pub struct Parser<'input> {
     lexer: Lexer<'input>,
     current: Option<(usize, Token, usize)>,
     module_name: &'input str,
+    path: std::path::PathBuf,
 }
 
 impl<'input> Parser<'input> {
-    pub fn new(mut lexer: Lexer<'input>, module_name: &'input str) -> Self {
+    pub fn new(
+        mut lexer: Lexer<'input>,
+        module_name: &'input str,
+        path: std::path::PathBuf,
+    ) -> Self {
         let current = Self::advance_lexer(&mut lexer);
         Self {
             lexer,
             current,
             module_name,
+            path,
         }
     }
 
@@ -192,7 +198,7 @@ impl<'input> Parser<'input> {
     }
 
     pub fn parse_program(&mut self) -> Result<Module, ParseError> {
-        let mut module = Module::new(self.module_name.to_string());
+        let mut module = Module::new(self.module_name.to_string(), self.path.clone());
 
         loop {
             self.skip_newlines();

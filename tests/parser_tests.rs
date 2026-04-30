@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use rapira26::ast::*;
 use rapira26::lexer::Lexer;
 use rapira26::module::Module;
@@ -6,7 +8,7 @@ use rapira26::pretty::pretty_parse_error;
 
 fn parse(source: &str) -> Module {
     let lexer = Lexer::new(source);
-    let mut parser = Parser::new(lexer, "");
+    let mut parser = Parser::new(lexer, "", PathBuf::new());
     parser.parse_program().unwrap_or_else(|e| {
         let err = pretty_parse_error(source, &"", e);
         panic!("{err}")
