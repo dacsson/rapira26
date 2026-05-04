@@ -46,8 +46,8 @@ pub struct CGen {
     variables_need_saving: Vec<String>,
     /// Temps created during expression evaluation that own a new value and need dec_ref at statement end.
     statement_temps: Vec<String>,
-    /// Rapira name -> callable info, so call sites can create callables inline
-    known_callables: HashMap<String, CallableInfo>,
+    /// module_base_name -> (rapira_name -> callable info)
+    known_callables: HashMap<String, HashMap<String, CallableInfo>>,
     /// Variables declared as чужие in current function scope (original Rapira names).
     /// Empty at top level and inside functions without чужие.
     foreign_vars: HashSet<String>,
@@ -55,6 +55,10 @@ pub struct CGen {
     inside_function: bool,
     /// Emit RAP_check_leaks() call and #define RAP_TEST_LEAKS
     check_leaks: bool,
+    /// Path of the entry module (the one defining вход()), used by compile() for binary naming
+    entry_module_path: String,
+    /// Imported functions
+    imported_definitions: HashSet<String>,
 }
 
 impl CGen {
@@ -76,6 +80,8 @@ impl CGen {
             foreign_vars: HashSet::new(),
             inside_function: false,
             check_leaks: false,
+            entry_module_path: String::new(),
+            imported_definitions: HashSet::new(),
         }
     }
 
@@ -106,6 +112,43 @@ impl CGen {
             .find(|t| t.variants.contains_key(variant_name))
     }
 
+    fn current_module_base_name(&self) -> String {
+        let path = std::path::Path::new(&self.current_module_path);
+        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        module_base_name(filename)
+    }
+
+    fn find_callable(&self, name: &str) -> Option<&CallableInfo> {
+        let current = self.current_module_base_name();
+        if let Some(info) = self.known_callables.get(&current).and_then(|m| m.get(name)) {
+            return Some(info);
+        }
+        self.known_callables.values().find_map(|m| m.get(name))
+    }
+
+    fn insert_callable(&mut self, name: String, info: CallableInfo) {
+        let module = self.current_module_base_name();
+        self.known_callables
+            .entry(module)
+            .or_default()
+            .insert(name, info);
+    }
+
+    fn reset_for_module(&mut self) {
+        self.output = String::new();
+        self.forward_decls = String::new();
+        self.indent_level = 1;
+        self.temp_counter = 0;
+        self.string_counter = 0;
+        self.param_counter = 0;
+        self.current_frame = "&_main_frame".to_string();
+        self.declared_vars = Vec::new();
+        self.variables_need_saving = Vec::new();
+        self.statement_temps = Vec::new();
+        self.foreign_vars = HashSet::new();
+        self.inside_function = false;
+    }
+
     /// Record a temp as needing dec_ref at statement end.
     fn track_temp(&mut self, temp: &str) {
         self.statement_temps.push(temp.to_string());
@@ -119,9 +162,6 @@ impl CGen {
             if temp != exclude.unwrap_or_default() {
                 self.emit_line(&format!("RAP_dec_ref({});", temp));
             }
-            // if exclude.map_or(true, |ex| ex != temp) {
-            //     self.emit_line(&format!("RAP_dec_ref({});", temp));
-            // }
         }
     }
 
@@ -273,7 +313,11 @@ impl CGen {
     }
 
     fn mangle_func_name(&self, rapira_name: &str) -> String {
-        format!("RAP_FUNC_{}", Self::transliterate(rapira_name))
+        format!(
+            "RAP_FUNC_{}_{}",
+            self.current_module_base_name(),
+            Self::transliterate(rapira_name)
+        )
     }
 
     fn mangle_type_name(&self, rapira_name: &str) -> String {
@@ -371,7 +415,7 @@ impl CGen {
         let func_def = &func_def_span.node;
         let name = func_def.name.as_deref().unwrap_or("_anon");
         let c_func_name = self.mangle_func_name(name);
-        self.known_callables.insert(
+        self.insert_callable(
             name.to_string(),
             CallableInfo {
                 c_func_name: c_func_name.clone(),
@@ -472,7 +516,7 @@ impl CGen {
         let proc_def = &proc_def_span.node;
         let name = proc_def.name.as_deref().unwrap_or("_anon");
         let c_func_name = self.mangle_func_name(name);
-        self.known_callables.insert(
+        self.insert_callable(
             name.to_string(),
             CallableInfo {
                 c_func_name: c_func_name.clone(),
@@ -697,7 +741,7 @@ impl CGen {
                 // Collect in-out param info: (proc_param_name, caller_var_name)
                 // TODO: refactor, wtf is this
                 let inout_pairs: Vec<(String, String)> = if let Expr::Name(proc_name) = procedure {
-                    if let Some(info) = self.known_callables.get(proc_name.as_str()) {
+                    if let Some(info) = self.find_callable(proc_name.as_str()) {
                         info.params
                             .iter()
                             .zip(arguments.iter())
@@ -898,7 +942,14 @@ impl CGen {
                 self.emit_line(&format!("return {};", result_temp));
             }
 
-            Statement::Import { .. } => todo!(),
+            Statement::Import { name, definitions } => {
+                // TODO: save definitions and check
+                for def in definitions {
+                    self.imported_definitions.insert(def.clone());
+                }
+
+                self.emit_line(&format!("RAP_{}_MOD_ENTRY();", name));
+            }
         }
 
         self.statement_temps = saved_temps;
@@ -1408,7 +1459,7 @@ impl CGen {
             Expr::Literal(lit) => self.emit_literal(lit),
 
             Expr::Name(name) => {
-                if let Some(info) = self.known_callables.get(name.as_str()) {
+                if let Some(info) = self.find_callable(name.as_str()) {
                     // TODO: we can detect name collisions here
                     // Known function/procedure - callable objects created, they are treated as objects too
                     let c_func_name = info.c_func_name.clone();
@@ -1565,8 +1616,6 @@ impl CGen {
 
     fn emit_binary_op(&mut self, op: &BinaryOperator, left: &str, right: &str) -> String {
         let temp = self.fresh_temp();
-        // self.track_temp(&left);
-        // self.track_temp(&right);
 
         let rhs = match op {
             BinaryOperator::Add => format!("RAP_add({}, {})", left, right),
@@ -1929,12 +1978,84 @@ impl CGen {
     }
 }
 
-impl CodegenTarget for CGen {
-    /// Main entry point: walk the whole program, return generated C source.
-    fn generate(&mut self, modules: Vec<Module>) -> ModuleMap {
-        let mut module_map = ModuleMap::new();
+impl CGen {
+    fn assemble_module_c(
+        &self,
+        is_main: bool,
+        module_base_name: &str,
+        extern_decls: &str,
+    ) -> String {
+        let mut result = String::new();
 
-        self.create_scope(); // main scope
+        if self.check_leaks {
+            result.push_str("#define RAP_TEST_LEAKS\n");
+        }
+        result.push_str("#include \"runtime.h\"\n");
+        result.push_str("#include <math.h>\n");
+        result.push_str("#include <stdio.h>\n");
+        result.push_str("#include <stdlib.h>\n");
+        result.push_str("#include <string.h>\n\n");
+
+        if is_main {
+            result.push_str(&format!(
+                "char* RAP_curret_module_path = \"{}\";\n",
+                self.current_module_path
+            ));
+            result.push_str("size_t RAP_current_pos_start=0;\nsize_t RAP_current_pos_end=0;\n\n");
+        } else {
+            result.push_str("extern char* RAP_curret_module_path;\n");
+            result.push_str(
+                "extern size_t RAP_current_pos_start;\nextern size_t RAP_current_pos_end;\n\n",
+            );
+        }
+
+        if !extern_decls.is_empty() {
+            result.push_str(extern_decls);
+            result.push('\n');
+        }
+
+        result.push_str(&self.forward_decls);
+
+        // MOD_ENTRY function
+        result.push_str(&format!(
+            "void RAP_{}_MOD_ENTRY(void) {{\n",
+            module_base_name
+        ));
+        result.push_str("  static int _initialized = 0;\n");
+        result.push_str("  if (_initialized) return;\n");
+        result.push_str("  _initialized = 1;\n");
+        result.push_str("  struct RAP_CallFrame _main_frame = {NULL, NULL, 0};\n");
+        result.push_str(&format!(
+            "  RAP_curret_module_path = \"{}\";\n",
+            self.current_module_path
+        ));
+        result.push('\n');
+        result.push_str(&self.output);
+        result.push_str("  RAP_free_main_frame(&_main_frame);\n");
+        result.push_str("}\n\n");
+
+        if is_main {
+            result.push_str("int main(void) {\n");
+            result.push_str(&format!("  RAP_{}_MOD_ENTRY();\n", module_base_name));
+            result.push_str(&format!(
+                "  RAP_FUNC_{}_vkhod(NULL, NULL, 0);\n",
+                module_base_name
+            ));
+            if self.check_leaks {
+                result.push_str("  RAP_check_leaks();\n");
+            }
+            result.push_str("  return 0;\n");
+            result.push_str("}\n");
+        }
+
+        result
+    }
+}
+
+impl CodegenTarget for CGen {
+    /// Main entry point: generate one C source per module.
+    fn generate(&mut self, modules: Vec<Module>) -> ModuleMap {
+        let mut result = ModuleMap::new();
 
         // Collect all type definitions from all modules for type lookups during codegen
         self.declared_types = modules
@@ -1943,11 +2064,28 @@ impl CodegenTarget for CGen {
             .map(|t| t.node.clone())
             .collect();
 
-        let module_count = modules.len();
+        // Find main module (has функ вход())
+        let main_module_name = modules
+            .iter()
+            .find(|m| {
+                m.functions
+                    .iter()
+                    .any(|f| f.node.name.as_deref() == Some("вход"))
+            })
+            .map(|m| module_base_name(&m.name));
 
-        for (i, module) in modules.iter().enumerate() {
+        for module in modules.iter() {
+            let base_name = module_base_name(&module.name);
+            let is_main = main_module_name.as_ref() == Some(&base_name);
+
+            self.reset_for_module();
             self.current_module_path = module.path.display().to_string();
 
+            if is_main {
+                self.entry_module_path = self.current_module_path.clone();
+            }
+
+            // Emit definitions
             for type_def in &module.types {
                 self.emit_type_def(type_def);
             }
@@ -1958,53 +2096,45 @@ impl CodegenTarget for CGen {
                 self.emit_procedure_def(proc);
             }
 
-            // Top level code is put into RAP_{MODULE_NAME}_MOD_ENTRY
-            // function, which executes on modules import
-            // for stmt in &module.toplevel {
-            //     self.emit_statement(stmt);
-            // }
-        }
-
-        let entry_path = modules
-            .last()
-            .map(|m| m.path.display().to_string())
-            .unwrap_or_default();
-
-        // The last module (entry point) emits toplevel into main()
-        // Here, "last" means "last after the topological sort of dependency graph"
-        let mut result = String::new();
-        if self.check_leaks {
-            result.push_str("#define RAP_TEST_LEAKS\n");
-        }
-        result.push_str("#include \"runtime.h\"\n");
-        result.push_str("#include <math.h>\n");
-        result.push_str("#include <stdio.h>\n");
-        result.push_str("#include <stdlib.h>\n");
-        result.push_str("#include <string.h>\n");
-        result.push('\n');
-        result.push_str(&format!(
-            "char* RAP_curret_module_path = \"{}\";\n",
-            entry_path
-        ));
-        result.push_str("size_t RAP_current_pos_start=0;\nsize_t RAP_current_pos_end=0;\n\n");
-        result.push_str(&self.forward_decls);
-        result.push_str("int main(void) {\n");
-        result.push_str("  struct RAP_CallFrame _main_frame = {NULL, NULL, 0};\n");
-        result.push('\n');
-        result.push_str(&self.output);
-        result.push_str("  RAP_free_main_frame(&_main_frame);\n");
-        if self.check_leaks {
-            // Decref all locals declared in main scope
-            let vars_in_scope = self.declared_vars.pop();
-            if let Some(vars) = vars_in_scope {
-                for var in &vars {
-                    result.push_str(&format!("  RAP_dec_ref({});\n", var));
+            // Collect extern declarations for imported symbols
+            let mut extern_decls = String::new();
+            for (import_mod_name, imported_names) in &module.imports {
+                extern_decls.push_str(&format!(
+                    "extern void RAP_{}_MOD_ENTRY(void);\n",
+                    import_mod_name
+                ));
+                println!("Known callables {:#?}", self.known_callables);
+                if let Some(mod_callables) = self.known_callables.get(import_mod_name) {
+                    for name in imported_names {
+                        if let Some(info) = mod_callables.get(name) {
+                            extern_decls.push_str(&format!(
+                                "extern RAP_Value {}(struct RAP_CallFrame *_frame,\n{:>width$}RAP_Value *_args, unsigned int _argc);\n",
+                                info.c_func_name,
+                                "",
+                                width = format!("extern RAP_Value {}(", info.c_func_name).len()
+                            ));
+                        }
+                    }
                 }
             }
-            result.push_str("  RAP_check_leaks();\n");
+
+            // Emit toplevel into self.output (becomes MOD_ENTRY body)
+            self.create_scope();
+
+            for (import_mod_name, _) in &module.imports {
+                self.emit_line(&format!("RAP_{}_MOD_ENTRY();", import_mod_name));
+            }
+
+            for stmt in &module.toplevel {
+                self.emit_statement(stmt);
+            }
+
+            self.drop_scope();
+
+            let code = self.assemble_module_c(is_main, &base_name, &extern_decls);
+            result.insert(module.path.display().to_string(), code);
         }
-        result.push_str("  return 0;\n");
-        result.push_str("}\n");
+
         result
     }
 
@@ -2014,43 +2144,36 @@ impl CodegenTarget for CGen {
         current_dir: &PathBuf,
         flags: &[String],
         run: bool,
+        dump: bool,
     ) -> Result<(), RunError> {
-        // 1. Generate obj files for each module
-        for (modname, modcode) in &modules_map {
-            let entry_path = PathBuf::from(&self.current_module_path);
-            let file_name = entry_path
+        let runtime_dir = find_runtime_dir();
+        let mut object_files = Vec::new();
+
+        // 1. Compile each module's .c to .o
+        for (module_path, module_code) in &modules_map {
+            let module_path = PathBuf::from(module_path);
+            let file_name = module_path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("a");
             let c_path = current_dir.join(PathBuf::from(file_name).with_extension("c"));
+            let o_path = current_dir.join(PathBuf::from(file_name).with_extension("o"));
 
-            let binary_path = current_dir.join(PathBuf::from(file_name).with_extension(".o"));
-
-            std::fs::write(&c_path, &modcode).unwrap_or_else(|error| {
+            std::fs::write(&c_path, module_code).unwrap_or_else(|error| {
                 eprintln!("error writing {:?}: {error}", c_path);
                 std::process::exit(1);
             });
-
-            let runtime_dir = find_runtime_dir();
 
             let status = Command::new("gcc")
                 .arg("-c")
                 .arg(&c_path)
                 .arg("-o")
-                .arg(&binary_path)
-                .arg(format!("-I{}", runtime_dir.display())) // runtime C library
+                .arg(&o_path)
+                .arg(format!("-I{}", runtime_dir.display()))
                 .arg(format!(
                     "-I{}",
                     runtime_dir.join("raperr/include").display()
-                )) // runtime error C library
-                .arg(format!("-L{}", runtime_dir.join("lib").display()))
-                .arg(format!(
-                    "-L{}",
-                    runtime_dir.join("raperr/target/release").display()
                 ))
-                .arg("-lrapruntime")
-                .arg("-lraperr")
-                .arg("-lm")
                 .args(flags)
                 .status()
                 .unwrap_or_else(|error| {
@@ -2063,36 +2186,51 @@ impl CodegenTarget for CGen {
                 std::process::exit(1);
             }
 
-            // Clean up generated C file
-            if let Err(error) = std::fs::remove_file(&c_path) {
-                eprintln!("failed to remove {:?}: {error}", c_path);
+            if !dump {
+                if let Err(error) = std::fs::remove_file(&c_path) {
+                    eprintln!("failed to remove {:?}: {error}", c_path);
+                }
             }
+
+            object_files.push(o_path);
         }
 
-        // 2. Link object files to create the final binary
-        let object_files = modules_map
-            .iter()
-            .map(|(path, _)| current_dir.join(PathBuf::from(path).with_extension("o")))
-            .collect::<Vec<_>>();
+        // 2. Link all .o files into the final binary
+        let entry_path = PathBuf::from(&self.entry_module_path);
+        let binary_name = entry_path
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .unwrap_or("a");
+        let binary_path = current_dir.join(binary_name);
 
-        // Path to the final binary
-        // Name = last module
-        let binary_path =
-            current_dir.join(PathBuf::from(&self.current_module_path).with_extension(""));
-
-        let link_command = Command::new("gcc")
-            .args(object_files)
+        let status = Command::new("gcc")
+            .args(&object_files)
             .arg("-o")
             .arg(&binary_path)
+            .arg(format!("-L{}", runtime_dir.join("lib").display()))
+            .arg(format!(
+                "-L{}",
+                runtime_dir.join("raperr/target/release").display()
+            ))
+            .arg("-lrapruntime")
+            .arg("-lraperr")
+            .arg("-lm")
             .status()
             .unwrap_or_else(|error| {
-                eprintln!("failed to link {:?}: {error}", binary_path);
+                eprintln!("failed to link: {error}");
                 std::process::exit(1);
             });
 
-        if !link_command.success() {
-            eprintln!("linking failed: {link_command:?}");
+        if !status.success() {
+            eprintln!("linking failed with {status}");
             std::process::exit(1);
+        }
+
+        // Clean up .o files
+        for o_path in &object_files {
+            if let Err(error) = std::fs::remove_file(o_path) {
+                eprintln!("failed to remove {:?}: {error}", o_path);
+            }
         }
 
         if run {
@@ -2106,7 +2244,6 @@ impl CodegenTarget for CGen {
                 std::process::exit(1);
             }
 
-            // Clean up generated binary
             if let Err(error) = std::fs::remove_file(&binary_path) {
                 eprintln!("failed to remove {:?}: {error}", binary_path);
             }
@@ -2141,9 +2278,18 @@ fn escape_c_string(s: &str) -> String {
 }
 
 /// Info needed to create a callable object at any call site.
+#[derive(Debug)]
 struct CallableInfo {
     c_func_name: String,
     /// (rapira_param_name, c_mode_constant)
     params: Vec<(String, String)>,
     is_function: bool,
+}
+
+fn module_base_name(filename: &str) -> String {
+    filename
+        .strip_suffix(".рап")
+        .or_else(|| filename.strip_suffix(".rap"))
+        .unwrap_or(filename)
+        .to_string()
 }

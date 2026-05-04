@@ -32,6 +32,7 @@ pub trait CodegenTarget {
         current_dir: &PathBuf,
         flags: &[String],
         run: bool,
+        dump: bool,
     ) -> Result<(), RunError>;
 }
 
@@ -45,12 +46,7 @@ pub fn run_codegen(
     dump: bool,
 ) -> Result<(), RunError> {
     let code_map = target.generate(modules);
-    if dump {
-        println!("{:#?}", code_map);
-    } else {
-        target.compile(code_map, current_dir, flags, run)?;
-    }
-
+    target.compile(code_map, current_dir, flags, run, dump)?;
     Ok(())
 }
 

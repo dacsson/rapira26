@@ -50,6 +50,7 @@ struct Cli {
 
 fn main() {
     let cli = Cli::parse();
+    env_logger::init();
 
     let mut modules = Vec::new();
 
