@@ -67,10 +67,12 @@ fn run_rap_file(rap_path: &Path) -> Result<String, String> {
     let source = std::fs::read_to_string(rap_path)
         .map_err(|e| format!("failed to read {}: {e}", rap_path.display()))?;
 
+    let mod_name = rap_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
     let token_stream = rapira26::lexer::Lexer::new(&source);
     let mut parser = rapira26::parser::Parser::new(
         token_stream,
-        rap_path.to_str().unwrap(),
+        mod_name,
         rap_path.canonicalize().unwrap_or_default(),
     );
     let mut program = parser
@@ -99,7 +101,13 @@ fn run_rap_file(rap_path: &Path) -> Result<String, String> {
     let c_path = temp_dir.join(format!("{stem}.c"));
     let bin_path = temp_dir.join(stem);
 
-    std::fs::write(&c_path, &c_code).map_err(|e| format!("write C: {e}"))?;
+    let modname = rap_path
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+
+    std::fs::write(&c_path, &c_code.get(&modname).unwrap()).map_err(|e| format!("write C: {e}"))?;
 
     // Compile
     let rt = runtime_dir();
@@ -120,8 +128,9 @@ fn run_rap_file(rap_path: &Path) -> Result<String, String> {
     if !gcc_output.status.success() {
         let stderr = String::from_utf8_lossy(&gcc_output.stderr);
         return Err(format!(
-            "gcc failed (exit {}):\n{stderr}\n\n--- generated C ---\n{c_code}",
-            gcc_output.status.code().unwrap_or(-1)
+            "gcc failed (exit {}):\n{stderr}\n\n--- generated C ---\n{}",
+            gcc_output.status.code().unwrap_or(-1),
+            c_code.get(&modname).unwrap()
         ));
     }
 

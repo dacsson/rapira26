@@ -8,6 +8,8 @@ use std::{
     process::Command,
 };
 
+use log::debug;
+
 use crate::{
     ast::*,
     codegen::{CodegenTarget, CodegenWarning, ModuleMap, RunError, find_runtime_dir},
@@ -23,7 +25,8 @@ pub struct CGen {
     /// Path to the source file of the module currently being emitted
     current_module_path: String,
     /// User declared types collected from all modules at the start of generate
-    declared_types: Vec<TypeDefinition>,
+    /// key: module base name, value: list of type definitions
+    declared_types: HashMap<String, Vec<TypeDefinition>>,
     /// Current scope output (main body, or function body while emitting a definition)
     output: String,
     /// File-scope C function definitions, flushed before main()
@@ -65,7 +68,7 @@ impl CGen {
     pub fn new() -> Self {
         Self {
             current_module_path: String::new(),
-            declared_types: Vec::new(),
+            declared_types: HashMap::new(),
             output: String::new(),
             forward_decls: String::new(),
             indent_level: 1, // inside main()
@@ -107,9 +110,23 @@ impl CGen {
     }
 
     fn find_type_def(&self, variant_name: &str) -> Option<&TypeDefinition> {
+        let current = self.current_module_base_name();
+        if let Some(typedef) = self
+            .declared_types
+            .get(&current)
+            .and_then(|m| m.iter().find(|t| t.variants.contains_key(variant_name)))
+        {
+            return Some(typedef);
+        }
+        None
+    }
+
+    fn add_type_def(&mut self, name: String, variants: HashMap<String, Vec<String>>) {
+        let current = self.current_module_base_name();
         self.declared_types
-            .iter()
-            .find(|t| t.variants.contains_key(variant_name))
+            .entry(current)
+            .or_default()
+            .push(TypeDefinition { name, variants });
     }
 
     fn current_module_base_name(&self) -> String {
@@ -321,12 +338,17 @@ impl CGen {
     }
 
     fn mangle_type_name(&self, rapira_name: &str) -> String {
-        format!("RAP_TYPE_{}", Self::transliterate(rapira_name))
+        format!(
+            "RAP_TYPE_{}_{}",
+            self.current_module_base_name(),
+            Self::transliterate(rapira_name)
+        )
     }
 
     fn mangle_type_variant_name(&self, type_name: &str, variant_name: &str) -> String {
         format!(
-            "RAP_TYPE_CTR_{}_{}",
+            "RAP_TYPE_CTR_{}_{}_{}",
+            self.current_module_base_name(),
             Self::transliterate(type_name),
             Self::transliterate(variant_name)
         )
@@ -400,6 +422,8 @@ impl CGen {
 
         self.output = saved_output;
         self.indent_level = saved_indent;
+
+        self.add_type_def(type_def.name.clone(), type_def.variants.clone());
     }
 
     fn emit_function_def(&mut self, func_def_span: &Spannable<FunctionDefinition>) {
@@ -2057,13 +2081,6 @@ impl CodegenTarget for CGen {
     fn generate(&mut self, modules: Vec<Module>) -> ModuleMap {
         let mut result = ModuleMap::new();
 
-        // Collect all type definitions from all modules for type lookups during codegen
-        self.declared_types = modules
-            .iter()
-            .flat_map(|m| m.types.iter())
-            .map(|t| t.node.clone())
-            .collect();
-
         // Find main module (has функ вход())
         let main_module_name = modules
             .iter()
@@ -2103,7 +2120,7 @@ impl CodegenTarget for CGen {
                     "extern void RAP_{}_MOD_ENTRY(void);\n",
                     import_mod_name
                 ));
-                println!("Known callables {:#?}", self.known_callables);
+                debug!("Known callables {:#?}", self.known_callables);
                 if let Some(mod_callables) = self.known_callables.get(import_mod_name) {
                     for name in imported_names {
                         if let Some(info) = mod_callables.get(name) {
