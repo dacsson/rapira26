@@ -1,5 +1,6 @@
 //! Defines a compilation unit of rapira26
 
+use log::debug;
 use petgraph::{
     algo::toposort,
     dot::{Config, Dot},
@@ -84,6 +85,10 @@ pub enum DependencyError {
 pub fn build_dependency_graph(
     modules: Vec<Module>,
 ) -> Result<(DependencyGraph, Vec<Module>), DependencyError> {
+    // First resolve imports
+    // let mut modules = modules;
+    // modules.resolve_imports();
+
     let mut graph = DependencyGraph::new();
     modules.into_iter().for_each(|m| _ = graph.add_node(m));
 
@@ -118,11 +123,15 @@ pub fn build_dependency_graph(
         Err(_) => return Err(DependencyError::CyclicDependency),
     };
 
-    let sorted = sorted_idxs
+    let mut sorted = sorted_idxs
         .into_iter()
         .map(|idx| graph.node_weight(idx).unwrap())
         .cloned()
         .collect::<Vec<_>>();
+
+    debug!("Отсортированные модули: {:?}", sorted);
+
+    sorted.reverse();
 
     Ok((graph, sorted))
 }
