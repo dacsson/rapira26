@@ -1,0 +1,20 @@
+[package]
+name = "vm-interp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bitvec = "1.0.1"
+clap = { version = "4.5.55", features = ["derive"] }
+vm-core = { path = "../vm-core" }
+
+[build-dependencies]
+bindgen = "0.72.1"
+
+[features]
+default = []
+verbose = []
+runtime_checks = []
+
+[profile.release]
+lto = 'fat'
