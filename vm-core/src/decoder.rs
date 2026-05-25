@@ -6,6 +6,7 @@ use crate::numeric::LeBytes;
 pub enum DecoderError {
     ReadingMoreThenCodeSection,
     InvalidOpcode(u8),
+    InvalidInstruction(Instruction),
 }
 
 impl std::fmt::Display for DecoderError {
@@ -16,6 +17,9 @@ impl std::fmt::Display for DecoderError {
             }
             DecoderError::InvalidOpcode(opcode) => {
                 write!(f, "Invalid opcode: {:#x}", opcode)
+            }
+            DecoderError::InvalidInstruction(instruction) => {
+                write!(f, "Invalid instruction: {:?}", instruction)
             }
         }
     }
@@ -144,5 +148,111 @@ impl Decoder {
             }),
             _ => Err(DecoderError::InvalidOpcode(byte)),
         }
+    }
+
+    /// Encode an instruction into a bytecode buffer, which can be
+    /// directly written into a bytefile
+    pub fn encode(instruction: &Instruction) -> Result<Vec<u8>, DecoderError> {
+        let mut buf = Vec::new();
+        match instruction {
+            Instruction::NOP => buf.push(0x00),
+            Instruction::BINOP { op } => {
+                let op_: &i32 = op.into();
+                buf.push(0x00 | *op_ as u8);
+            }
+            Instruction::CONST { value } => {
+                buf.push(0x10);
+                buf.extend(&value.to_le_bytes());
+            }
+            Instruction::STRING { index } => {
+                buf.push(0x11);
+                buf.extend(&index.to_le_bytes());
+            }
+            Instruction::STI => buf.push(0x13),
+            Instruction::STA => buf.push(0x14),
+            Instruction::JMP { offset } => {
+                buf.push(0x15);
+                buf.extend(&offset.to_le_bytes());
+            }
+            Instruction::END => buf.push(0x16),
+            Instruction::RET => buf.push(0x17),
+            Instruction::DROP => buf.push(0x18),
+            Instruction::DUP => buf.push(0x19),
+            Instruction::SWAP => buf.push(0x1a),
+            Instruction::ELEM => buf.push(0x1b),
+            Instruction::LOAD { rel, index } => {
+                let rel_: &i32 = rel.into();
+                buf.push(0x20 | *rel_ as u8);
+                buf.extend(&index.to_le_bytes());
+            }
+            Instruction::STORE { rel, index } => {
+                let rel_: &i32 = rel.into();
+                buf.push(0x40 | *rel_ as u8);
+                buf.extend(&index.to_le_bytes());
+            }
+            Instruction::CJMP {
+                offset,
+                kind: CompareJumpKind::ISZERO,
+            } => {
+                buf.push(0x50);
+                buf.extend(&offset.to_le_bytes());
+            }
+            Instruction::CJMP {
+                offset,
+                kind: CompareJumpKind::ISNONZERO,
+            } => {
+                buf.push(0x51);
+                buf.extend(&offset.to_le_bytes());
+            }
+            Instruction::BEGIN { args, locals } => {
+                buf.push(0x52);
+                buf.extend(&args.to_le_bytes());
+                buf.extend(&locals.to_le_bytes());
+            }
+            Instruction::CBEGIN { args, locals } => {
+                buf.push(0x53);
+                buf.extend(&args.to_le_bytes());
+                buf.extend(&locals.to_le_bytes());
+            }
+            Instruction::CLOSURE { offset, arity } => {
+                buf.push(0x54);
+                buf.extend(&offset.to_le_bytes());
+                buf.extend(&arity.to_le_bytes());
+            }
+            Instruction::CALLC { arity } => {
+                buf.push(0x55);
+                buf.extend(&arity.to_le_bytes());
+            }
+            Instruction::CALL { offset, n } => {
+                buf.push(0x56);
+                buf.extend(&offset.to_le_bytes());
+                buf.extend(&n.to_le_bytes());
+            }
+            Instruction::ARRAY { n } => {
+                buf.push(0x58);
+                buf.extend(&n.to_le_bytes());
+            }
+            Instruction::LINE { n } => {
+                buf.push(0x5a);
+                buf.extend(&n.to_le_bytes());
+            }
+            Instruction::CALLBUILTIN { n, name } if *name != Builtin::Barray => {
+                let name_: &i32 = name.into();
+                buf.push(0x70 | (*name_ as u8) - 1);
+                if *n != 0 {
+                    buf.extend(&n.to_le_bytes());
+                }
+            }
+            Instruction::CALLBUILTIN {
+                n,
+                name: Builtin::Barray,
+            } => {
+                buf.push(0x74);
+                buf.extend(&n.to_le_bytes());
+            }
+            _ => return Err(DecoderError::InvalidInstruction(instruction.clone())),
+        }
+
+        Ok(buf)
     }
 }
