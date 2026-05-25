@@ -1,7 +1,12 @@
 // pub mod cgen;
+pub mod bcgen;
+
 use std::{collections::HashMap, path::PathBuf};
 
-use crate::module::{AbsolutModulePath, Module};
+use crate::{
+    ast::{FunctionDefinition, ProcedureDefinition, Spannable, Statement, TypeDefinition},
+    module::{AbsolutModulePath, Module},
+};
 use clap::ValueEnum;
 
 pub enum CodegenWarning {
@@ -17,16 +22,20 @@ pub enum RunError {
 #[derive(ValueEnum, Clone, Debug)]
 pub enum CodegenTargetName {
     C,
+    RBC, // Rapira Bytecode
 }
 
 /// Generated code for a module
-pub type ModuleCode = String;
+pub type ModuleCode = Vec<u8>;
 
 /// A map of module paths to their generated code
 pub type ModuleMap = HashMap<AbsolutModulePath, ModuleCode>;
 
 pub trait CodegenTarget {
+    /// Generate a map of module paths to their generated code
     fn generate(&mut self, modules: Vec<Module>) -> ModuleMap;
+
+    /// Compile and possibly run code after generation
     fn compile(
         &mut self,
         modules_codes: ModuleMap,
@@ -35,6 +44,14 @@ pub trait CodegenTarget {
         run: bool,
         dump: bool,
     ) -> Result<(), RunError>;
+
+    fn emit_procedure_def(&mut self, proc_def_span: &Spannable<ProcedureDefinition>);
+
+    fn emit_function_def(&mut self, func_def_span: &Spannable<FunctionDefinition>);
+
+    fn emit_type_def(&mut self, type_def_span: &Spannable<TypeDefinition>);
+
+    fn emit_top_level_def(&mut self, top_level: &Vec<Spannable<Statement>>);
 }
 
 /// Generate and compile modules using the given target

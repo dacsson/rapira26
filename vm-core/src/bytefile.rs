@@ -3,6 +3,12 @@
 use std::ffi::CString;
 use std::fmt::Display;
 use std::io::{BufRead, BufReader, Cursor, Read};
+use std::path::PathBuf;
+
+use crate::bytecode::Instruction;
+use crate::decoder::{Decoder, DecoderError};
+
+type BytefilePath = PathBuf;
 
 // Memory layout of the bytecode file
 // +------------------------------------+
@@ -47,8 +53,142 @@ pub enum BytefileError {
 }
 
 impl Bytefile {
+    /// Creates a new Bytefile,
+    /// it is not yet saved nor validated
+    pub fn new() -> Self {
+        Self {
+            stringtab_size: 0,
+            global_area_size: 0,
+            public_symbols_number: 0,
+            public_symbols: Vec::new(),
+            string_table: Vec::new(),
+            code_section: Vec::new(),
+            main_offset: 0,
+        }
+    }
+
+    /// Adds a string to the string section of bytefile
+    pub fn add_string(&mut self, string: String) {
+        self.string_table.extend(string.as_bytes());
+        // Push null terminator
+        self.string_table.push(0);
+        self.stringtab_size += string.as_bytes().len() as u32 + 1;
+    }
+
+    /// Add raw code to the code section of bytefile
+    pub fn add_code(&mut self, code: Vec<u8>) {
+        self.code_section.extend(code);
+    }
+
+    /// Adds an instruction to the code section of bytefile, encoding it into byte buffer first
+    pub fn add_instruction(&mut self, instruction: &Instruction) -> Result<(), DecoderError> {
+        let encoded = Decoder::encode(instruction)?;
+        self.code_section.extend(encoded);
+        Ok(())
+    }
+
+    /// Addds a public symbol to the public symbols section of bytefile
+    ///
+    /// The name for it should already be in the string table
+    pub fn add_public_symbol(&mut self, name: &str, offset: u32) -> Result<(), BytefileError> {
+        // First find the index of string (offset)
+        let string_offset = self.find_string_offset(name);
+
+        if string_offset.is_none() {
+            return Err(BytefileError::InvalidStringIndexInStringTable);
+        }
+
+        self.public_symbols.push((string_offset.unwrap(), offset));
+        self.public_symbols_number += 1;
+
+        Ok(())
+    }
+
+    /// Returns offset of the given string in the string table, if found
+    pub fn find_string_offset(&self, string: &str) -> Option<u32> {
+        let mut reader = BufReader::new(Cursor::new(&self.string_table));
+
+        for i in 0..self.stringtab_size {
+            let mut buff = vec![];
+            reader.read_until(0x00, &mut buff).unwrap_or_default();
+
+            // Get rid of the null byte at the end, so we can
+            // compare with Rust string
+            if buff.len() > 0 && buff[buff.len() - 1] == 0x00 {
+                buff.pop();
+            }
+
+            if buff == string.as_bytes() {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Returns the current offset relative to the start of the whole bytefile
+    pub fn get_current_global_offset(&self) -> usize {
+        // Metadata size
+        let stringtab_size_size = std::mem::size_of::<u32>();
+        let global_area_size_size = std::mem::size_of::<u32>();
+        let public_symbols_number_size = std::mem::size_of::<u32>();
+        let public_symbols_size = self.public_symbols.len() * std::mem::size_of::<(u32, u32)>();
+
+        // String table size
+        let string_table_size = self.string_table.len();
+
+        // Current code section size
+        let code_section_size = self.code_section.len();
+
+        return stringtab_size_size
+            + global_area_size_size
+            + public_symbols_number_size
+            + public_symbols_size
+            + string_table_size
+            + code_section_size;
+    }
+
+    /// Returns the current offset relative to the start of the code section
+    ///
+    /// For overall offset calculation, use [`Bytefile::get_current_global_offset`]
+    pub fn get_current_offset(&self) -> usize {
+        self.code_section.len()
+    }
+
+    /// Encodes the bytefile into a binary format
+    ///
+    /// The `*.rbc` files are exactly that (this output)
+    pub fn encode(&self) -> Vec<u8> {
+        let mut output = vec![];
+
+        // Push stringtab size
+        output.extend(self.stringtab_size.to_le_bytes());
+
+        // Push global area size
+        output.extend(self.global_area_size.to_le_bytes());
+
+        // Push public symbols number
+        output.extend(self.public_symbols_number.to_le_bytes());
+
+        // Push public symbols
+        // P × (int32, int32) | 8 bytes each
+        for (offset, name_offset) in &self.public_symbols {
+            output.extend(offset.to_le_bytes());
+            output.extend(name_offset.to_le_bytes());
+        }
+
+        // Push string table
+        output.extend(&self.string_table);
+
+        // Push code section
+        output.extend(&self.code_section);
+
+        output.push(0xff);
+
+        output
+    }
+
     /// Parse a bytecode file into a Bytefile struct.
-    /// Leaves code section raw (as raw bytes) to be interpreted later,
+    /// Leaves code section raw (as raw bytes) to be interpreted later by a [`Decoder`],
     /// while all other sections are parsed and stored to be easily accessed.
     pub fn parse(source: Vec<u8>) -> Result<Bytefile, BytefileError> {
         let source_len = source.len();

@@ -2,7 +2,7 @@ use std::env;
 use std::path::PathBuf;
 
 use clap::Parser;
-// use compiler_core::codegen::cgen::CGen;
+use compiler_core::codegen::bcgen::BcGen;
 use compiler_core::codegen::{CodegenTargetName, run_codegen};
 use compiler_core::module::{build_dependency_graph, dump_dependency_graph};
 use compiler_core::opt::deframe::DeframePass;
@@ -126,6 +126,7 @@ fn main() {
 
     match cli.бэкенд {
         CodegenTargetName::C => {
+            panic!("C backend is deprecated");
             // run_codegen(
             //     &mut CGen::new().with_check_leaks(cli.вкл_проверку_утечек),
             //     modules,
@@ -138,6 +139,20 @@ fn main() {
             //     eprintln!("Кодоген не справился: {error}");
             //     std::process::exit(1);
             // });
+        }
+        CodegenTargetName::RBC => {
+            run_codegen(
+                &mut BcGen::new(),
+                modules,
+                &env::current_dir().unwrap(),
+                cli.флаги.as_slice(),
+                cli.запуск,
+                cli.дамп_код,
+            )
+            .unwrap_or_else(|error| {
+                eprintln!("Кодоген не справился: {error}");
+                std::process::exit(1);
+            });
         }
     }
 }
