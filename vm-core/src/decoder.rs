@@ -158,7 +158,7 @@ impl Decoder {
             Instruction::NOP => buf.push(0x00),
             Instruction::BINOP { op } => {
                 let op_: &i32 = op.into();
-                buf.push(0x00 | *op_ as u8);
+                buf.push(0x00 | (*op_ as u8) + 1);
             }
             Instruction::CONST { value } => {
                 buf.push(0x10);

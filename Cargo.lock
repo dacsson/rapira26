@@ -187,6 +187,7 @@ dependencies = [
  "log",
  "petgraph",
  "vm-core",
+ "vm-interp",
 ]
 
 [[package]]

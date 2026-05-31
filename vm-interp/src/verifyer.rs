@@ -4,7 +4,7 @@ use std::fmt::{Debug, Display, Formatter};
 use bitvec::array::BitArray;
 use bitvec::vec::BitVec;
 use bitvec::{BitArr, prelude as bv};
-use vm_core::bytecode::{Builtin, Instruction, PattKind, ValueRel};
+use vm_core::bytecode::{Builtin, Instruction, ValueRel};
 use vm_core::bytefile::Bytefile;
 use vm_core::decoder::{Decoder, DecoderError};
 
@@ -139,7 +139,7 @@ impl Verifier {
 
     fn is_terminal(instr: &Instruction) -> bool {
         match instr {
-            Instruction::RET | Instruction::END | Instruction::FAIL { .. } => true,
+            Instruction::RET | Instruction::END => true,
             _ => false,
         }
     }
@@ -533,39 +533,6 @@ impl Verifier {
                     return Err(VerifierError::StringIndexOutOfBounds);
                 }
             }
-            Instruction::SEXP { s_index, n_members } => {
-                let string_index = *s_index as usize;
-                if string_index >= self.decoder.bf.stringtab_size as usize {
-                    return Err(VerifierError::StringIndexOutOfBounds);
-                }
-
-                if *n_members < 0 {
-                    return Err(VerifierError::NegativeArity);
-                }
-                let mems = *n_members as usize;
-                if mems >= MAX_SEXP_MEMBERS {
-                    return Err(VerifierError::TooMuchMembers(mems, MAX_SEXP_MEMBERS));
-                }
-
-                let tag = self
-                    .decoder
-                    .bf
-                    .get_string_at_offset(string_index)
-                    .map_err(|_| VerifierError::StringIndexOutOfBounds)?;
-
-                if tag.len() > MAX_SEXP_TAGLEN {
-                    return Err(VerifierError::SexpTagTooLong(tag.len()));
-                }
-            }
-            Instruction::TAG { index, n } => {
-                if *n < 0 {
-                    return Err(VerifierError::NegativeArity);
-                }
-
-                if *index < 0 || *index >= self.decoder.bf.stringtab_size as i32 {
-                    return Err(VerifierError::StringIndexOutOfBounds);
-                }
-            }
             Instruction::ARRAY { n } => {
                 if *n < 0 {
                     return Err(VerifierError::NegativeArity);
@@ -670,10 +637,6 @@ impl StackEffect for Instruction {
             Instruction::BINOP { .. } => -1, // pop two, push one
             Instruction::CONST { .. } => 1,
             Instruction::STRING { .. } => 1,
-            Instruction::SEXP { n_members, .. } => {
-                // pop n_members arguments, push the new S‑exp
-                1 - (*n_members as isize)
-            }
             Instruction::JMP { .. } => 0,
             Instruction::STA => -2, // pop 3, push aggregate back
             Instruction::STI => 0,
@@ -703,14 +666,8 @@ impl StackEffect for Instruction {
             Instruction::CJMP { .. } => -1,
             Instruction::ELEM => -1, // pop index n container, push result
             Instruction::ARRAY { .. } => 0,
-            Instruction::TAG { .. } => 0,
-            Instruction::FAIL { .. } => -1,
             Instruction::CLOSURE { .. } => 1,
             Instruction::CALLC { arity } => -(*arity as isize),
-            Instruction::PATT { kind } => match kind {
-                PattKind::BothAreStr => -1,
-                _ => 0,
-            },
             _ => 0,
         }
     }
@@ -721,7 +678,6 @@ impl StackEffect for Instruction {
             Instruction::BINOP { .. } => 2,
             Instruction::CONST { .. } => 0,
             Instruction::STRING { .. } => 0,
-            Instruction::SEXP { n_members, .. } => *n_members as usize,
             Instruction::JMP { .. } => 0,
             Instruction::STA => 3,
             Instruction::STI => 0,
@@ -745,15 +701,9 @@ impl StackEffect for Instruction {
             Instruction::CJMP { .. } => 1,
             Instruction::ELEM => 2,
             Instruction::ARRAY { .. } => 1,
-            Instruction::TAG { .. } => 1,
-            Instruction::FAIL { .. } => 1,
             Instruction::CLOSURE { arity, .. } => *arity as usize + 1,
             Instruction::CALLC { arity, .. } => *arity as usize,
-            Instruction::PATT { kind } => match kind {
-                PattKind::BothAreStr => 2,
-                _ => 1,
-            },
-            Instruction::LOADREF { .. } | Instruction::HALT => 0,
+            Instruction::HALT => 0,
         }
     }
 
@@ -763,7 +713,6 @@ impl StackEffect for Instruction {
             Instruction::BINOP { .. } => 1,
             Instruction::CONST { .. } => 1,
             Instruction::STRING { .. } => 1,
-            Instruction::SEXP { .. } => 1,
             Instruction::JMP { .. } => 0,
             Instruction::STA => 1,
             Instruction::STI => 0,
@@ -782,12 +731,9 @@ impl StackEffect for Instruction {
             Instruction::CJMP { .. } => 0,
             Instruction::ELEM => 1,
             Instruction::ARRAY { .. } => 1,
-            Instruction::TAG { .. } => 1,
-            Instruction::FAIL { .. } => 0,
             Instruction::CLOSURE { arity, .. } => *arity as usize + 2,
             Instruction::CALLC { .. } => 0,
-            Instruction::PATT { .. } => 1,
-            Instruction::LOADREF { .. } | Instruction::HALT => 0,
+            Instruction::HALT => 0,
         }
     }
 }

@@ -15,3 +15,4 @@ log = "0.4"
 env_logger = "0.11.10"
 vm-core = { path = "../vm-core" }
 compiler-core = { path = "../compiler-core" }
+vm-interp = { path = "../vm-interp" }

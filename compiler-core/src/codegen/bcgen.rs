@@ -15,7 +15,7 @@ use crate::{
         Expr, FunctionDefinition, Literal, LoopStatement, NameDeclarations, SelectionStatement,
         Spannable, Statement, TypeDefinition,
     },
-    codegen::{CodegenTarget, ModuleMap, RunError},
+    codegen::{AbsolutGeneratedCodePath, CodegenTarget, ModuleMap, RunError},
     module::Module,
 };
 
@@ -141,20 +141,14 @@ impl CodegenTarget for BcGen {
         modules_codes: ModuleMap,
         current_dir: &PathBuf,
         flags: &[String],
-        run: bool,
         dump: bool,
-    ) -> Result<(), RunError> {
+    ) -> Result<Vec<AbsolutGeneratedCodePath>, RunError> {
         let (module_path, bytefile) = modules_codes.iter().next().unwrap();
         let module_path = module_path.clone().0;
         let bytefile_path = module_path.with_extension("rbc");
-        if dump {
-            std::fs::write(&bytefile_path, bytefile).unwrap();
-            println!("Dumped bytefile to {}", bytefile_path.display());
-        } else {
-            panic!("Not implemented");
-        }
+        std::fs::write(&bytefile_path, bytefile).unwrap();
 
-        Ok(())
+        Ok(vec![AbsolutGeneratedCodePath(bytefile_path)])
     }
 
     fn emit_procedure_def(

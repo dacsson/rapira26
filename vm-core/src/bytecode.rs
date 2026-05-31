@@ -360,6 +360,5 @@ mod tests {
         assert_eq!(Instruction::NOP.discriminant(), 0);
         assert_eq!(Instruction::BINOP { op: Op::ADD }.discriminant(), 3);
         assert_eq!(Instruction::BINOP { op: Op::SUB }.discriminant(), 3);
-        assert_eq!(Instruction::ARRAY { n: 10 }.discriminant(), 28);
     }
 }

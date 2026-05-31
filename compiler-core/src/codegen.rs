@@ -31,6 +31,10 @@ pub type ModuleCode = Vec<u8>;
 /// A map of module paths to their generated code
 pub type ModuleMap = HashMap<AbsolutModulePath, ModuleCode>;
 
+/// Canonical path to a modules compiled code
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub struct AbsolutGeneratedCodePath(pub PathBuf);
+
 pub trait CodegenTarget {
     /// Generate a map of module paths to their generated code
     fn generate(&mut self, modules: Vec<Module>) -> ModuleMap;
@@ -41,31 +45,30 @@ pub trait CodegenTarget {
         modules_codes: ModuleMap,
         current_dir: &PathBuf,
         flags: &[String],
-        run: bool,
         dump: bool,
-    ) -> Result<(), RunError>;
+    ) -> Result<Vec<AbsolutGeneratedCodePath>, RunError>;
 
+    // Base constructs that a backend should implement, you
+    // can emit more than that if you want to
     fn emit_procedure_def(&mut self, proc_def_span: &Spannable<ProcedureDefinition>);
-
     fn emit_function_def(&mut self, func_def_span: &Spannable<FunctionDefinition>);
-
     fn emit_type_def(&mut self, type_def_span: &Spannable<TypeDefinition>);
-
     fn emit_top_level_def(&mut self, top_level: &Vec<Spannable<Statement>>);
 }
 
 /// Generate and compile modules using the given target
+///
+/// Returns a list of paths to generated files
 pub fn run_codegen(
     target: &mut dyn CodegenTarget,
     modules: Vec<Module>,
     current_dir: &PathBuf,
     flags: &[String],
-    run: bool,
     dump: bool,
-) -> Result<(), RunError> {
+) -> Result<Vec<AbsolutGeneratedCodePath>, RunError> {
     let code_map = target.generate(modules);
-    target.compile(code_map, current_dir, flags, run, dump)?;
-    Ok(())
+    let generated_paths = target.compile(code_map, current_dir, flags, dump)?;
+    Ok(generated_paths)
 }
 
 /// Find the runtime/ directory containing librapruntime.a and headers.

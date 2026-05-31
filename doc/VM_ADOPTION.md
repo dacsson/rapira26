@@ -32,3 +32,14 @@ Runtime needs to be swapped from LaMa to Rapira26. The open question is a garbag
 4. Decide what opcodes need to be added
 5. Patch the backend
 6. Remove or archive the old C backend
+
+## TODO
+
+- [x] Create simple bytefile writer API
+- [x] Boot up simple `вывод: 2` program
+  - [x] Create e2e run pipeline
+- [x] Disable optimizations (deframe pass)
+- [ ] Implement basic arithemtic operations (Int + Float)
+  - [ ] Comment out support for other runtime constructrs
+  - [ ] Rewrite runtime support for arithmetic operations
+  - [ ] Run `examples/02_arithmetic.rap`
