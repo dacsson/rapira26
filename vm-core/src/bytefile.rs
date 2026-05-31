@@ -1,14 +1,10 @@
 //! Disassembler of Lama VM bytecode file
 
+use crate::bytecode::Instruction;
+use crate::decoder::{Decoder, DecoderError};
 use std::ffi::CString;
 use std::fmt::Display;
 use std::io::{BufRead, BufReader, Cursor, Read};
-use std::path::PathBuf;
-
-use crate::bytecode::Instruction;
-use crate::decoder::{Decoder, DecoderError};
-
-type BytefilePath = PathBuf;
 
 // Memory layout of the bytecode file
 // +------------------------------------+

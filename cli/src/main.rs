@@ -1,4 +1,6 @@
 use std::env;
+use std::fs::File;
+use std::io::Read;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -8,6 +10,11 @@ use compiler_core::module::{build_dependency_graph, dump_dependency_graph};
 use compiler_core::opt::deframe::DeframePass;
 use compiler_core::opt::opt_pass::{OptimizationPassOpts, run_optimizations};
 use compiler_core::pretty::pretty_parse_error;
+use vm_core::bytefile::Bytefile;
+use vm_core::decoder::Decoder;
+use vm_interp::interpreter::Interpreter;
+
+const MAX_FILE_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 
 #[derive(Parser)]
 #[command(name = "рапик", about = "Компилятор языка рапира26")]
@@ -40,12 +47,66 @@ struct Cli {
     дамп_опт_дебаг: bool,
 
     /// Выбор бэкенда для генерации кода
-    #[arg(long, value_enum, default_value_t = CodegenTargetName::C)]
+    #[arg(long, value_enum, default_value_t = CodegenTargetName::RBC)]
     бэкенд: CodegenTargetName,
 
     /// Дамп графа зависимостей модулей
     #[arg(long)]
     дамп_граф_модулей: bool,
+}
+
+// TODO: refactor
+fn run_interpreter(path: &str, dump_bytefile: bool) -> Result<(), Box<dyn std::error::Error>> {
+    // Check file size
+    let metadata = std::fs::metadata(path).map_err(|err| {
+        eprintln!("{}", err);
+        err
+    })?;
+    if metadata.len() >= MAX_FILE_SIZE {
+        panic!("File is too large: {} > {}", metadata.len(), MAX_FILE_SIZE);
+    }
+
+    let mut file: File = File::open(path).map_err(|err| {
+        eprintln!("{}", err);
+        err
+    })?;
+    let mut content = Vec::new();
+    file.read_to_end(&mut content).map_err(|err| {
+        eprintln!("{}", err);
+        err
+    })?;
+
+    let bytefile = Bytefile::parse(content.clone()).map_err(|err| {
+        eprintln!("{}", err);
+        err
+    })?;
+
+    if dump_bytefile {
+        println!("{}", bytefile);
+    }
+
+    let decoder = Decoder::new(bytefile);
+
+    // TODO: patch verifier mod declaration
+    // let mut verifier = Veri::new(decoder);
+    // verifier.verify().map_err(|err| {
+    //     eprintln!("{}", err);
+    //     err
+    // })?;
+
+    // // Move decoder from verifier to interpreter
+    // let Verifier { mut decoder, .. } = verifier;
+
+    // Reset IP to main offset
+    // decoder.ip = decoder.bf.main_offset as usize;
+
+    let mut interp = Interpreter::new(decoder);
+    let _ = interp.run().map_err(|err| {
+        eprintln!("{}", err);
+        err
+    });
+
+    Ok(())
 }
 
 fn main() {
@@ -127,30 +188,27 @@ fn main() {
     match cli.бэкенд {
         CodegenTargetName::C => {
             panic!("C backend is deprecated");
-            // run_codegen(
-            //     &mut CGen::new().with_check_leaks(cli.вкл_проверку_утечек),
-            //     modules,
-            //     &env::current_dir().unwrap(),
-            //     cli.флаги.as_slice(),
-            //     cli.запуск,
-            //     cli.дамп_код,
-            // )
-            // .unwrap_or_else(|error| {
-            //     eprintln!("Кодоген не справился: {error}");
-            //     std::process::exit(1);
-            // });
         }
         CodegenTargetName::RBC => {
-            run_codegen(
+            let generated_paths = run_codegen(
                 &mut BcGen::new(),
                 modules,
                 &env::current_dir().unwrap(),
                 cli.флаги.as_slice(),
-                cli.запуск,
                 cli.дамп_код,
             )
             .unwrap_or_else(|error| {
                 eprintln!("Кодоген не справился: {error}");
+                std::process::exit(1);
+            });
+
+            log::info!("Generated paths: {generated_paths:?}");
+
+            // TODO: support >1 module
+            let module = &generated_paths[0];
+
+            run_interpreter(&module.0.to_string_lossy(), cli.дамп_код).unwrap_or_else(|error| {
+                eprintln!("Интерпретатор не справился: {error}");
                 std::process::exit(1);
             });
         }
