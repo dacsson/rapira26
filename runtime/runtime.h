@@ -4,6 +4,18 @@
 #include "rapobject.h"
 #include "rapvalue.h"
 
+// GC INFO
+// TODO: this is dummys right now
+
+extern size_t __gc_stack_top;
+extern size_t __gc_stack_bottom;
+
+// Defined in gc_stub.c. Rapira uses refcounting, not conservative stack
+// scanning, so this is a no-op; the symbols exist only so the VM interpreter
+// (adopted from LaMa) can keep its operand-stack-top pointer in
+// __gc_stack_bottom. Declared (not defined inline) to avoid ODR across TUs.
+void __gc_init(void);
+
 // METADATA
 
 // Should be overriden by compiled module

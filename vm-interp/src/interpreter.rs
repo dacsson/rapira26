@@ -3,12 +3,19 @@
 use crate::frame::FrameMetadata;
 use crate::object::{Object, ObjectError};
 use crate::{
-    __gc_init, __gc_stack_bottom, __gc_stack_top, Llength, Lread, Lwrite, new_array, rtUnbox,
+    RAP_add, RAP_divide, RAP_equal, RAP_greater_or_equal, RAP_greater_than, RAP_input_value,
+    RAP_less_or_equal, RAP_less_than, RAP_modulo, RAP_multiply, RAP_not_equal, RAP_stringify_object,
+    RAP_subtract, __gc_init, __gc_stack_bottom, __gc_stack_top,
 };
 use core::array;
-use core::convert::TryFrom;
 use vm_core::bytecode::{Builtin, Instruction, Op};
 use vm_core::decoder::{Decoder, DecoderError};
+
+// libc; the runtime stringifies into a malloc'd C string which we print as-is.
+// `puts` appends a newline, giving one Rapira `вывод` per line.
+unsafe extern "C" {
+    fn puts(s: *const core::ffi::c_char) -> core::ffi::c_int;
+}
 
 const MAX_SEXP_TAGLEN: usize = 10;
 
@@ -468,47 +475,53 @@ impl Interpreter {
 
         match name {
             Builtin::Barray => unsafe {
-                let length = n as usize;
+                // let length = n as usize;
 
-                let borrow_operand_stack_elements = &mut self.operand_stack.0
-                    [self.operand_stack_len - length + 1..=self.operand_stack_len];
-                let array = new_array(borrow_operand_stack_elements);
+                // let borrow_operand_stack_elements = &mut self.operand_stack.0
+                //     [self.operand_stack_len - length + 1..=self.operand_stack_len];
+                // let array = new_array(borrow_operand_stack_elements);
 
-                // remove args
-                for _ in 0..length {
-                    self.pop()?;
-                }
+                // // remove args
+                // for _ in 0..length {
+                //     self.pop()?;
+                // }
 
-                self.push(
-                    Object::try_from(array).map_err(|_| InterpreterError::InvalidObjectPointer)?,
-                )?;
+                // self.push(
+                //     Object::try_from(array).map_err(|_| InterpreterError::InvalidObjectPointer)?,
+                // )?;
+
+                todo!()
             },
             Builtin::Llength => {
-                let obj = self.pop()?;
-                let as_ptr = obj
-                    .as_ptr_mut()
-                    .ok_or(InterpreterError::InvalidObjectPointer)?;
+                // let obj = self.pop()?;
+                // let as_ptr = obj
+                //     .as_ptr_mut()
+                //     .ok_or(InterpreterError::InvalidObjectPointer)?;
 
-                unsafe {
-                    // Llength returns a boxed length value
-                    let length = Llength(as_ptr);
-                    self.push(Object::new_boxed(rtUnbox(length)))?;
-                }
+                // unsafe {
+                //     // Llength returns a boxed length value
+                //     let length = Llength(as_ptr);
+                //     self.push(Object::new_boxed(rtUnbox(length)))?;
+                // }
+
+                todo!()
             }
             Builtin::Lread => unsafe {
-                let val = Lread();
-
-                // Returns BOXED value
-                self.push(Object::new_boxed(rtUnbox(val)))?;
+                // Parses a line of stdin into a typed RAP_Value (int/float/text).
+                self.push(Object::new(RAP_input_value()))?;
             },
             Builtin::Lwrite => {
                 let obj = self.pop()?;
 
                 unsafe {
-                    // Lwrite takes a boxed value
-                    Lwrite(obj.raw());
+                    // The runtime renders the value (numbers, да/нет, ...) into a
+                    // malloc'd C string; `puts` prints it followed by a newline.
+                    // The string is intentionally leaked for now.
+                    puts(RAP_stringify_object(obj.raw()));
                 }
 
+                // `вывод` is an expression in the bytecode (no DROP follows), so
+                // the printed value stays on the operand stack.
                 self.push(obj)?;
             }
             Builtin::Lstring => {
@@ -1024,85 +1037,39 @@ impl Interpreter {
             return Err(InterpreterError::NotEnoughArguments("BINOP"));
         };
 
-        let right = self.pop()?.unbox();
-        let left = self.pop()?.unbox();
-        let result = match op {
-            Op::ADD => left + right,
-            Op::SUB => left - right,
-            Op::MUL => left * right,
-            Op::DIV => {
-                #[cfg(feature = "runtime_checks")]
-                if right == 0 {
-                    return Err(InterpreterError::DivisionByZero);
-                }
-                left / right
-            }
-            Op::MOD => {
-                #[cfg(feature = "runtime_checks")]
-                if right == 0 {
-                    return Err(InterpreterError::DivisionByZero);
-                }
-                left % right
-            }
-            Op::EQ => {
-                if left == right {
-                    1
-                } else {
-                    0
-                }
-            }
-            Op::NEQ => {
-                if left != right {
-                    1
-                } else {
-                    0
-                }
-            }
-            Op::LT => {
-                if left < right {
-                    1
-                } else {
-                    0
-                }
-            }
-            Op::LEQ => {
-                if left <= right {
-                    1
-                } else {
-                    0
-                }
-            }
-            Op::GT => {
-                if left > right {
-                    1
-                } else {
-                    0
-                }
-            }
-            Op::GEQ => {
-                if left >= right {
-                    1
-                } else {
-                    0
-                }
-            }
-            Op::AND => {
-                if left != 0 && right != 0 {
-                    1
-                } else {
-                    0
-                }
-            }
-            Op::OR => {
-                if left != 0 || right != 0 {
-                    1
-                } else {
-                    0
+        let right = self.pop()?;
+        let left = self.pop()?;
+
+        // C's `%` / `/` on a zero divisor is UB, so guard before delegating.
+        if matches!(op, Op::DIV | Op::MOD) && right.unbox() == 0 {
+            return Err(InterpreterError::DivisionByZero);
+        }
+
+        // Delegate to the Rapira runtime so arithmetic/comparison semantics
+        // (floor division, spec remainder, да/нет booleans, int/float
+        // promotion) live in one place. Operands and results are raw RAP_Values.
+        let result = unsafe {
+            match op {
+                Op::ADD => RAP_add(left.raw(), right.raw()),
+                Op::SUB => RAP_subtract(left.raw(), right.raw()),
+                Op::MUL => RAP_multiply(left.raw(), right.raw()),
+                Op::DIV => RAP_divide(left.raw(), right.raw()),
+                Op::MOD => RAP_modulo(left.raw(), right.raw()),
+                Op::LT => RAP_less_than(left.raw(), right.raw()),
+                Op::LEQ => RAP_less_or_equal(left.raw(), right.raw()),
+                Op::GT => RAP_greater_than(left.raw(), right.raw()),
+                Op::GEQ => RAP_greater_or_equal(left.raw(), right.raw()),
+                Op::EQ => RAP_equal(left.raw(), right.raw()),
+                Op::NEQ => RAP_not_equal(left.raw(), right.raw()),
+                // The runtime has no logical-and/or yet; the spec's да/нет
+                // operators aren't exercised by the current programs.
+                Op::AND | Op::OR => {
+                    return Err(InterpreterError::InvalidType("AND/OR not yet supported"));
                 }
             }
         };
 
-        self.push(Object::new_boxed(result))?;
+        self.push(Object::new(result))?;
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;

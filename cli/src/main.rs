@@ -1,3 +1,7 @@
+// Force-link raperr so its `#[no_mangle] runtime_error_description` (a C symbol
+// the runtime archive references via RAP_fatal_error) is present at link time.
+extern crate raperr;
+
 use std::env;
 use std::fs::File;
 use std::io::Read;
@@ -211,6 +215,12 @@ fn main() {
                 eprintln!("Интерпретатор не справился: {error}");
                 std::process::exit(1);
             });
+
+            if !cli.дамп_код {
+                std::fs::remove_file(&module.0).unwrap_or_else(|e| {
+                    eprintln!("Failed to remove generated file: {e}");
+                });
+            }
         }
     }
 }

@@ -16,3 +16,6 @@ env_logger = "0.11.10"
 vm-core = { path = "../vm-core" }
 compiler-core = { path = "../compiler-core" }
 vm-interp = { path = "../vm-interp" }
+# Provides `runtime_error_description`, referenced by the C runtime's
+# RAP_fatal_error. Linked as an rlib so std is shared with the binary.
+raperr = { path = "../runtime/raperr" }
