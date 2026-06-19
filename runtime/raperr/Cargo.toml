@@ -3,8 +3,11 @@ name = "raperr"
 version = "0.1.0"
 edition = "2024"
 
+# staticlib: linked by the C backend's generated module.
+# rlib: consumed as a normal cargo dependency by the VM binary so Rust std is
+# shared (avoids duplicate-std link errors that a staticlib would cause).
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 annotate-snippets = "0.12.13"

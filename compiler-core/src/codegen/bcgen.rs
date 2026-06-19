@@ -6,14 +6,14 @@
 use std::{collections::HashSet, path::PathBuf};
 
 use vm_core::{
-    bytecode::{Builtin, Instruction},
+    bytecode::{Builtin, Instruction, Op},
     bytefile::Bytefile,
 };
 
 use crate::{
     ast::{
-        Expr, FunctionDefinition, Literal, LoopStatement, NameDeclarations, SelectionStatement,
-        Spannable, Statement, TypeDefinition,
+        BinaryOperator, Expr, FunctionDefinition, Literal, LoopStatement, NameDeclarations,
+        SelectionStatement, Spannable, Statement, TypeDefinition, UnaryOperator,
     },
     codegen::{AbsolutGeneratedCodePath, CodegenTarget, ModuleMap, RunError},
     module::Module,
@@ -45,6 +45,33 @@ impl BcGen {
                 }
                 _ => panic!("Not implemented: {:?}", lit),
             },
+            Expr::BinaryOp {
+                operator,
+                left,
+                right,
+            } => {
+                instrs.extend(self.emit_expr(left));
+                instrs.extend(self.emit_expr(right));
+
+                instrs.push(Instruction::BINOP {
+                    op: self.ast_binop_to_vm_op(operator),
+                });
+            }
+            Expr::UnaryOp { operator, operand } => {
+                // TODO: maybe add unary opcodes to bytecode
+                match operator {
+                    UnaryOperator::Negate => {
+                        instrs.push(Instruction::CONST { value: 0 });
+                        instrs.extend(self.emit_expr(operand));
+                        instrs.push(Instruction::BINOP { op: Op::SUB });
+                    }
+                    UnaryOperator::Plus => {
+                        instrs.extend(self.emit_expr(operand));
+                        // Nothing to do
+                    }
+                    _ => panic!("Not implemented: {:?}", operator),
+                }
+            }
             _ => panic!("Not implemented: {:?}", expr),
         }
 
@@ -112,6 +139,27 @@ impl BcGen {
             }
         }
         count
+    }
+
+    fn ast_binop_to_vm_op(&self, operator: &BinaryOperator) -> Op {
+        match operator {
+            BinaryOperator::Power => panic!("POWER binop not implemented!"),
+            BinaryOperator::Multiply => Op::MUL,
+            BinaryOperator::Divide => Op::DIV,
+            BinaryOperator::IntegerDivide => Op::DIV,
+            BinaryOperator::Remainder => Op::MOD,
+            BinaryOperator::Add => Op::ADD,
+            BinaryOperator::Subtract => Op::SUB,
+            BinaryOperator::Greater => Op::GT,
+            BinaryOperator::Less => Op::LT,
+            BinaryOperator::GreaterOrEqual => Op::GEQ,
+            BinaryOperator::LessOrEqual => Op::LEQ,
+            BinaryOperator::Equal => Op::EQ,
+            BinaryOperator::NotEqual => Op::NEQ,
+            BinaryOperator::And => Op::AND,
+            BinaryOperator::Or => Op::OR,
+            BinaryOperator::Dot => panic!("DOT binop not implemented!"),
+        }
     }
 }
 

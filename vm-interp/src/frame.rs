@@ -34,9 +34,9 @@ impl<'a> FrameMetadata {
     /// Accompanies the `BEGIN` instruction.
     #[inline(always)]
     pub fn get_from_stack(stack: &[Object], frame_pointer: usize) -> Option<FrameMetadata> {
-        let closure_obj = stack.get(frame_pointer)?.raw();
-        let n_args = stack.get(frame_pointer + 1)?.raw();
-        let n_locals = stack.get(frame_pointer + 2)?.raw();
+        let closure_obj = stack.get(frame_pointer)?.raw() as i64;
+        let n_args = stack.get(frame_pointer + 1)?.raw() as i64;
+        let n_locals = stack.get(frame_pointer + 2)?.raw() as i64;
         let ret_frame_pointer = stack.get(frame_pointer + 3)?.raw() as usize;
         let ret_ip = stack.get(frame_pointer + 4)?.raw() as usize;
 
