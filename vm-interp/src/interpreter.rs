@@ -3,12 +3,13 @@
 use crate::frame::FrameMetadata;
 use crate::object::{Object, ObjectError};
 use crate::{
-    RAP_add, RAP_divide, RAP_equal, RAP_greater_or_equal, RAP_greater_than, RAP_input_value,
-    RAP_less_or_equal, RAP_less_than, RAP_modulo, RAP_multiply, RAP_not_equal, RAP_stringify_object,
-    RAP_subtract, __gc_init, __gc_stack_bottom, __gc_stack_top,
+    __gc_init, __gc_stack_bottom, __gc_stack_top, RAP_add, RAP_and, RAP_divide, RAP_equal,
+    RAP_greater_or_equal, RAP_greater_than, RAP_input_value, RAP_less_or_equal, RAP_less_than,
+    RAP_modulo, RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_stringify_object,
+    RAP_subtract,
 };
 use core::array;
-use vm_core::bytecode::{Builtin, Instruction, Op};
+use vm_core::bytecode::{Builtin, Instruction, Op, UnaryOp};
 use vm_core::decoder::{Decoder, DecoderError};
 
 // libc; the runtime stringifies into a malloc'd C string which we print as-is.
@@ -35,7 +36,7 @@ pub struct InstructionTrace {
 }
 
 const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), InterpreterError>;
-    25] = [
+    26] = [
     Interpreter::eval_nop,
     Interpreter::eval_end,
     Interpreter::eval_end, // ret
@@ -60,7 +61,8 @@ const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), In
     Interpreter::eval_sti,
     Interpreter::eval_sta,
     Interpreter::eval_array,
-    Interpreter::eval_halt,
+    Interpreter::eval_bool,
+    Interpreter::eval_unary,
 ];
 
 pub struct Interpreter {
@@ -147,7 +149,13 @@ impl Interpreter {
         Ok(())
     }
 
-    fn eval_halt(&mut self, _: Instruction) -> Result<(), InterpreterError> {
+    fn eval_bool(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+        let Instruction::BOOL { value: index } = instr else {
+            return Err(InterpreterError::NotEnoughArguments("BOOL"));
+        };
+
+        self.push(Object::new_bool(index))?;
+
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
 
@@ -1040,14 +1048,10 @@ impl Interpreter {
         let right = self.pop()?;
         let left = self.pop()?;
 
-        // C's `%` / `/` on a zero divisor is UB, so guard before delegating.
         if matches!(op, Op::DIV | Op::MOD) && right.unbox() == 0 {
             return Err(InterpreterError::DivisionByZero);
         }
 
-        // Delegate to the Rapira runtime so arithmetic/comparison semantics
-        // (floor division, spec remainder, да/нет booleans, int/float
-        // promotion) live in one place. Operands and results are raw RAP_Values.
         let result = unsafe {
             match op {
                 Op::ADD => RAP_add(left.raw(), right.raw()),
@@ -1061,11 +1065,30 @@ impl Interpreter {
                 Op::GEQ => RAP_greater_or_equal(left.raw(), right.raw()),
                 Op::EQ => RAP_equal(left.raw(), right.raw()),
                 Op::NEQ => RAP_not_equal(left.raw(), right.raw()),
-                // The runtime has no logical-and/or yet; the spec's да/нет
-                // operators aren't exercised by the current programs.
-                Op::AND | Op::OR => {
-                    return Err(InterpreterError::InvalidType("AND/OR not yet supported"));
-                }
+                Op::AND => RAP_and(left.raw(), right.raw()),
+                Op::OR => RAP_or(left.raw(), right.raw()),
+            }
+        };
+
+        self.push(Object::new(result))?;
+
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
+
+        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+    }
+
+    fn eval_unary(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+        let Instruction::UNARY { op } = instr else {
+            return Err(InterpreterError::NotEnoughArguments("UNARY"));
+        };
+
+        let value = self.pop()?;
+
+        let result = unsafe {
+            match op {
+                UnaryOp::Negate => RAP_negate(value.raw()),
+                UnaryOp::Not => RAP_not(value.raw()),
             }
         };
 

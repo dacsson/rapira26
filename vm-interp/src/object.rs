@@ -31,11 +31,16 @@ impl Object {
 
     /// Box a user integer as a Rapira SMI.
     ///
-    /// Mirrors `RAP_CREATE_SMI` from `runtime/rapvalue.h`: the int32 value sits
-    /// in the high 32 bits, leaving the low two tag bits as `00`. Values built
-    /// this way are valid operands for the `RAP_*` runtime ops.
+    /// Mirrors `RAP_CREATE_SMI` from `runtime/rapvalue.h`.
     pub fn new_boxed(value: i64) -> Self {
-        Object(((value as i32 as i64) << 32) as usize)
+        Object((value << 32) as usize)
+    }
+
+    /// Create a new boolean object.
+    ///
+    /// Mirrors `RAP_CREATE_BOOL` from `runtime/rapvalue.h`.
+    pub fn new_bool(value: bool) -> Self {
+        Object((value as usize) << 32 | 2)
     }
 
     /// Extract the integer from a SMI. Mirrors `RAP_SMI_VALUE`.

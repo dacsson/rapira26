@@ -18,6 +18,12 @@ pub enum Op {
     OR,  // !!, Tests if either of the operands is non-zero.
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+pub enum UnaryOp {
+    Negate,
+    Not,
+}
+
 /// Scoping rule for a value
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub enum ValueRel {
@@ -169,8 +175,14 @@ pub enum Instruction {
         /// Number of elements in the array
         n: i32,
     },
-    /// Imaginary instruction to mark the end of the bytecode file
-    HALT,
+    /// Pushes a boolean value onto the stack.
+    BOOL {
+        value: bool,
+    },
+    /// Unary operations
+    UNARY {
+        op: UnaryOp,
+    },
 }
 
 /// Usefull feature to convert subopcode of
@@ -241,6 +253,18 @@ impl TryFrom<u8> for CompareJumpKind {
     }
 }
 
+impl TryFrom<u8> for UnaryOp {
+    type Error = ();
+
+    fn try_from(subopcode: u8) -> Result<Self, Self::Error> {
+        match subopcode {
+            0x0 => Ok(UnaryOp::Negate),
+            0x1 => Ok(UnaryOp::Not),
+            _ => Err(()),
+        }
+    }
+}
+
 impl From<&Op> for &i32 {
     fn from(op: &Op) -> Self {
         match op {
@@ -257,6 +281,15 @@ impl From<&Op> for &i32 {
             Op::NEQ => &10,
             Op::AND => &11,
             Op::OR => &12,
+        }
+    }
+}
+
+impl From<&UnaryOp> for &i32 {
+    fn from(op: &UnaryOp) -> Self {
+        match op {
+            UnaryOp::Negate => &0,
+            UnaryOp::Not => &1,
         }
     }
 }
@@ -339,7 +372,8 @@ impl Instruction {
             Instruction::STI => String::from("STI"),
             Instruction::STA => String::from("STA"),
             Instruction::ARRAY { n } => format!("ARRAY {}", n),
-            Instruction::HALT => String::from("HALT"),
+            Instruction::BOOL { value } => format!("BOOL {}", value),
+            Instruction::UNARY { op } => format!("UNARY {:#?}", op),
         }
     }
 

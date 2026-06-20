@@ -1,8 +1,9 @@
 \ Tests: basic вывод, all literal types, multi-value output
 \ No input required.
 
+\ TODO:
 \ --- null ---
-вывод: пусто
+\ вывод: пусто
 \ => пусто
 
 \ --- booleans ---
