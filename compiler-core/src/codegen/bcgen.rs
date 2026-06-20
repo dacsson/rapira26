@@ -6,7 +6,7 @@
 use std::{collections::HashSet, path::PathBuf};
 
 use vm_core::{
-    bytecode::{Builtin, Instruction, Op},
+    bytecode::{Builtin, Instruction, Op, UnaryOp},
     bytefile::Bytefile,
 };
 
@@ -43,6 +43,11 @@ impl BcGen {
                         value: *value as i32,
                     });
                 }
+                Literal::Boolean(value) => {
+                    instrs.push(Instruction::CONST {
+                        value: *value as i32,
+                    });
+                }
                 _ => panic!("Not implemented: {:?}", lit),
             },
             Expr::BinaryOp {
@@ -61,14 +66,20 @@ impl BcGen {
                 // TODO: maybe add unary opcodes to bytecode
                 match operator {
                     UnaryOperator::Negate => {
-                        instrs.push(Instruction::CONST { value: 0 });
                         instrs.extend(self.emit_expr(operand));
-                        instrs.push(Instruction::BINOP { op: Op::SUB });
+                        instrs.push(Instruction::UNARY {
+                            op: UnaryOp::Negate,
+                        });
                     }
                     UnaryOperator::Plus => {
                         instrs.extend(self.emit_expr(operand));
                         // Nothing to do
                     }
+                    UnaryOperator::Not => {
+                        instrs.extend(self.emit_expr(operand));
+                        instrs.push(Instruction::UNARY { op: UnaryOp::Not });
+                    }
+
                     _ => panic!("Not implemented: {:?}", operator),
                 }
             }

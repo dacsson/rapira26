@@ -99,6 +99,9 @@ impl Decoder {
                 rel: ValueRel::try_from(subopcode).map_err(|_| DecoderError::from(byte))?,
                 index: self.next::<i32>()?,
             }),
+            (0x30, _) => Ok(Instruction::UNARY {
+                op: UnaryOp::try_from(subopcode).map_err(|_| DecoderError::from(byte))?,
+            }),
             (0x40, _) if subopcode <= 0x3 => Ok(Instruction::STORE {
                 rel: ValueRel::try_from(subopcode).map_err(|_| DecoderError::from(byte))?,
                 index: self.next::<i32>()?,
@@ -145,6 +148,9 @@ impl Decoder {
             (0x70, 0x4) => Ok(Instruction::CALLBUILTIN {
                 n: self.next::<i32>()?,
                 name: Builtin::Barray,
+            }),
+            (0x70, 0x5) => Ok(Instruction::BOOL {
+                value: self.next::<bool>()?,
             }),
             _ => Err(DecoderError::InvalidOpcode(byte)),
         }

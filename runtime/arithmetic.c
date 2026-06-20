@@ -406,3 +406,24 @@ RAP_Value RAP_power(RAP_Value a, RAP_Value b) {
 
   RAP_FATAL_TYPE_OP_ERR("возведения в степень", a, b);
 }
+
+RAP_Value RAP_and(RAP_Value a, RAP_Value b) {
+  if (RAP_IS_BOOL(a) && RAP_IS_BOOL(b)) {
+    return RAP_create_logical_obj(RAP_BOOL_VALUE(a) && RAP_BOOL_VALUE(b));
+  }
+  RAP_FATAL_TYPE_OP_ERR("логического И", a, b);
+}
+
+RAP_Value RAP_or(RAP_Value a, RAP_Value b) {
+  if (RAP_IS_BOOL(a) && RAP_IS_BOOL(b)) {
+    return RAP_create_logical_obj(RAP_BOOL_VALUE(a) || RAP_BOOL_VALUE(b));
+  }
+  RAP_FATAL_TYPE_OP_ERR("логического ИЛИ", a, b);
+}
+
+RAP_Value RAP_not(RAP_Value a) {
+  if (RAP_IS_BOOL(a)) {
+    return RAP_create_logical_obj(!RAP_BOOL_VALUE(a));
+  }
+  RAP_FATAL_TYPE_OP_ERR("логического НЕ", a, a);
+}

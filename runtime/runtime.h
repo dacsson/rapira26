@@ -99,6 +99,9 @@ RAP_Value RAP_divide(RAP_Value a, RAP_Value b);
 RAP_Value RAP_length(RAP_Value a);
 RAP_Value RAP_negate(RAP_Value a);
 RAP_Value RAP_power(RAP_Value a, RAP_Value b);
+RAP_Value RAP_and(RAP_Value a, RAP_Value b);
+RAP_Value RAP_or(RAP_Value a, RAP_Value b);
+RAP_Value RAP_not(RAP_Value a);
 
 // FRAME UTILITIES
 
