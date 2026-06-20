@@ -36,7 +36,7 @@ pub struct InstructionTrace {
 }
 
 const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), InterpreterError>;
-    26] = [
+    27] = [
     Interpreter::eval_nop,
     Interpreter::eval_end,
     Interpreter::eval_end, // ret
@@ -63,6 +63,7 @@ const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), In
     Interpreter::eval_array,
     Interpreter::eval_bool,
     Interpreter::eval_unary,
+    Interpreter::eval_constf,
 ];
 
 pub struct Interpreter {
@@ -999,28 +1000,23 @@ impl Interpreter {
     }
 
     fn eval_string(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        // let Instruction::STRING { index } = instr else {
-        //     return Err(InterpreterError::NotEnoughArguments("STRING"));
-        // };
+        let Instruction::STRING { index } = instr else {
+            return Err(InterpreterError::NotEnoughArguments("STRING"));
+        };
 
-        // let string = self
-        //     .decoder
-        //     .bf
-        //     .get_string_at_offset(index as usize)
-        //     .map_err(|_| InterpreterError::StringIndexOutOfBounds)?;
+        let string = self
+            .decoder
+            .bf
+            .get_string_at_offset(index as usize)
+            .map_err(|_| InterpreterError::StringIndexOutOfBounds)?;
 
-        // let lama_string = new_string(string).map_err(|_| InterpreterError::InvalidStringPointer)?;
+        // TODO: errors can happen
+        self.push(Object::new_string(string))?;
 
-        // self.push(
-        //     Object::try_from(lama_string).map_err(|_| InterpreterError::InvalidStringPointer)?,
-        // )?;
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
 
-        // let encoding = self.decoder.next::<u8>()?;
-        // let instr = self.decoder.decode(encoding)?;
-
-        // become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
-
-        todo!();
+        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
     }
 
     fn eval_const(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
@@ -1093,6 +1089,19 @@ impl Interpreter {
         };
 
         self.push(Object::new(result))?;
+
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
+
+        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+    }
+
+    fn eval_constf(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+        let Instruction::CONSTF { value } = instr else {
+            return Err(InterpreterError::NotEnoughArguments("CONSTF"));
+        };
+
+        self.push(Object::new_float(value))?;
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;

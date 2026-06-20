@@ -1,6 +1,6 @@
 //! Interpreter Objet type description
 
-use crate::{RAP_Value, isSMI};
+use crate::{RAP_TAG_MASK, RAP_Value, RAP_create_float_obj, RAP_create_text_obj, isPtr};
 
 /// A wrapper around RAP_VALUE defined in runtime
 ///
@@ -12,6 +12,10 @@ impl Object {
     /// Wrap a raw [`RAP_Value`] (e.g. a result handed back by the runtime).
     pub fn new(data: usize) -> Self {
         Object(data)
+    }
+
+    pub fn new_float(data: f64) -> Self {
+        unsafe { Object(RAP_create_float_obj(data)) }
     }
 
     /// Empty placeholder slot (raw 0). Used for globals and uninitialized
@@ -40,7 +44,13 @@ impl Object {
     ///
     /// Mirrors `RAP_CREATE_BOOL` from `runtime/rapvalue.h`.
     pub fn new_bool(value: bool) -> Self {
-        Object((value as usize) << 32 | 2)
+        Object((value as usize) << 2 | 0x1)
+    }
+
+    /// Create a new text object
+    pub fn new_string(value: &[u8]) -> Self {
+        // TODO: cast is unsafe
+        unsafe { Object(RAP_create_text_obj(value.as_ptr() as *const i8)) }
     }
 
     /// Extract the integer from a SMI. Mirrors `RAP_SMI_VALUE`.
@@ -53,28 +63,31 @@ impl Object {
         self.0
     }
 
-    /// Data is stored as tagged ptr, hence we need to translate back to pointer
-    /// iff it was created from pointer
+    /// Data is stored as a tagged pointer, so we must strip the tag bits before
+    /// dereferencing. Returns `None` for non-pointer values (SMIs, booleans).
+    ///
+    /// Mirrors `RAP_IS_PTR` + `RAP_PTR_VALUE` from `runtime/rapvalue.h`.
     pub fn as_ptr<T>(&self) -> Option<*const T> {
-        if isSMI(self.0) {
-            None
+        if isPtr(self.0) {
+            Some((self.0 & !(RAP_TAG_MASK as usize)) as *const T)
         } else {
-            Some(self.0 as *const T)
+            None
         }
     }
 
     /// [`as_ptr`]
     pub fn as_ptr_mut<T>(&self) -> Option<*mut T> {
-        if isSMI(self.0) {
-            None
+        if isPtr(self.0) {
+            Some((self.0 & !(RAP_TAG_MASK as usize)) as *mut T)
         } else {
-            Some(self.0 as *mut T)
+            None
         }
     }
 
-    /// [`as_ptr`]
+    /// [`as_ptr`], but assumes the value is a tagged pointer without checking.
+    /// The tag bits are still stripped so the result is dereferenceable.
     pub fn as_ptr_mut_unchecked<T>(&self) -> *mut T {
-        self.0 as *mut T
+        (self.0 & !(RAP_TAG_MASK as usize)) as *mut T
     }
 }
 

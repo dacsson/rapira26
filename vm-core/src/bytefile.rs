@@ -4,7 +4,7 @@ use crate::bytecode::Instruction;
 use crate::decoder::{Decoder, DecoderError};
 use std::ffi::CString;
 use std::fmt::Display;
-use std::io::{BufRead, BufReader, Cursor, Read};
+use std::io::{BufRead, BufReader, Cursor, Read, Seek};
 
 // Memory layout of the bytecode file
 // +------------------------------------+
@@ -64,11 +64,15 @@ impl Bytefile {
     }
 
     /// Adds a string to the string section of bytefile
-    pub fn add_string(&mut self, string: String) {
+    pub fn add_string(&mut self, string: String) -> u32 {
+        println!("before add_string: {}", self);
+        let offset = self.stringtab_size;
         self.string_table.extend(string.as_bytes());
         // Push null terminator
         self.string_table.push(0);
         self.stringtab_size += string.as_bytes().len() as u32 + 1;
+        println!("after add_string: {}", self);
+        offset
     }
 
     /// Add raw code to the code section of bytefile
@@ -87,8 +91,12 @@ impl Bytefile {
     ///
     /// The name for it should already be in the string table
     pub fn add_public_symbol(&mut self, name: &str, offset: u32) -> Result<(), BytefileError> {
+        println!("adding ps: {:#?}", (name, offset));
+
         // First find the index of string (offset)
         let string_offset = self.find_string_offset(name);
+
+        println!("offset: {:#?}", string_offset);
 
         if string_offset.is_none() {
             return Err(BytefileError::InvalidStringIndexInStringTable);
@@ -103,6 +111,7 @@ impl Bytefile {
     /// Returns offset of the given string in the string table, if found
     pub fn find_string_offset(&self, string: &str) -> Option<u32> {
         let mut reader = BufReader::new(Cursor::new(&self.string_table));
+        let mut curr_offset = 0;
 
         for i in 0..self.stringtab_size {
             let mut buff = vec![];
@@ -114,9 +123,14 @@ impl Bytefile {
                 buff.pop();
             }
 
+            println!("buff: {:#?}, i: {}", String::from_utf8(buff.clone()), i);
+
             if buff == string.as_bytes() {
-                return Some(i);
+                return Some(curr_offset);
             }
+
+            // TODO: send err
+            curr_offset = reader.stream_position().unwrap_or_default() as u32;
         }
         None
     }
@@ -231,6 +245,8 @@ impl Bytefile {
             .read_exact(&mut string_table)
             .map_err(|_| BytefileError::UnexpectedEOF)?;
 
+        println!("ps: {:#?}", public_symbols);
+
         // Find "main" entry point in public symbols
         let main_offset = public_symbols
             .iter()
@@ -241,8 +257,12 @@ impl Bytefile {
                     .position(|&b| b == 0)
                     .ok_or(BytefileError::InvalidStringIndexInStringTable);
 
+                println!("slice: {:?}", slice);
+
                 if let Ok(first_null) = first_null {
                     let buff = slice[..=first_null].to_vec();
+
+                    println!("finding main, buff {:#?}", String::from_utf8(buff.clone()));
 
                     if buff == b"main\0".to_vec() {
                         return true;

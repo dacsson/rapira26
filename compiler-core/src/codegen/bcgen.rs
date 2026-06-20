@@ -44,9 +44,24 @@ impl BcGen {
                     });
                 }
                 Literal::Boolean(value) => {
-                    instrs.push(Instruction::CONST {
-                        value: *value as i32,
-                    });
+                    instrs.push(Instruction::BOOL { value: *value });
+                }
+                Literal::Real(value) => {
+                    instrs.push(Instruction::CONSTF { value: *value });
+                }
+                Literal::Text(value) => {
+                    // We should push all new strings to
+                    // a string table of bytefile first
+                    if let Some(index) = self.bytefile.find_string_offset(value) {
+                        instrs.push(Instruction::STRING {
+                            index: index as i32,
+                        })
+                    } else {
+                        // First occurence of a string
+                        instrs.push(Instruction::STRING {
+                            index: self.bytefile.add_string(value.clone()) as i32,
+                        });
+                    }
                 }
                 _ => panic!("Not implemented: {:?}", lit),
             },
@@ -250,6 +265,8 @@ impl CodegenTarget for BcGen {
         // Top-level is just a main function, nothing special actually
         // The important thing is that top-level is evaluated on import (if used as module)
         // or immediately if its a main module (look at docs for more info)
+
+        println!("emitting toplevel main");
 
         let top_level_name = "main".to_string();
         let locals = self.count_locals(top_level);
