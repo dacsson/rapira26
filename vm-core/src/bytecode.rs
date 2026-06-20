@@ -57,7 +57,7 @@ pub struct CapturedVar {
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Instruction {
     NOP,
     /// Marks the end of the procedure definition. When executed
@@ -175,13 +175,17 @@ pub enum Instruction {
         /// Number of elements in the array
         n: i32,
     },
-    /// Pushes a boolean value onto the stack.
+    /// Pushes a boolean value onto the stack
     BOOL {
         value: bool,
     },
     /// Unary operations
     UNARY {
         op: UnaryOp,
+    },
+    /// Push floating point value on operand stack
+    CONSTF {
+        value: f64,
     },
 }
 
@@ -374,6 +378,7 @@ impl Instruction {
             Instruction::ARRAY { n } => format!("ARRAY {}", n),
             Instruction::BOOL { value } => format!("BOOL {}", value),
             Instruction::UNARY { op } => format!("UNARY {:#?}", op),
+            Instruction::CONSTF { value } => format!("CONSTF {}", value),
         }
     }
 

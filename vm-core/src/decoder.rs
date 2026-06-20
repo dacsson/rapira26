@@ -2,7 +2,7 @@ use crate::bytecode::*;
 use crate::bytefile::Bytefile;
 use crate::numeric::LeBytes;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum DecoderError {
     ReadingMoreThenCodeSection,
     InvalidOpcode(u8),
@@ -95,6 +95,9 @@ impl Decoder {
             (0x10, 0x9) => Ok(Instruction::DUP),
             (0x10, 0xa) => Ok(Instruction::SWAP),
             (0x10, 0xb) => Ok(Instruction::ELEM),
+            (0x10, 0xc) => Ok(Instruction::CONSTF {
+                value: self.next::<f64>()?,
+            }),
             (0x20, _) if subopcode <= 0x3 => Ok(Instruction::LOAD {
                 rel: ValueRel::try_from(subopcode).map_err(|_| DecoderError::from(byte))?,
                 index: self.next::<i32>()?,
@@ -150,7 +153,7 @@ impl Decoder {
                 name: Builtin::Barray,
             }),
             (0x70, 0x5) => Ok(Instruction::BOOL {
-                value: self.next::<bool>()?,
+                value: self.next::<u8>()? != 0,
             }),
             _ => Err(DecoderError::InvalidOpcode(byte)),
         }
@@ -186,10 +189,18 @@ impl Decoder {
             Instruction::DUP => buf.push(0x19),
             Instruction::SWAP => buf.push(0x1a),
             Instruction::ELEM => buf.push(0x1b),
+            Instruction::CONSTF { value } => {
+                buf.push(0x1c);
+                buf.extend(&value.to_le_bytes());
+            }
             Instruction::LOAD { rel, index } => {
                 let rel_: &i32 = rel.into();
                 buf.push(0x20 | *rel_ as u8);
                 buf.extend(&index.to_le_bytes());
+            }
+            Instruction::UNARY { op } => {
+                let _op: &i32 = op.into();
+                buf.push(0x30 | *_op as u8);
             }
             Instruction::STORE { rel, index } => {
                 let rel_: &i32 = rel.into();
@@ -255,6 +266,10 @@ impl Decoder {
             } => {
                 buf.push(0x74);
                 buf.extend(&n.to_le_bytes());
+            }
+            Instruction::BOOL { value } => {
+                buf.push(0x75);
+                buf.extend((*value as u8).to_le_bytes());
             }
             _ => return Err(DecoderError::InvalidInstruction(instruction.clone())),
         }

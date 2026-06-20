@@ -1,4 +1,7 @@
 //! Defines some numeric constraints for memory reads
+//!
+//! The original code credits go to `rten`:
+//! - https://github.com/robertknight/rten
 
 /// Convert between a primitive type and an array of bytes in little-endian
 /// order.
@@ -33,3 +36,4 @@ impl_le_bytes!(i32, 4);
 impl_le_bytes!(u32, 4);
 impl_le_bytes!(i64, 8);
 impl_le_bytes!(u64, 8);
+impl_le_bytes!(f64, 8);
