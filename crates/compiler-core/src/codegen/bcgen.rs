@@ -6,7 +6,7 @@
 use std::{collections::HashSet, path::PathBuf};
 
 use vm_core::{
-    bytecode::{Builtin, Instruction, Op, UnaryOp},
+    bytecode::{Builtin, Instruction, LWRITE_NEWLINE_FLAG, Op, UnaryOp},
     bytefile::Bytefile,
 };
 
@@ -94,9 +94,24 @@ impl BcGen {
                         instrs.extend(self.emit_expr(operand));
                         instrs.push(Instruction::UNARY { op: UnaryOp::Not });
                     }
-
+                    UnaryOperator::Length => {
+                        instrs.extend(self.emit_expr(operand));
+                        instrs.push(Instruction::CALLBUILTIN {
+                            name: Builtin::Llength,
+                            n: 0,
+                        });
+                    }
                     _ => panic!("Not implemented: {:?}", operator),
                 }
+            }
+            Expr::TupleConstruct(elements) => {
+                elements
+                    .iter()
+                    .for_each(|el| instrs.extend(self.emit_expr(el)));
+
+                instrs.push(Instruction::TUPLE {
+                    n: elements.len() as i32,
+                });
             }
             _ => panic!("Not implemented: {:?}", expr),
         }
@@ -116,10 +131,19 @@ impl BcGen {
                     instrs.extend(self.emit_expr(value));
                 }
 
+                // Newline is a single bit stores in n
+                let n = if *no_newline {
+                    // clear the newline bit, keep the argument count
+                    values.len() as i32 & !LWRITE_NEWLINE_FLAG
+                } else {
+                    // 1 means add "\n" at the end
+                    values.len() as i32 | LWRITE_NEWLINE_FLAG
+                };
+
                 // Finally emit call to write builtin
                 let print_instr = Instruction::CALLBUILTIN {
                     name: Builtin::Lwrite,
-                    n: 0,
+                    n,
                 };
                 instrs.push(print_instr);
 

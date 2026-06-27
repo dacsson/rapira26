@@ -1,6 +1,9 @@
 //! Descriptor of Lama bytecode
 use std::convert::TryFrom;
 
+pub const LWRITE_NEWLINE_FLAG: i32 = 1 << 30;
+pub const LWRITE_NEWLINE_MASK: i32 = LWRITE_NEWLINE_FLAG - 1;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub enum Op {
     ADD, // +
@@ -186,6 +189,12 @@ pub enum Instruction {
     /// Push floating point value on operand stack
     CONSTF {
         value: f64,
+    },
+    /// Push a tuple on the operand stack
+    ///
+    /// Takes `n` elements from the top of the stack
+    TUPLE {
+        n: i32,
     },
 }
 
@@ -379,6 +388,7 @@ impl Instruction {
             Instruction::BOOL { value } => format!("BOOL {}", value),
             Instruction::UNARY { op } => format!("UNARY {:#?}", op),
             Instruction::CONSTF { value } => format!("CONSTF {}", value),
+            Instruction::TUPLE { n } => format!("TUPLE {}", n),
         }
     }
 

@@ -1,11 +1,14 @@
 //! Interpreter Objet type description
 
-use crate::{RAP_TAG_MASK, RAP_Value, RAP_create_float_obj, RAP_create_text_obj, isPtr};
+use crate::{
+    RAP_TAG_MASK, RAP_Value, RAP_create_float_obj, RAP_create_text_obj, RAP_create_tuple_obj, isPtr,
+};
 
 /// A wrapper around RAP_VALUE defined in runtime
 ///
 /// See runtime/rapvalue.h for detailed description
 #[derive(Clone, Copy)]
+#[repr(transparent)]
 pub struct Object(RAP_Value);
 
 impl Object {
@@ -51,6 +54,14 @@ impl Object {
     pub fn new_string(value: &[u8]) -> Self {
         // TODO: cast is unsafe
         unsafe { Object(RAP_create_text_obj(value.as_ptr() as *const i8)) }
+    }
+
+    /// Create a new tuple object
+    pub fn new_tuple(size: usize, elements: &mut [Object]) -> Self {
+        let n = size as u32;
+        let items = elements.as_mut_ptr() as *mut RAP_Value;
+
+        unsafe { Object(RAP_create_tuple_obj(n, items)) }
     }
 
     /// Extract the integer from a SMI. Mirrors `RAP_SMI_VALUE`.
