@@ -266,8 +266,6 @@ impl CodegenTarget for BcGen {
         // The important thing is that top-level is evaluated on import (if used as module)
         // or immediately if its a main module (look at docs for more info)
 
-        println!("emitting toplevel main");
-
         let top_level_name = "main".to_string();
         let locals = self.count_locals(top_level);
         let begin_instr_length = self.bytefile.get_current_offset() + 1 /* 1 byte for BEGIN */ +
