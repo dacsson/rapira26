@@ -4,13 +4,14 @@ use crate::frame::FrameMetadata;
 use crate::object::{Object, ObjectError};
 use crate::{
     __gc_init, __gc_stack_bottom, __gc_stack_top, RAP_add, RAP_and, RAP_divide, RAP_equal,
-    RAP_greater_or_equal, RAP_greater_than, RAP_input_value, RAP_less_or_equal, RAP_less_than,
-    RAP_modulo, RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_stringify_object,
-    RAP_subtract,
+    RAP_greater_or_equal, RAP_greater_than, RAP_input_value, RAP_length, RAP_less_or_equal,
+    RAP_less_than, RAP_modulo, RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or,
+    RAP_stringify_object, RAP_subtract,
 };
 use core::array;
-use libc::puts;
-use vm_core::bytecode::{Builtin, Instruction, Op, UnaryOp};
+use vm_core::bytecode::{
+    Builtin, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, Op, UnaryOp,
+};
 use vm_core::decoder::{Decoder, DecoderError};
 
 const MAX_SEXP_TAGLEN: usize = 10;
@@ -31,7 +32,7 @@ pub struct InstructionTrace {
 }
 
 const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), InterpreterError>;
-    27] = [
+    28] = [
     Interpreter::eval_nop,
     Interpreter::eval_end,
     Interpreter::eval_end, // ret
@@ -59,6 +60,7 @@ const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), In
     Interpreter::eval_bool,
     Interpreter::eval_unary,
     Interpreter::eval_constf,
+    Interpreter::eval_tuple,
 ];
 
 pub struct Interpreter {
@@ -497,32 +499,36 @@ impl Interpreter {
                 todo!()
             },
             Builtin::Llength => {
-                // let obj = self.pop()?;
-                // let as_ptr = obj
-                //     .as_ptr_mut()
-                //     .ok_or(InterpreterError::InvalidObjectPointer)?;
+                let obj = self.pop()?;
 
-                // unsafe {
-                //     // Llength returns a boxed length value
-                //     let length = Llength(as_ptr);
-                //     self.push(Object::new_boxed(rtUnbox(length)))?;
-                // }
+                // RAP_length returns RAP_Value (boxed SMI)
+                let length = unsafe { RAP_length(obj.raw()) };
 
-                todo!()
+                self.push(Object::new_unboxed(length as i64))?;
             }
             Builtin::Lread => unsafe {
                 // Parses a line of stdin into a typed RAP_Value (int/float/text).
                 self.push(Object::new(RAP_input_value()))?;
             },
-            Builtin::Lwrite => {
-                let obj = self.pop()?;
+            Builtin::Lwrite => unsafe {
+                // `n` packs the newline flag (bit 30) with the real argument count
+                let newline_bit = n & LWRITE_NEWLINE_FLAG;
+                let n = n & LWRITE_NEWLINE_MASK;
 
-                unsafe {
-                    puts(RAP_stringify_object(obj.raw()));
+                if n != 0 {
+                    let borrow_operand_stack_elements = &mut self.operand_stack.0
+                        [self.operand_stack_len - (n as usize) + 1..=self.operand_stack_len];
+                    for obj in borrow_operand_stack_elements {
+                        libc::printf(RAP_stringify_object(obj.raw()));
+                    }
+                    if newline_bit != 0 {
+                        libc::printf(c"\n".as_ptr());
+                    }
                 }
-
-                self.push(obj)?;
-            }
+                for _ in 0..n {
+                    self.pop()?;
+                }
+            },
             Builtin::Lstring => {
                 todo!();
                 // let obj = self.pop()?;
@@ -1025,8 +1031,6 @@ impl Interpreter {
     }
 
     fn eval_binop(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        // println!("eval_binop: {:?}", instr);
-
         let Instruction::BINOP { op } = instr else {
             return Err(InterpreterError::NotEnoughArguments("BINOP"));
         };
@@ -1092,6 +1096,34 @@ impl Interpreter {
         };
 
         self.push(Object::new_float(value))?;
+
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
+
+        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+    }
+
+    fn eval_tuple(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+        let Instruction::TUPLE { n } = instr else {
+            return Err(InterpreterError::NotEnoughArguments("TUPLE"));
+        };
+
+        if n == 0 {
+            self.push(Object::new_tuple(0, &mut []))?;
+        }
+
+        // Take n elements from stack
+        let borrow_operand_stack_elements = &mut self.operand_stack.0
+            [self.operand_stack_len - (n as usize) + 1..=self.operand_stack_len];
+
+        let obj = Object::new_tuple(n as usize, borrow_operand_stack_elements);
+
+        // Pop arguments from the stack
+        for _ in 0..n {
+            self.pop()?;
+        }
+
+        self.push(obj)?;
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;

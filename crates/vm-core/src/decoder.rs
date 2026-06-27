@@ -84,6 +84,9 @@ impl Decoder {
             (0x10, 0x1) => Ok(Instruction::STRING {
                 index: self.next::<i32>()?,
             }),
+            (0x10, 0x2) => Ok(Instruction::TUPLE {
+                n: self.next::<i32>()?,
+            }),
             (0x10, 0x3) => Ok(Instruction::STI),
             (0x10, 0x4) => Ok(Instruction::STA),
             (0x10, 0x5) => Ok(Instruction::JMP {
@@ -144,13 +147,17 @@ impl Decoder {
             (0x50, 0xa) => Ok(Instruction::LINE {
                 n: self.next::<i32>()?,
             }),
-            (0x70, _) if subopcode <= 0x3 => Ok(Instruction::CALLBUILTIN {
+            (0x70, _) if subopcode <= 0x3 && subopcode != 1 => Ok(Instruction::CALLBUILTIN {
                 n: 0,
                 name: Builtin::try_from(subopcode).map_err(|_| DecoderError::from(byte))?,
             }),
             (0x70, 0x4) => Ok(Instruction::CALLBUILTIN {
                 n: self.next::<i32>()?,
                 name: Builtin::Barray,
+            }),
+            (0x70, 0x1) => Ok(Instruction::CALLBUILTIN {
+                n: self.next::<i32>()?,
+                name: Builtin::Lwrite,
             }),
             (0x70, 0x5) => Ok(Instruction::BOOL {
                 value: self.next::<u8>()? != 0,
@@ -176,6 +183,10 @@ impl Decoder {
             Instruction::STRING { index } => {
                 buf.push(0x11);
                 buf.extend(&index.to_le_bytes());
+            }
+            Instruction::TUPLE { n } => {
+                buf.push(0x12);
+                buf.extend(&n.to_le_bytes());
             }
             Instruction::STI => buf.push(0x13),
             Instruction::STA => buf.push(0x14),
