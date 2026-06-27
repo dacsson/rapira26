@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 bitvec = "1.0.1"
 clap = { version = "4.5.55", features = ["derive"] }
+libc = "0.2.186"
 vm-core = { path = "../vm-core" }
 
 [build-dependencies]

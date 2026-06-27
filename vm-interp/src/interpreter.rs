@@ -9,14 +9,9 @@ use crate::{
     RAP_subtract,
 };
 use core::array;
+use libc::puts;
 use vm_core::bytecode::{Builtin, Instruction, Op, UnaryOp};
 use vm_core::decoder::{Decoder, DecoderError};
-
-// libc; the runtime stringifies into a malloc'd C string which we print as-is.
-// `puts` appends a newline, giving one Rapira `вывод` per line.
-unsafe extern "C" {
-    fn puts(s: *const core::ffi::c_char) -> core::ffi::c_int;
-}
 
 const MAX_SEXP_TAGLEN: usize = 10;
 
@@ -523,14 +518,9 @@ impl Interpreter {
                 let obj = self.pop()?;
 
                 unsafe {
-                    // The runtime renders the value (numbers, да/нет, ...) into a
-                    // malloc'd C string; `puts` prints it followed by a newline.
-                    // The string is intentionally leaked for now.
                     puts(RAP_stringify_object(obj.raw()));
                 }
 
-                // `вывод` is an expression in the bytecode (no DROP follows), so
-                // the printed value stays on the operand stack.
                 self.push(obj)?;
             }
             Builtin::Lstring => {
