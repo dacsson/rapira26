@@ -9,11 +9,6 @@ CFLAGS = -fPIC
 
 all: $(LIB_DIR)/librapruntime.a
 
-# librapruntime.a leaves `runtime_error_description` (used by RAP_fatal_error)
-# undefined; it is resolved at final-binary link time by the `raperr` crate.
-# The C backend links raperr's staticlib; the VM consumes raperr as a cargo
-# rlib dependency (see cli/Cargo.toml) so the Rust std is shared rather than
-# duplicated.
 $(LIB_DIR)/librapruntime.a: $(OBJS) | $(LIB_DIR)
 	ar rcs $@ $(OBJS)
 
