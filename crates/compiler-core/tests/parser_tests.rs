@@ -763,84 +763,84 @@ fn parse_field_access() {
 
 #[test]
 fn parse_example_01_output_and_literals() {
-    let source = std::fs::read_to_string("../examples/01_output_and_literals.rap").unwrap();
+    let source = std::fs::read_to_string("../../examples/01_output_and_literals.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
 fn parse_example_02_arithmetic() {
-    let source = std::fs::read_to_string("../examples/02_arithmetic.rap").unwrap();
+    let source = std::fs::read_to_string("../../examples/02_arithmetic.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
 fn parse_example_05_conditionals() {
-    let source = std::fs::read_to_string("../examples/05_conditionals.rap").unwrap();
+    let source = std::fs::read_to_string("../../examples/05_conditionals.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
 fn parse_example_06_loops() {
-    let source = std::fs::read_to_string("../examples/06_loops.rap").unwrap();
+    let source = std::fs::read_to_string("../../examples/06_loops.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
 fn parse_example_07_procedures() {
-    let source = std::fs::read_to_string("../examples/07_procedures.rap").unwrap();
+    let source = std::fs::read_to_string("../../examples/07_procedures.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
 fn parse_example_08_functions() {
-    let source = std::fs::read_to_string("../examples/08_functions.rap").unwrap();
+    let source = std::fs::read_to_string("../../examples/08_functions.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
 fn parse_example_03_text_operations() {
-    let source = std::fs::read_to_string("../examples/03_text_operations.rap").unwrap();
+    let source = std::fs::read_to_string("../../examples/03_text_operations.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
 fn parse_example_04_tuple_operations() {
-    let source = std::fs::read_to_string("../examples/04_tuple_operations.rap").unwrap();
+    let source = std::fs::read_to_string("../../examples/04_tuple_operations.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
 fn parse_example_09_scoping() {
-    let source = std::fs::read_to_string("../examples/09_scoping.rap").unwrap();
+    let source = std::fs::read_to_string("../../examples/09_scoping.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
 fn parse_example_10_return_parameters() {
-    let source = std::fs::read_to_string("../examples/10_return_parameters.rap").unwrap();
+    let source = std::fs::read_to_string("../../examples/10_return_parameters.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
 fn parse_example_11_type_checks() {
-    let source = std::fs::read_to_string("../examples/11_type_checks.rap").unwrap();
+    let source = std::fs::read_to_string("../../examples/11_type_checks.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
 fn parse_example_12_spec_examples() {
-    let source = std::fs::read_to_string("../examples/12_spec_examples.rap").unwrap();
+    let source = std::fs::read_to_string("../../examples/12_spec_examples.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
 fn parse_example_13_input() {
-    let source = std::fs::read_to_string("../examples/13_input.rap").unwrap();
+    let source = std::fs::read_to_string("../../examples/13_input.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
 fn parse_example_14_user_types() {
-    let source = std::fs::read_to_string("../examples/14_user_types.rap").unwrap();
+    let source = std::fs::read_to_string("../../examples/14_user_types.rap").unwrap();
     let _program = parse(&source);
 }

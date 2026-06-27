@@ -4,11 +4,11 @@ use std::path::PathBuf;
 fn main() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     // let wrapper_header = format!("{manifest_dir}/../runtime-c/rt.h");
-    let wrapper_header = format!("{manifest_dir}/../runtime/runtime.h");
+    let wrapper_header = format!("{manifest_dir}/../../runtime/runtime.h");
 
     // Tell cargo to look for shared libraries in the specified directory
     // println!("cargo:rustc-link-search={manifest_dir}/../runtime-c/");
-    println!("cargo:rustc-link-search={manifest_dir}/../runtime/lib");
+    println!("cargo:rustc-link-search={manifest_dir}/../../runtime/lib");
 
     // Tell cargo to tell rustc to link the system bzip2
     // shared library.
