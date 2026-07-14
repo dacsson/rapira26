@@ -32,7 +32,7 @@ pub struct InstructionTrace {
 }
 
 const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), InterpreterError>;
-    28] = [
+    29] = [
     Interpreter::eval_nop,
     Interpreter::eval_end,
     Interpreter::eval_end, // ret
@@ -61,6 +61,7 @@ const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), In
     Interpreter::eval_unary,
     Interpreter::eval_constf,
     Interpreter::eval_tuple,
+    Interpreter::eval_null,
 ];
 
 pub struct Interpreter {
@@ -1124,6 +1125,16 @@ impl Interpreter {
         }
 
         self.push(obj)?;
+
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
+
+        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+    }
+
+    /// Push null value on the operand stack
+    fn eval_null(&mut self, _: Instruction) -> Result<(), InterpreterError> {
+        self.push(Object::new_null())?;
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;

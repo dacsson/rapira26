@@ -63,6 +63,9 @@ impl BcGen {
                         });
                     }
                 }
+                Literal::Null => {
+                    instrs.push(Instruction::NULL);
+                }
                 _ => panic!("Not implemented: {:?}", lit),
             },
             Expr::BinaryOp {

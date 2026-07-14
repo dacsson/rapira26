@@ -1,7 +1,8 @@
 //! Interpreter Objet type description
 
 use crate::{
-    RAP_TAG_MASK, RAP_Value, RAP_create_float_obj, RAP_create_text_obj, RAP_create_tuple_obj, isPtr,
+    RAP_TAG_MASK, RAP_Value, RAP_create_float_obj, RAP_create_null_obj, RAP_create_text_obj,
+    RAP_create_tuple_obj, isPtr,
 };
 
 /// A wrapper around RAP_VALUE defined in runtime
@@ -62,6 +63,11 @@ impl Object {
         let items = elements.as_mut_ptr() as *mut RAP_Value;
 
         unsafe { Object(RAP_create_tuple_obj(n, items)) }
+    }
+
+    /// Create a new null object
+    pub fn new_null() -> Self {
+        unsafe { Object(RAP_create_null_obj()) }
     }
 
     /// Extract the integer from a SMI. Mirrors `RAP_SMI_VALUE`.
