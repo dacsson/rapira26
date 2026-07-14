@@ -162,6 +162,7 @@ impl Decoder {
             (0x70, 0x5) => Ok(Instruction::BOOL {
                 value: self.next::<u8>()? != 0,
             }),
+            (0x70, 0x6) => Ok(Instruction::NULL),
             _ => Err(DecoderError::InvalidOpcode(byte)),
         }
     }
@@ -281,6 +282,9 @@ impl Decoder {
             Instruction::BOOL { value } => {
                 buf.push(0x75);
                 buf.extend((*value as u8).to_le_bytes());
+            }
+            Instruction::NULL => {
+                buf.push(0x76);
             }
             _ => return Err(DecoderError::InvalidInstruction(instruction.clone())),
         }

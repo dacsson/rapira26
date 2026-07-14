@@ -196,6 +196,8 @@ pub enum Instruction {
     TUPLE {
         n: i32,
     },
+    /// Push null value on the operand stack
+    NULL,
 }
 
 /// Usefull feature to convert subopcode of
@@ -389,6 +391,7 @@ impl Instruction {
             Instruction::UNARY { op } => format!("UNARY {:#?}", op),
             Instruction::CONSTF { value } => format!("CONSTF {}", value),
             Instruction::TUPLE { n } => format!("TUPLE {}", n),
+            Instruction::NULL => String::from("NULL"),
         }
     }
 

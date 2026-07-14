@@ -108,6 +108,8 @@ fn assert_rap_output(filename: &str) {
     let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
+        .parent()
+        .unwrap()
         .to_path_buf();
     let rap_path = project_root.join("examples").join(filename);
 
