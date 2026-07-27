@@ -3,9 +3,10 @@
 use crate::frame::FrameMetadata;
 use crate::object::{Object, ObjectError};
 use crate::{
-    __gc_init, __gc_stack_bottom, __gc_stack_top, RAP_add, RAP_and, RAP_divide, RAP_equal,
-    RAP_greater_or_equal, RAP_greater_than, RAP_input_value, RAP_length, RAP_less_or_equal,
-    RAP_less_than, RAP_modulo, RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or,
+    __gc_init, __gc_stack_bottom, __gc_stack_top, RAP_abs, RAP_add, RAP_and, RAP_divide, RAP_equal,
+    RAP_floor, RAP_floor_divide, RAP_greater_or_equal, RAP_greater_than, RAP_index_of,
+    RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than, RAP_modulo, RAP_multiply,
+    RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_power, RAP_round, RAP_sign, RAP_sqrt,
     RAP_stringify_object, RAP_subtract,
 };
 use core::array;
@@ -547,6 +548,34 @@ impl Interpreter {
                 //     )?;
                 // }
             }
+            Builtin::Abs | Builtin::Sign | Builtin::Sqrt | Builtin::Floor | Builtin::Round => {
+                if n != 1 {
+                    return Err(InterpreterError::NotEnoughArguments(
+                        "unary arithmetic builtin",
+                    ));
+                }
+                let value = self.pop()?;
+                let result = unsafe {
+                    match name {
+                        Builtin::Abs => RAP_abs(value.raw()),
+                        Builtin::Sign => RAP_sign(value.raw()),
+                        Builtin::Sqrt => RAP_sqrt(value.raw()),
+                        Builtin::Floor => RAP_floor(value.raw()),
+                        Builtin::Round => RAP_round(value.raw()),
+                        _ => unreachable!(),
+                    }
+                };
+                self.push(Object::new(result))?;
+            }
+            Builtin::Index => {
+                if n != 2 {
+                    return Err(InterpreterError::NotEnoughArguments("индекс"));
+                }
+                let haystack = self.pop()?;
+                let needle = self.pop()?;
+                let result = unsafe { RAP_index_of(needle.raw(), haystack.raw()) };
+                self.push(Object::new(result))?;
+            }
         }
 
         let encoding = self.decoder.next::<u8>()?;
@@ -1041,7 +1070,7 @@ impl Interpreter {
         let right = self.pop()?;
         let left = self.pop()?;
 
-        if matches!(op, Op::DIV | Op::MOD) && right.unbox() == 0 {
+        if matches!(op, Op::DIV | Op::MOD | Op::IDIV) && right.unbox() == 0 {
             return Err(InterpreterError::DivisionByZero);
         }
 
@@ -1060,6 +1089,8 @@ impl Interpreter {
                 Op::NEQ => RAP_not_equal(left.raw(), right.raw()),
                 Op::AND => RAP_and(left.raw(), right.raw()),
                 Op::OR => RAP_or(left.raw(), right.raw()),
+                Op::IDIV => RAP_floor_divide(left.raw(), right.raw()),
+                Op::POW => RAP_power(left.raw(), right.raw()),
             }
         };
 

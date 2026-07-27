@@ -74,7 +74,7 @@ impl Decoder {
 
         match (opcode, subopcode) {
             (0x00, 0x0) => Ok(Instruction::NOP),
-            (0x00, _) if (0x1..=0xd).contains(&subopcode) => Ok(Instruction::BINOP {
+            (0x00, _) if (0x1..=0xf).contains(&subopcode) => Ok(Instruction::BINOP {
                 op: Op::try_from(subopcode).map_err(|_| DecoderError::from(byte))?,
             }),
             (0x00, _) => Err(DecoderError::from(byte)),
@@ -163,6 +163,10 @@ impl Decoder {
                 value: self.next::<u8>()? != 0,
             }),
             (0x70, 0x6) => Ok(Instruction::NULL),
+            (0x70, 0x7..=0xc) => Ok(Instruction::CALLBUILTIN {
+                n: self.next::<i32>()?,
+                name: Builtin::try_from(subopcode).map_err(|_| DecoderError::from(byte))?,
+            }),
             _ => Err(DecoderError::InvalidOpcode(byte)),
         }
     }

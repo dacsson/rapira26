@@ -3,14 +3,15 @@
 #include "runtime.h"
 #include "runtime_internal.h"
 
-#define RAP_FATAL_TYPE_OP_ERR(opname, a, b) do { \
-  const char* type_a = RAP_get_type_name(a); \
-  const char* type_b = RAP_get_type_name(b); \
-  char err_buf[256]; \
-  snprintf(err_buf, sizeof(err_buf), \
-    "Неподдерживаемые типы для " opname ": %s и %s", type_a, type_b); \
-  RAP_fatal_error(err_buf); \
-} while(0)
+#define RAP_FATAL_TYPE_OP_ERR(opname, a, b)                                    \
+  do {                                                                         \
+    const char *type_a = RAP_get_type_name(a);                                 \
+    const char *type_b = RAP_get_type_name(b);                                 \
+    char err_buf[256];                                                         \
+    snprintf(err_buf, sizeof(err_buf),                                         \
+             "Неподдерживаемые типы для " opname ": %s и %s", type_a, type_b); \
+    RAP_fatal_error(err_buf);                                                  \
+  } while (0)
 
 // Integer operations
 
@@ -112,7 +113,8 @@ RAP_Value RAP_add(RAP_Value a, RAP_Value b) {
   else if (RAP_IS_SLICE(a) && RAP_IS_SLICE(b)) {
     RAP_Value materialized_a = RAP_materialize_slice(RAP_PTR_VALUE(a));
     RAP_Value materialized_b = RAP_materialize_slice(RAP_PTR_VALUE(b));
-    RAP_Value result = RAP_append_tuple(RAP_PTR_VALUE(materialized_a), RAP_PTR_VALUE(materialized_b));
+    RAP_Value result = RAP_append_tuple(RAP_PTR_VALUE(materialized_a),
+                                        RAP_PTR_VALUE(materialized_b));
     RAP_free_object(RAP_PTR_VALUE(materialized_a));
     RAP_free_object(RAP_PTR_VALUE(materialized_b));
     return result;
@@ -248,6 +250,24 @@ RAP_Value RAP_divide(RAP_Value a, RAP_Value b) {
   }
 
   RAP_FATAL_TYPE_OP_ERR("деления", a, b);
+}
+
+RAP_Value RAP_floor_divide(RAP_Value a, RAP_Value b) {
+  if (RAP_IS_SMI(a) && RAP_IS_SMI(b)) {
+    int64_t av = RAP_SMI_VALUE(a);
+    int64_t bv = RAP_SMI_VALUE(b);
+    if (bv == 0)
+      RAP_fatal_error("Деление на ноль");
+
+    int64_t quotient = av / bv;
+    int64_t remainder = av % bv;
+    if (remainder != 0 && ((remainder < 0) != (bv < 0)))
+      quotient--;
+
+    return RAP_create_int_obj(quotient);
+  }
+
+  RAP_FATAL_TYPE_OP_ERR("целочисленного деления", a, b);
 }
 
 RAP_Value RAP_less_than(RAP_Value a, RAP_Value b) {

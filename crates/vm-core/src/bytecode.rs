@@ -6,19 +6,21 @@ pub const LWRITE_NEWLINE_MASK: i32 = LWRITE_NEWLINE_FLAG - 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub enum Op {
-    ADD, // +
-    SUB, // -
-    MUL, // *
-    DIV, // /
-    MOD, // %
-    LT,  // <
-    LEQ, // <=
-    GT,  // >
-    GEQ, // >=
-    EQ,  // ==
-    NEQ, // !=
-    AND, // &&, Tests if both integer operands are non-zero
-    OR,  // !!, Tests if either of the operands is non-zero.
+    ADD,  // +
+    SUB,  // -
+    MUL,  // *
+    DIV,  // /
+    MOD,  // %
+    LT,   // <
+    LEQ,  // <=
+    GT,   // >
+    GEQ,  // >=
+    EQ,   // ==
+    NEQ,  // !=
+    AND,  // &&, Tests if both integer operands are non-zero
+    OR,   // !!, Tests if either of the operands is non-zero.
+    IDIV, // //, integer floor division
+    POW,  // **
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
@@ -43,13 +45,19 @@ pub enum CompareJumpKind {
 }
 
 /// Builtin functions
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub enum Builtin {
     Lread,
     Lwrite,
     Llength,
     Lstring, // Load string from string table
     Barray,
+    Abs,
+    Sign,
+    Sqrt,
+    Floor,
+    Round,
+    Index,
 }
 
 /// A description of the captured variables of a closure.
@@ -220,6 +228,8 @@ impl TryFrom<u8> for Op {
             0xb => Ok(Op::NEQ),
             0xc => Ok(Op::AND),
             0xd => Ok(Op::OR),
+            0xe => Ok(Op::IDIV),
+            0xf => Ok(Op::POW),
             _ => Err(()),
         }
     }
@@ -251,6 +261,12 @@ impl TryFrom<u8> for Builtin {
             0x2 => Ok(Builtin::Llength),
             0x3 => Ok(Builtin::Lstring),
             0x4 => Ok(Builtin::Barray),
+            0x7 => Ok(Builtin::Abs),
+            0x8 => Ok(Builtin::Sign),
+            0x9 => Ok(Builtin::Sqrt),
+            0xa => Ok(Builtin::Floor),
+            0xb => Ok(Builtin::Round),
+            0xc => Ok(Builtin::Index),
             _ => Err(()),
         }
     }
@@ -296,6 +312,8 @@ impl From<&Op> for &i32 {
             Op::NEQ => &10,
             Op::AND => &11,
             Op::OR => &12,
+            Op::IDIV => &13,
+            Op::POW => &14,
         }
     }
 }
@@ -328,6 +346,12 @@ impl From<&Builtin> for &i32 {
             Builtin::Llength => &3,
             Builtin::Lstring => &4,
             Builtin::Barray => &5,
+            Builtin::Abs => &8,
+            Builtin::Sign => &9,
+            Builtin::Sqrt => &10,
+            Builtin::Floor => &11,
+            Builtin::Round => &12,
+            Builtin::Index => &13,
         }
     }
 }
