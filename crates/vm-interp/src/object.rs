@@ -4,6 +4,7 @@ use crate::{
     RAP_TAG_MASK, RAP_Value, RAP_create_float_obj, RAP_create_null_obj, RAP_create_text_obj,
     RAP_create_tuple_obj, isPtr,
 };
+use core::ffi::CStr;
 
 /// A wrapper around RAP_VALUE defined in runtime
 ///
@@ -52,9 +53,8 @@ impl Object {
     }
 
     /// Create a new text object
-    pub fn new_string(value: &[u8]) -> Self {
-        // TODO: cast is unsafe
-        unsafe { Object(RAP_create_text_obj(value.as_ptr() as *const i8)) }
+    pub fn new_string(value: &CStr) -> Self {
+        unsafe { Object(RAP_create_text_obj(value.as_ptr())) }
     }
 
     /// Create a new tuple object
