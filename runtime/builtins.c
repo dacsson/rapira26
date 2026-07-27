@@ -12,7 +12,9 @@ RAP_Value RAP_abs(RAP_Value a) {
 }
 
 RAP_Value RAP_sqrt(RAP_Value a) {
-  if (RAP_IS_SMI(a) || RAP_IS_FLOAT(a)) {
+  if (RAP_IS_SMI(a)) {
+    return RAP_create_float_obj(sqrt((double)RAP_SMI_VALUE(a)));
+  } else if (RAP_IS_FLOAT(a)) {
     return RAP_create_float_obj(sqrt(RAP_GET_FLOAT_VAL(a)));
   }
   RAP_fatal_error("Неподдерживаемые типы для квадратного корня");

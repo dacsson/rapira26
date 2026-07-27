@@ -95,7 +95,10 @@ RAP_Value RAP_modulo(RAP_Value a, RAP_Value b);
 RAP_Value RAP_add(RAP_Value a, RAP_Value b);
 RAP_Value RAP_subtract(RAP_Value a, RAP_Value b);
 RAP_Value RAP_multiply(RAP_Value a, RAP_Value b);
+/// Returns float obj
 RAP_Value RAP_divide(RAP_Value a, RAP_Value b);
+/// An integer division, returns int object
+RAP_Value RAP_floor_divide(RAP_Value a, RAP_Value b);
 RAP_Value RAP_length(RAP_Value a);
 RAP_Value RAP_negate(RAP_Value a);
 RAP_Value RAP_power(RAP_Value a, RAP_Value b);
@@ -192,8 +195,8 @@ RAP_Value RAP_get_objects_refcount(RAP_Value obj);
 
 void RAP_free_main_frame(struct RAP_CallFrame *frame);
 
-const char* RAP_get_type_name(RAP_Value val);
+const char *RAP_get_type_name(RAP_Value val);
 
-const char* RAP_type_to_string(RAP_ObjectTag tag);
+const char *RAP_type_to_string(RAP_ObjectTag tag);
 
 #endif // RAPIRA_RUNTIME_H

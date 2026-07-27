@@ -19,6 +19,18 @@ use crate::{
     module::Module,
 };
 
+const BUILTIN_FUNCS: [(&str, Builtin); 9] = [
+    ("abs", Builtin::Abs),
+    ("абс", Builtin::Abs),
+    ("sign", Builtin::Sign),
+    ("знак", Builtin::Sign),
+    ("корень", Builtin::Sqrt),
+    ("sqrt", Builtin::Sqrt),
+    ("целч", Builtin::Floor),
+    ("окрч", Builtin::Round),
+    ("индекс", Builtin::Index),
+];
+
 /// Bytecode generator for the rapira virtual machine
 pub struct BcGen {
     bytefile: Bytefile,
@@ -66,7 +78,6 @@ impl BcGen {
                 Literal::Null => {
                     instrs.push(Instruction::NULL);
                 }
-                _ => panic!("Not implemented: {:?}", lit),
             },
             Expr::BinaryOp {
                 operator,
@@ -115,6 +126,27 @@ impl BcGen {
                 instrs.push(Instruction::TUPLE {
                     n: elements.len() as i32,
                 });
+            }
+            Expr::FunctionCall {
+                function,
+                arguments,
+            } => {
+                let Expr::Name(name) = &function.node else {
+                    panic!("Anonymous functions not implemented");
+                };
+
+                if let Some(&(_, builtin)) = BUILTIN_FUNCS.iter().find(|(n, _)| name == n) {
+                    // A builtin call
+                    for argument in arguments {
+                        instrs.extend(self.emit_expr(argument));
+                    }
+                    instrs.push(Instruction::CALLBUILTIN {
+                        name: builtin, // why do need to clone this?
+                        n: arguments.len() as i32,
+                    });
+                } else {
+                    panic!("Function call not implemented");
+                }
             }
             _ => panic!("Not implemented: {:?}", expr),
         }
@@ -196,10 +228,10 @@ impl BcGen {
 
     fn ast_binop_to_vm_op(&self, operator: &BinaryOperator) -> Op {
         match operator {
-            BinaryOperator::Power => panic!("POWER binop not implemented!"),
+            BinaryOperator::Power => Op::POW,
             BinaryOperator::Multiply => Op::MUL,
             BinaryOperator::Divide => Op::DIV,
-            BinaryOperator::IntegerDivide => Op::DIV,
+            BinaryOperator::IntegerDivide => Op::IDIV,
             BinaryOperator::Remainder => Op::MOD,
             BinaryOperator::Add => Op::ADD,
             BinaryOperator::Subtract => Op::SUB,

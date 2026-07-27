@@ -447,7 +447,9 @@ mod tests {
 
         assert_eq!(bytefile.find_string_offset(""), Some(empty_offset));
         assert_eq!(
-            bytefile.get_string_at_offset(empty_offset as usize).unwrap(),
+            bytefile
+                .get_string_at_offset(empty_offset as usize)
+                .unwrap(),
             b"\0"
         );
     }
