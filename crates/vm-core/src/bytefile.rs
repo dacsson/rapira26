@@ -4,7 +4,7 @@ use crate::bytecode::Instruction;
 use crate::decoder::{Decoder, DecoderError};
 use std::ffi::CString;
 use std::fmt::Display;
-use std::io::{BufRead, BufReader, Cursor, Read, Seek};
+use std::io::{BufRead, BufReader, Cursor, Read};
 
 // Memory layout of the bytecode file
 // +------------------------------------+
@@ -104,26 +104,19 @@ impl Bytefile {
 
     /// Returns offset of the given string in the string table, if found
     pub fn find_string_offset(&self, string: &str) -> Option<u32> {
-        let mut reader = BufReader::new(Cursor::new(&self.string_table));
-        let mut curr_offset = 0;
+        let mut offset = 0;
 
-        for i in 0..self.stringtab_size {
-            let mut buff = vec![];
-            reader.read_until(0x00, &mut buff).unwrap_or_default();
+        while offset < self.string_table.len() {
+            let remaining = &self.string_table[offset..];
+            let terminator = remaining.iter().position(|&byte| byte == 0)?;
 
-            // Get rid of the null byte at the end, so we can
-            // compare with Rust string
-            if buff.len() > 0 && buff[buff.len() - 1] == 0x00 {
-                buff.pop();
+            if &remaining[..terminator] == string.as_bytes() {
+                return Some(offset as u32);
             }
 
-            if buff == string.as_bytes() {
-                return Some(curr_offset);
-            }
-
-            // TODO: send err
-            curr_offset = reader.stream_position().unwrap_or_default() as u32;
+            offset += terminator + 1;
         }
+
         None
     }
 
@@ -440,5 +433,22 @@ mod tests {
         assert_eq!(String::from_utf8(main_str)?, "main\0");
 
         Ok(())
+    }
+
+    #[test]
+    fn empty_string_is_not_found_at_end_of_table() {
+        let mut bytefile = Bytefile::new();
+        bytefile.add_string("main".to_string());
+
+        assert_eq!(bytefile.find_string_offset(""), None);
+
+        let empty_offset = bytefile.add_string(String::new());
+        bytefile.add_string("following".to_string());
+
+        assert_eq!(bytefile.find_string_offset(""), Some(empty_offset));
+        assert_eq!(
+            bytefile.get_string_at_offset(empty_offset as usize).unwrap(),
+            b"\0"
+        );
     }
 }

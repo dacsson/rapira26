@@ -9,6 +9,7 @@ use crate::{
     RAP_stringify_object, RAP_subtract,
 };
 use core::array;
+use core::ffi::CStr;
 use vm_core::bytecode::{
     Builtin, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, Op, UnaryOp,
 };
@@ -1001,13 +1002,14 @@ impl Interpreter {
             return Err(InterpreterError::NotEnoughArguments("STRING"));
         };
 
-        let string = self
+        let string_bytes = self
             .decoder
             .bf
             .get_string_at_offset(index as usize)
             .map_err(|_| InterpreterError::StringIndexOutOfBounds)?;
+        let string = CStr::from_bytes_with_nul(string_bytes)
+            .map_err(|_| InterpreterError::InvalidCString)?;
 
-        // TODO: errors can happen
         self.push(Object::new_string(string))?;
 
         let encoding = self.decoder.next::<u8>()?;
