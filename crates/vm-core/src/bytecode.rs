@@ -58,6 +58,11 @@ pub enum Builtin {
     Floor,
     Round,
     Index,
+    /// Create a slice. Here - `n` is a bounds bitmask:
+    /// bit 0 means `from` is on the stack, and bit 1 means `to` is on the stack.
+    /// Thus `n` ranges from 0 (`[:]`) to 3 (`[from:to]`)
+    /// TODO: this can be encoded as enum rather then numbers
+    Slice,
 }
 
 /// A description of the captured variables of a closure.
@@ -267,6 +272,7 @@ impl TryFrom<u8> for Builtin {
             0xa => Ok(Builtin::Floor),
             0xb => Ok(Builtin::Round),
             0xc => Ok(Builtin::Index),
+            0xd => Ok(Builtin::Slice),
             _ => Err(()),
         }
     }
@@ -352,6 +358,7 @@ impl From<&Builtin> for &i32 {
             Builtin::Floor => &11,
             Builtin::Round => &12,
             Builtin::Index => &13,
+            Builtin::Slice => &14,
         }
     }
 }
