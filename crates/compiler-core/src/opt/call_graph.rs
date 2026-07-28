@@ -252,7 +252,9 @@ impl CallGraph {
             Statement::Empty
             | Statement::ReturnFromProcedure
             | Statement::ReturnFromFunction(_) => Vec::new(),
-            Statement::Assignment { value, .. } => vec![value],
+            Statement::Assignment { value, .. } | Statement::Declaration { value, .. } => {
+                vec![value]
+            }
             Statement::ProcedureCall { procedure, .. } => vec![procedure],
             Statement::Conditional { condition, .. } => vec![condition],
             Statement::Selection(selection) => match selection {

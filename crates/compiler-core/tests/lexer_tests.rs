@@ -229,7 +229,7 @@ fn lex_arithmetic_operators() {
 
 #[test]
 fn lex_comparison_operators() {
-    let tokens = tokenize("= /= < > <= >=");
+    let tokens = tokenize("== /= < > <= >=");
     assert_eq!(
         tokens,
         vec![
@@ -244,8 +244,14 @@ fn lex_comparison_operators() {
 }
 
 #[test]
-fn lex_assignment() {
+fn lex_declare() {
     let tokens = tokenize(":=");
+    assert_eq!(tokens, vec![Token::Declare]);
+}
+
+#[test]
+fn lex_assign() {
+    let tokens = tokenize("=");
     assert_eq!(tokens, vec![Token::Assign]);
 }
 
@@ -361,7 +367,20 @@ fn lex_assignment_statement() {
         tokens,
         vec![
             Token::Ident("X".to_string()),
-            Token::Assign,
+            Token::Declare,
+            Token::Integer(5),
+        ]
+    );
+}
+
+#[test]
+fn lex_declaration_statement() {
+    let tokens = tokenize("X := 5");
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Ident("X".to_string()),
+            Token::Declare,
             Token::Integer(5),
         ]
     );
@@ -430,7 +449,7 @@ fn lex_tuple_literal() {
 
 #[test]
 fn lex_complex_expression() {
-    let tokens = tokenize("N /% M = 0");
+    let tokens = tokenize("N /% M == 0");
     assert_eq!(
         tokens,
         vec![

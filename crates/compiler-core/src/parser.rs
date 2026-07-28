@@ -474,7 +474,7 @@ impl<'input> Parser<'input> {
         Ok(Spannable::new(stmt.node, (pos_start, pos_end)))
     }
 
-    /// Parse a statement starting with an identifier: assignment or procedure call.
+    /// Parse a statement starting with an identifier
     fn parse_ident_statement(&mut self) -> Result<Spannable<Statement>, ParseError> {
         let name = self.expect_ident()?;
         let start_pos = self.positions().0;
@@ -494,7 +494,20 @@ impl<'input> Parser<'input> {
                     (start_pos, end_pos),
                 ))
             }
-            // NAME := expr — simple assignment
+            // NAME := expr — variable declaration
+            Some(Token::Declare) => {
+                self.advance();
+                let value = self.parse_expression()?;
+                let end_pos = self.positions().1;
+                Ok(Spannable::new(
+                    Statement::Declaration {
+                        target: Spannable::new(LValue::Name(name), (start_pos, end_pos)),
+                        value: Box::new(value),
+                    },
+                    (start_pos, end_pos),
+                ))
+            }
+            // NAME = expr — assignment
             Some(Token::Assign) => {
                 self.advance();
                 let value = self.parse_expression()?;
@@ -507,7 +520,7 @@ impl<'input> Parser<'input> {
                     (start_pos, end_pos),
                 ))
             }
-            // EXPR.FIELD := expr - mutating a field
+            // EXPR.FIELD = expr - mutating a field
             Some(Token::Dot) => {
                 self.advance();
                 let field = self.expect_ident()?;
@@ -528,7 +541,7 @@ impl<'input> Parser<'input> {
                     (start_pos, end_pos),
                 ))
             }
-            // NAME[...] := expr — subscript/slice assignment
+            // NAME[...] = expr — subscript/slice assignment
             Some(Token::LBracket) => {
                 self.advance(); // consume [
                 let target = self.parse_lvalue_subscript_or_slice(name)?;
