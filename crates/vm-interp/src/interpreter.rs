@@ -12,7 +12,7 @@ use crate::{
 use core::array;
 use core::ffi::CStr;
 use vm_core::bytecode::{
-    Builtin, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, Op, UnaryOp,
+    Builtin, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, Op, UnaryOp, ValueRel,
 };
 use vm_core::decoder::{Decoder, DecoderError};
 
@@ -95,6 +95,7 @@ impl Interpreter {
         }
 
         // Emulating call to main
+        // TODO: is this needed?
         operand_stack.0[global_areas_size] = Object::new_empty(); // CLOSURE_OBJ
         operand_stack.0[global_areas_size + 1] = Object::new_unboxed(2); // ARGS_COUNT
         operand_stack.0[global_areas_size + 2] = Object::new_empty(); // LOCALS_COUNT
@@ -639,112 +640,110 @@ impl Interpreter {
     }
 
     fn eval_load(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        // let Instruction::LOAD { rel, index } = instr else {
-        //     return Err(InterpreterError::InvalidObjectPointer);
-        // };
+        let Instruction::LOAD { rel, index } = instr else {
+            return Err(InterpreterError::InvalidObjectPointer);
+        };
 
-        // let mut frame = FrameMetadata::get_from_stack(&self.operand_stack.0, self.frame_pointer)
-        //     .ok_or(InterpreterError::NotEnoughArguments("STORE"))?;
+        let mut frame = FrameMetadata::get_from_stack(&self.operand_stack.0, self.frame_pointer)
+            .ok_or(InterpreterError::NotEnoughArguments("STORE"))?;
 
-        // match rel {
-        //     ValueRel::Arg => {
-        //         let value = frame
-        //             .get_arg_at(&self.operand_stack.0, self.frame_pointer, index as usize)
-        //             .unwrap();
+        match rel {
+            ValueRel::Arg => {
+                let value = frame
+                    .get_arg_at(&self.operand_stack.0, self.frame_pointer, index as usize)
+                    .unwrap();
 
-        //         self.push(value.clone())?;
-        //     }
-        //     ValueRel::Capture => unsafe {
-        //         let closure = frame
-        //             .get_closure(&mut self.operand_stack.0, self.frame_pointer)
-        //             .unwrap();
+                self.push(value.clone())?;
+            }
+            ValueRel::Capture => unsafe {
+                todo!();
+                // let closure = frame
+                //     .get_closure(&mut self.operand_stack.0, self.frame_pointer)
+                //     .unwrap();
 
-        //         let to_data = rtToData(
-        //             closure
-        //                 .as_ptr_mut()
-        //                 .ok_or(InterpreterError::InvalidObjectPointer)?,
-        //         );
+                // let to_data = rtToData(
+                //     closure
+                //         .as_ptr_mut()
+                //         .ok_or(InterpreterError::InvalidObjectPointer)?,
+                // );
 
-        //         let element = get_captured_variable(&*to_data, index as usize);
+                // let element = get_captured_variable(&*to_data, index as usize);
 
-        //         self.push(Object::new_unboxed(element))?;
-        //     },
-        //     ValueRel::Global => {
-        //         let value = self.globals()[index as usize].clone();
-        //         self.push(value)?;
-        //     }
-        //     ValueRel::Local => {
-        //         let value = frame
-        //             .get_local_at(&self.operand_stack.0, self.frame_pointer, index as usize)
-        //             .unwrap();
+                // self.push(Object::new_unboxed(element))?;
+            },
+            ValueRel::Global => {
+                let value = self.globals()[index as usize].clone();
+                self.push(value)?;
+            }
+            ValueRel::Local => {
+                let value = frame
+                    .get_local_at(&self.operand_stack.0, self.frame_pointer, index as usize)
+                    .unwrap();
 
-        //         self.push(value.clone())?;
-        //     }
-        // }
+                self.push(value.clone())?;
+            }
+        }
 
-        // let encoding = self.decoder.next::<u8>()?;
-        // let instr = self.decoder.decode(encoding)?;
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
 
-        // become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
-
-        todo!();
+        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
     }
 
     fn eval_store(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        // let Instruction::STORE { rel, index } = instr else {
-        //     return Err(InterpreterError::InvalidObjectPointer);
-        // };
+        let Instruction::STORE { rel, index } = instr else {
+            return Err(InterpreterError::InvalidObjectPointer);
+        };
 
-        // let mut frame = FrameMetadata::get_from_stack(&self.operand_stack.0, self.frame_pointer)
-        //     .ok_or(InterpreterError::NotEnoughArguments("STORE"))?;
+        let mut frame = FrameMetadata::get_from_stack(&self.operand_stack.0, self.frame_pointer)
+            .ok_or(InterpreterError::NotEnoughArguments("STORE"))?;
 
-        // let value = self.pop()?;
+        let value = self.pop()?;
 
-        // match rel {
-        //     ValueRel::Arg => {
-        //         frame
-        //             .set_arg_at(
-        //                 &mut self.operand_stack.0,
-        //                 self.frame_pointer,
-        //                 index as usize,
-        //                 value.clone(),
-        //             )
-        //             .unwrap();
-        //     }
-        //     ValueRel::Capture => unsafe {
-        //         let closure = frame
-        //             .get_closure(&mut self.operand_stack.0, self.frame_pointer)
-        //             .unwrap();
+        match rel {
+            ValueRel::Arg => {
+                frame
+                    .set_arg_at(
+                        &mut self.operand_stack.0,
+                        self.frame_pointer,
+                        index as usize,
+                        value.clone(),
+                    )
+                    .unwrap();
+            }
+            ValueRel::Capture => unsafe {
+                todo!();
+                // let closure = frame
+                //     .get_closure(&mut self.operand_stack.0, self.frame_pointer)
+                //     .unwrap();
 
-        //         let to_data = rtToData(
-        //             closure
-        //                 .as_ptr_mut()
-        //                 .ok_or(InterpreterError::InvalidObjectPointer)?,
-        //         );
+                // let to_data = rtToData(
+                //     closure
+                //         .as_ptr_mut()
+                //         .ok_or(InterpreterError::InvalidObjectPointer)?,
+                // );
 
-        //         set_captured_variable(&mut *to_data, index as usize, value.raw());
-        //     },
-        //     ValueRel::Global => {
-        //         self.globals_mut()[index as usize] = value.clone();
-        //     }
-        //     ValueRel::Local => frame
-        //         .set_local_at(
-        //             &mut self.operand_stack.0,
-        //             self.frame_pointer,
-        //             index as usize,
-        //             value.clone(),
-        //         )
-        //         .unwrap(),
-        // }
+                // set_captured_variable(&mut *to_data, index as usize, value.raw());
+            },
+            ValueRel::Global => {
+                self.globals_mut()[index as usize] = value.clone();
+            }
+            ValueRel::Local => frame
+                .set_local_at(
+                    &mut self.operand_stack.0,
+                    self.frame_pointer,
+                    index as usize,
+                    value.clone(),
+                )
+                .unwrap(),
+        }
 
-        // self.push(value)?;
+        self.push(value)?;
 
-        // let encoding = self.decoder.next::<u8>()?;
-        // let instr = self.decoder.decode(encoding)?;
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
 
-        // become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
-
-        todo!();
+        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
     }
 
     fn eval_end(&mut self, _: Instruction) -> Result<(), InterpreterError> {

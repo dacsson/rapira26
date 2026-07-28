@@ -3,16 +3,19 @@
 //! The bytecode itself is an adopted/reworked version of LaMa VM bytecode.
 //! To explore the bytecode format, see the `vm-core` crate.
 
-use std::{collections::HashSet, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 use vm_core::{
-    bytecode::{Builtin, Instruction, LWRITE_NEWLINE_FLAG, Op, UnaryOp},
+    bytecode::{Builtin, Instruction, LWRITE_NEWLINE_FLAG, Op, UnaryOp, ValueRel},
     bytefile::Bytefile,
 };
 
 use crate::{
     ast::{
-        BinaryOperator, Expr, FunctionDefinition, Literal, LoopStatement, NameDeclarations,
+        BinaryOperator, Expr, FunctionDefinition, LValue, Literal, LoopStatement, NameDeclarations,
         SelectionStatement, Spannable, Statement, TypeDefinition, UnaryOperator,
     },
     codegen::{AbsolutGeneratedCodePath, CodegenTarget, ModuleMap, RunError},
@@ -31,15 +34,60 @@ const BUILTIN_FUNCS: [(&str, Builtin); 9] = [
     ("индекс", Builtin::Index),
 ];
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Context {
+    Global,
+    Function,
+}
+
+struct Env {
+    /// Locals counter
+    local_counter: i32,
+    /// Globals counter
+    global_counter: i32,
+    /// Mapping from local variable names to their bytecode index
+    locals: HashMap<String, i32>,
+    /// Mapping from global variable names to their bytecode index
+    globals: HashMap<String, i32>,
+    /// Current context (global or function)
+    context: Context,
+}
+
+impl Env {
+    /// Allocate a new variable in the current context, returning its index and
+    /// whether it is local or global
+    fn allocate_variable(&mut self, name: String) -> (i32, ValueRel) {
+        if let Context::Function = self.context {
+            let index = self.local_counter;
+            self.locals.insert(name, index);
+            self.local_counter = index + 1;
+            (index, ValueRel::Local)
+        } else {
+            let index = self.global_counter;
+            self.globals.insert(name, index);
+            self.global_counter = index + 1;
+            (index, ValueRel::Global)
+        }
+    }
+}
+
 /// Bytecode generator for the rapira virtual machine
 pub struct BcGen {
     bytefile: Bytefile,
+    env: Env,
 }
 
 impl BcGen {
     pub fn new() -> Self {
         Self {
             bytefile: Bytefile::new(),
+            env: Env {
+                local_counter: 0,
+                global_counter: 0,
+                locals: HashMap::new(),
+                globals: HashMap::new(),
+                context: Context::Global,
+            },
         }
     }
 
@@ -115,7 +163,6 @@ impl BcGen {
                             n: 0,
                         });
                     }
-                    _ => panic!("Not implemented: {:?}", operator),
                 }
             }
             Expr::TupleConstruct(elements) => {
@@ -148,6 +195,29 @@ impl BcGen {
                     panic!("Function call not implemented");
                 }
             }
+            Expr::Name(name) => {
+                // Load variable by index
+                let Some(&index) = self
+                    .env
+                    .locals
+                    .get(name)
+                    .or_else(|| self.env.globals.get(name))
+                else {
+                    panic!("Unknown local variable: {}", name);
+                };
+
+                let is_local = self.env.context == Context::Function;
+                let rel = if is_local {
+                    ValueRel::Local
+                } else {
+                    ValueRel::Global
+                };
+
+                instrs.push(Instruction::LOAD {
+                    rel: rel,
+                    index: index,
+                });
+            }
             _ => panic!("Not implemented: {:?}", expr),
         }
 
@@ -158,6 +228,17 @@ impl BcGen {
         let stmt = &stmt_span.node;
 
         match stmt {
+            Statement::Declaration { target, value } => {
+                let mut instrs = self.emit_expr(value);
+
+                let LValue::Name(name) = &target.node else {
+                    panic!("Not implemented: {:?}", target.node);
+                };
+
+                let (index, rel) = self.env.allocate_variable(name.clone());
+                instrs.push(Instruction::STORE { rel, index });
+                instrs
+            }
             Statement::Output { no_newline, values } => {
                 let mut instrs = Vec::new();
 

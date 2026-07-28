@@ -8,7 +8,7 @@ use compiler_core::pretty::pretty_parse_error;
 
 fn parse(source: &str) -> Module {
     let lexer = Lexer::new(source);
-    let mut parser = Parser::new(lexer, "", PathBuf::new());
+    let mut parser = Parser::new(lexer, PathBuf::new());
     parser.parse_program().unwrap_or_else(|e| {
         let err = pretty_parse_error(source, &"", e);
         panic!("{err}")

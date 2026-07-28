@@ -209,6 +209,7 @@ pub fn build_dependency_graph(
                     imported_functions
                         .entry(node_idx)
                         .or_default()
+                        // TODO: refactor Rc usage, rn its pointless
                         .push(Rc::new(imported_func.clone()));
                 }
             }

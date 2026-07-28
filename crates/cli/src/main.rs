@@ -128,18 +128,9 @@ fn main() {
             std::process::exit(1);
         });
 
-        let filename = file
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_else(|| {
-                eprintln!("Упс, ошибка: неизвестный моудль");
-                std::process::exit(1);
-            });
-
         let token_stream = compiler_core::lexer::Lexer::new(&source);
         let mut parser = compiler_core::parser::Parser::new(
             token_stream,
-            filename,
             file.canonicalize().unwrap_or_default(),
         );
 
