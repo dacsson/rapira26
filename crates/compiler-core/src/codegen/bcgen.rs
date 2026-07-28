@@ -218,6 +218,35 @@ impl BcGen {
                     index: index,
                 });
             }
+            Expr::Subscript { collection, index } => {
+                instrs.extend(self.emit_expr(collection));
+                instrs.extend(self.emit_expr(index));
+                instrs.push(Instruction::ELEM);
+            }
+            Expr::Slice {
+                collection,
+                from,
+                to,
+            } => {
+                instrs.extend(self.emit_expr(collection));
+
+                // For Slice, CALLBUILTIN.n is a bound-presence bitmask rather
+                // than an argument count: bit 0 = from, bit 1 = to.
+                let mut bounds = 0;
+                if let Some(from) = from {
+                    instrs.extend(self.emit_expr(from));
+                    bounds |= 1;
+                }
+                if let Some(to) = to {
+                    instrs.extend(self.emit_expr(to));
+                    bounds |= 2;
+                }
+
+                instrs.push(Instruction::CALLBUILTIN {
+                    name: Builtin::Slice,
+                    n: bounds,
+                });
+            }
             _ => panic!("Not implemented: {:?}", expr),
         }
 

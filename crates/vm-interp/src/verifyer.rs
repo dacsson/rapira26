@@ -663,6 +663,7 @@ impl StackEffect for Instruction {
                 Builtin::Lstring => 0,
                 Builtin::Abs | Builtin::Sign | Builtin::Sqrt | Builtin::Floor | Builtin::Round => 0,
                 Builtin::Index => -1,
+                Builtin::Slice => -((1 + (n & 1) + ((n >> 1) & 1)) as isize) + 1,
             },
             Instruction::CJMP { .. } => -1,
             Instruction::ELEM => -1, // pop index n container, push result
@@ -699,6 +700,7 @@ impl StackEffect for Instruction {
                 Builtin::Lstring => 1,
                 Builtin::Abs | Builtin::Sign | Builtin::Sqrt | Builtin::Floor | Builtin::Round => 1,
                 Builtin::Index => 2,
+                Builtin::Slice => (1 + (n & 1) + ((n >> 1) & 1)) as usize,
             },
             Instruction::CJMP { .. } => 1,
             Instruction::ELEM => 2,

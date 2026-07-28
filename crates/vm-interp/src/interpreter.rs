@@ -3,11 +3,11 @@
 use crate::frame::FrameMetadata;
 use crate::object::{Object, ObjectError};
 use crate::{
-    __gc_init, __gc_stack_bottom, __gc_stack_top, RAP_abs, RAP_add, RAP_and, RAP_divide, RAP_equal,
-    RAP_floor, RAP_floor_divide, RAP_greater_or_equal, RAP_greater_than, RAP_index_of,
-    RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than, RAP_modulo, RAP_multiply,
-    RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_power, RAP_round, RAP_sign, RAP_sqrt,
-    RAP_stringify_object, RAP_subtract,
+    __gc_init, __gc_stack_bottom, __gc_stack_top, RAP_abs, RAP_add, RAP_and, RAP_create_slice,
+    RAP_divide, RAP_equal, RAP_floor, RAP_floor_divide, RAP_get_tuple_item, RAP_greater_or_equal,
+    RAP_greater_than, RAP_index_of, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than,
+    RAP_modulo, RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_power, RAP_round,
+    RAP_sign, RAP_sqrt, RAP_stringify_object, RAP_subtract,
 };
 use core::array;
 use core::ffi::CStr;
@@ -19,7 +19,7 @@ use vm_core::decoder::{Decoder, DecoderError};
 const MAX_SEXP_TAGLEN: usize = 10;
 
 #[cfg(test)]
-const MAX_OPERAND_STACK_SIZE: usize = 8; // 0xffff;
+const MAX_OPERAND_STACK_SIZE: usize = 64;
 
 #[cfg(not(test))]
 const MAX_OPERAND_STACK_SIZE: usize = 1024; // 0x7fffffff;
@@ -386,60 +386,28 @@ impl Interpreter {
     }
 
     fn eval_elem(&mut self, _: Instruction) -> Result<(), InterpreterError> {
-        // let index_obj = self.pop()?;
-        // let mut obj = self.pop()?;
+        let index_obj = self.pop()?;
+        let collection = self.pop()?;
+        let index = index_obj.unbox();
 
-        // let index = index_obj.unbox() as usize;
+        // Check bounds here because the runtime accepts an unsigned index and
+        // text lookup otherwise reaches into its backing storage directly
+        let length = Object::new(unsafe { RAP_length(collection.raw()) }).unbox();
+        if index < 0 || index >= length {
+            return Err(InterpreterError::OutOfBoundsAccess(
+                index as usize,
+                length as usize,
+            ));
+        }
 
-        // // check for aggregate
-        // #[cfg(feature = "runtime_checks")]
-        // if obj.lama_type().is_none() {
-        //     return Err(InterpreterError::InvalidType(
-        //         "indexing into a type that is not an aggregate",
-        //     ));
-        // }
+        let element =
+            unsafe { RAP_get_tuple_item(collection.raw(), u32::try_from(index).unwrap()) };
+        self.push(Object::new(element))?;
 
-        // unsafe {
-        //     let length = rtUnbox(Llength(obj.as_ptr_mut().unwrap())) as usize;
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
 
-        //     // check for out of bounds access
-        //     #[cfg(feature = "runtime_checks")]
-        //     if (index_obj.unbox()) < 0 || index >= length {
-        //         return Err(InterpreterError::OutOfBoundsAccess(index, length));
-        //     }
-
-        //     let as_ptr = obj
-        //         .as_ptr_mut()
-        //         .ok_or(InterpreterError::InvalidObjectPointer)?;
-
-        //     let lama_type = obj.lama_type().unwrap();
-
-        //     if lama_type == lama_type_SEXP {
-        //         let sexp = rtToSexp(as_ptr);
-        //         let element = get_sexp_el(&*sexp, index);
-
-        //         self.push(Object::new_unboxed(element))?;
-        //     } else if lama_type == lama_type_STRING {
-        //         let contents = (*rtToData(as_ptr)).contents.as_ptr();
-
-        //         let el = contents.add(index);
-
-        //         self.push(Object::new_boxed(*el as i64))?;
-        //     } else {
-        //         let array = rtToData(as_ptr);
-        //         let element = get_array_el(&*array, index);
-
-        //         // push the boxed element onto the stack
-        //         self.push(Object::new_unboxed(element))?;
-        //     }
-        // }
-
-        // let encoding = self.decoder.next::<u8>()?;
-        // let instr = self.decoder.decode(encoding)?;
-
-        todo!();
-
-        // become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
     }
 
     fn eval_cjmp(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
@@ -575,6 +543,20 @@ impl Interpreter {
                 let haystack = self.pop()?;
                 let needle = self.pop()?;
                 let result = unsafe { RAP_index_of(needle.raw(), haystack.raw()) };
+                self.push(Object::new(result))?;
+            }
+            Builtin::Slice => {
+                // Unlike other builtins, n is not an argument count here:
+                // bit 0 says `from` was pushed, and bit 1 says `to` was pushed.
+                let to = if n & 2 != 0 { self.pop()?.unbox() } else { -1 };
+                let from = if n & 1 != 0 { self.pop()?.unbox() } else { 0 };
+                let collection = self.pop()?;
+                let to = if to < 0 {
+                    Object::new(unsafe { RAP_length(collection.raw()) }).unbox()
+                } else {
+                    to
+                };
+                let result = unsafe { RAP_create_slice(collection.raw(), from, to) };
                 self.push(Object::new(result))?;
             }
         }

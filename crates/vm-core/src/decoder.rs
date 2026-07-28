@@ -163,7 +163,7 @@ impl Decoder {
                 value: self.next::<u8>()? != 0,
             }),
             (0x70, 0x6) => Ok(Instruction::NULL),
-            (0x70, 0x7..=0xc) => Ok(Instruction::CALLBUILTIN {
+            (0x70, 0x7..=0xd) => Ok(Instruction::CALLBUILTIN {
                 n: self.next::<i32>()?,
                 name: Builtin::try_from(subopcode).map_err(|_| DecoderError::from(byte))?,
             }),
@@ -272,7 +272,9 @@ impl Decoder {
             Instruction::CALLBUILTIN { n, name } if *name != Builtin::Barray => {
                 let name_: &i32 = name.into();
                 buf.push(0x70 | (*name_ as u8) - 1);
-                if *n != 0 {
+                // Slice uses n as a bounds bitmask - 0 means
+                // `[:]`, so its zero value must still be encoded explicitly.
+                if *n != 0 || *name == Builtin::Slice {
                     buf.extend(&n.to_le_bytes());
                 }
             }
