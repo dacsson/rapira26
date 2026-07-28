@@ -85,8 +85,18 @@ pub enum Statement {
     /// Пустое предписание (например `;` или пустая строка)
     Empty,
 
-    /// variable := expression
+    /// variable = expression
+    ///
+    /// Мутирует значение переменной
     Assignment {
+        target: Spannable<LValue>,
+        value: Box<Spannable<Expr>>,
+    },
+
+    /// variable := expression
+    ///
+    /// Объявление переменной
+    Declaration {
         target: Spannable<LValue>,
         value: Box<Spannable<Expr>>,
     },

@@ -290,8 +290,20 @@ fn parse_parenthesised_expression() {
 // ── Assignment ──────────────────────────────────────────────────────────────
 
 #[test]
-fn parse_simple_assignment() {
+fn parse_simple_declaration() {
     let statement = parse_first_statement("X := 42");
+    match statement {
+        Statement::Declaration { target, value } => {
+            assert!(matches!(&target.node, LValue::Name(name) if name == "X"));
+            assert!(matches!(&value.node, Expr::Literal(Literal::Integer(42))));
+        }
+        other => panic!("expected Assignment, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_simple_assignment() {
+    let statement = parse_first_statement("X = 42");
     match statement {
         Statement::Assignment { target, value } => {
             assert!(matches!(&target.node, LValue::Name(name) if name == "X"));
@@ -303,7 +315,7 @@ fn parse_simple_assignment() {
 
 #[test]
 fn parse_subscript_assignment() {
-    let statement = parse_first_statement("X[1] := 5");
+    let statement = parse_first_statement("X[1] = 5");
     match statement {
         Statement::Assignment { target, .. } => {
             assert!(matches!(&target.node, LValue::Subscript { .. }));
@@ -314,7 +326,7 @@ fn parse_subscript_assignment() {
 
 #[test]
 fn parse_slice_assignment() {
-    let statement = parse_first_statement("X[1:3] := \"abc\"");
+    let statement = parse_first_statement("X[1:3] = \"abc\"");
     match statement {
         Statement::Assignment { target, .. } => {
             assert!(matches!(&target.node, LValue::Slice { .. }));
@@ -720,7 +732,7 @@ fn parse_complex_type_definition() {
 fn parse_field_access() {
     let program = parse("х := точечка.х");
     assert_eq!(program.toplevel.len(), 1);
-    let Statement::Assignment { target: _, value } = &program.toplevel[0].node else {
+    let Statement::Declaration { target: _, value } = &program.toplevel[0].node else {
         panic!("Expected a Statement unit");
     };
 

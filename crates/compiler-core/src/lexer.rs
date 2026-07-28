@@ -79,8 +79,9 @@ pub enum Token {
     Plus,           // +
     Minus,          // -
     Hash,           // #
-    Assign,         // :=
-    Equal,          // =
+    Assign,         // =
+    Declare,        // :=
+    Equal,          // ==
     NotEqual,       // /=
     LessOrEqual,    // <=
     GreaterOrEqual, // >=
@@ -554,12 +555,18 @@ impl<'input> Lexer<'input> {
             ':' => {
                 if self.peek_char() == Some('=') {
                     self.advance();
-                    Ok(Token::Assign)
+                    Ok(Token::Declare)
                 } else {
                     Ok(Token::Colon)
                 }
             }
-            '=' => Ok(Token::Equal),
+            '=' => match self.peek_char() {
+                Some('=') => {
+                    self.advance();
+                    Ok(Token::Equal)
+                }
+                _ => Ok(Token::Assign),
+            },
             '/' => match self.peek_char() {
                 Some('/') => {
                     self.advance();
@@ -700,8 +707,9 @@ impl std::fmt::Display for Token {
             Token::Plus => write!(f, "сложение ( `+` )"),
             Token::Minus => write!(f, "минус ( `-` )"),
             Token::Hash => write!(f, "получение длины контейнера ( `#` )"),
-            Token::Assign => write!(f, "присваивание ( `:=` )"),
-            Token::Equal => write!(f, "проверка на равенствно ( `=` )"),
+            Token::Assign => write!(f, "присваивание ( `=` )"),
+            Token::Equal => write!(f, "проверка на равенство ( `==` )"),
+            Token::Declare => write!(f, "объявление ( `:=` )"),
             Token::NotEqual => write!(f, "неравенство ( `/=` )"),
             Token::LessOrEqual => write!(f, "`<="),
             Token::GreaterOrEqual => write!(f, "`>=`"),
