@@ -9,14 +9,16 @@ use std::{
 };
 
 use vm_core::{
-    bytecode::{Builtin, Instruction, LWRITE_NEWLINE_FLAG, Op, UnaryOp, ValueRel},
+    bytecode::{
+        Builtin, CompareJumpKind, Instruction, LWRITE_NEWLINE_FLAG, Label, Op, UnaryOp, ValueRel,
+    },
     bytefile::Bytefile,
 };
 
 use crate::{
     ast::{
-        BinaryOperator, Expr, FunctionDefinition, LValue, Literal, LoopStatement, NameDeclarations,
-        SelectionStatement, Spannable, Statement, TypeDefinition, UnaryOperator,
+        BinaryOperator, Expr, FunctionDefinition, LValue, Literal, LoopHeader, LoopStatement,
+        NameDeclarations, SelectionStatement, Spannable, Statement, TypeDefinition, UnaryOperator,
     },
     codegen::{AbsolutGeneratedCodePath, CodegenTarget, ModuleMap, RunError},
     module::Module,
@@ -69,19 +71,37 @@ impl Env {
             (index, ValueRel::Global)
         }
     }
+
+    fn deallocate_variable(&mut self, name: &str) -> Option<i32> {
+        if let Context::Function = self.context {
+            self.locals.remove(name)
+        } else {
+            self.globals.remove(name)
+        }
+    }
+
+    fn find_variable(&self, name: &str) -> Option<(i32, ValueRel)> {
+        let local = self.locals.get(name).map(|id| (*id, ValueRel::Local));
+        let global = self.globals.get(name).map(|id| (*id, ValueRel::Global));
+        local.or(global)
+    }
 }
 
 /// Bytecode generator for the rapira virtual machine
 pub struct BcGen {
     bytefile: Bytefile,
     env: Env,
+    label_counter: usize,
 }
 
 impl BcGen {
     pub fn new() -> Self {
         Self {
             bytefile: Bytefile::new(),
+            label_counter: 0,
             env: Env {
+                // TODO: maybe we can use `count_locals` to
+                //       pre-allocate enough indecies?
                 local_counter: 0,
                 global_counter: 0,
                 locals: HashMap::new(),
@@ -89,6 +109,12 @@ impl BcGen {
                 context: Context::Global,
             },
         }
+    }
+
+    fn fresh_label(&mut self, prefix: &str) -> Label {
+        let name = format!("{prefix}_{}", self.label_counter);
+        self.label_counter += 1;
+        Label { name, offset: None }
     }
 
     fn emit_expr(&mut self, expr_span: &Spannable<Expr>) -> Vec<Instruction> {
@@ -192,7 +218,7 @@ impl BcGen {
                         n: arguments.len() as i32,
                     });
                 } else {
-                    panic!("Function call not implemented");
+                    todo!("Function call not implemented");
                 }
             }
             Expr::Name(name) => {
@@ -247,7 +273,6 @@ impl BcGen {
                     n: bounds,
                 });
             }
-            _ => panic!("Not implemented: {:?}", expr),
         }
 
         instrs
@@ -261,10 +286,35 @@ impl BcGen {
                 let mut instrs = self.emit_expr(value);
 
                 let LValue::Name(name) = &target.node else {
-                    panic!("Not implemented: {:?}", target.node);
+                    todo!("Not implemented: {:?}", target.node);
                 };
 
                 let (index, rel) = self.env.allocate_variable(name.clone());
+                instrs.push(Instruction::STORE { rel, index });
+                instrs
+            }
+            Statement::Assignment { target, value } => {
+                let mut instrs = self.emit_expr(value);
+
+                // let LValue::Name(name) = &target.node else {
+                //     todo!("Not implemented: {:?}", target.node);
+                // };
+
+                let name = match &target.node {
+                    LValue::Name(n) => n,
+                    LValue::Subscript { collection, index } => {
+                        let Expr::Name(n) = &collection.node else {
+                            todo!("Not implemented: {:?}", target.node);
+                        };
+                        n
+                    }
+                    _ => todo!("slice in assignment"),
+                };
+
+                let Some((index, rel)) = self.env.find_variable(name) else {
+                    todo!("unknown variable")
+                };
+
                 instrs.push(Instruction::STORE { rel, index });
                 instrs
             }
@@ -291,6 +341,113 @@ impl BcGen {
                     n,
                 };
                 instrs.push(print_instr);
+
+                instrs
+            }
+            Statement::Loop(LoopStatement {
+                header,
+                while_condition,
+                body,
+                post_condition,
+            }) => {
+                let mut instrs = Vec::new();
+
+                let LoopHeader::For {
+                    variable,
+                    from,
+                    to,
+                    step,
+                } = header
+                else {
+                    todo!("loop form {:#?}", header);
+                };
+
+                let from_expr = from.as_ref().map(|expr| self.emit_expr(expr));
+                let to_expr = to.as_ref().map(|expr| self.emit_expr(expr));
+                let step_expr = step
+                    .as_ref()
+                    .map(|expr| self.emit_expr(expr))
+                    .unwrap_or_else(|| vec![Instruction::CONST { value: 1 }]);
+
+                // TODO: we can make a helper for workin in scopes
+                //       maybe something like: `do_in_scope(||)`
+
+                let (index, rel) = self.env.allocate_variable(variable.clone());
+
+                // Declare loop variable
+                if let Some(from) = from_expr {
+                    instrs.extend(from);
+                } else {
+                    todo!("unpsecified from bound in loop")
+                }
+                instrs.push(Instruction::STORE { rel, index });
+
+                let loop_label = self.fresh_label("for_loop");
+                let end_label = self.fresh_label("for_end");
+                instrs.push(Instruction::LABEL {
+                    name: loop_label.name.clone(),
+                });
+
+                // An omitted upper bound makes the `for` loop unbounded.
+                if let Some(to) = to_expr {
+                    // step > 0 && variable <= to
+                    instrs.extend(step_expr.clone());
+                    instrs.push(Instruction::CONST { value: 0 });
+                    instrs.push(Instruction::BINOP { op: Op::GT });
+                    instrs.push(Instruction::LOAD { rel, index });
+                    instrs.extend(to.clone());
+                    instrs.push(Instruction::BINOP { op: Op::LEQ });
+                    instrs.push(Instruction::BINOP { op: Op::AND });
+
+                    // step <= 0 && variable >= to
+                    instrs.extend(step_expr.clone());
+                    instrs.push(Instruction::CONST { value: 0 });
+                    instrs.push(Instruction::BINOP { op: Op::LEQ });
+                    instrs.push(Instruction::LOAD { rel, index });
+                    instrs.extend(to);
+                    instrs.push(Instruction::BINOP { op: Op::GEQ });
+                    instrs.push(Instruction::BINOP { op: Op::AND });
+
+                    instrs.push(Instruction::BINOP { op: Op::OR });
+
+                    instrs.push(Instruction::CJMP {
+                        dest: end_label.clone(),
+                        kind: CompareJumpKind::ISZERO,
+                    });
+                }
+
+                if let Some(condition) = while_condition {
+                    instrs.extend(self.emit_expr(condition));
+                    instrs.push(Instruction::CJMP {
+                        dest: end_label.clone(),
+                        kind: CompareJumpKind::ISZERO,
+                    });
+                }
+
+                for stmt in body {
+                    instrs.extend(self.emit_statement(stmt));
+                }
+
+                if let Some(condition) = post_condition {
+                    instrs.extend(self.emit_expr(condition));
+                    instrs.push(Instruction::CJMP {
+                        dest: end_label.clone(),
+                        kind: CompareJumpKind::ISNONZERO,
+                    });
+                }
+
+                // Advance the loop variable before jumping back to the guard.
+                instrs.push(Instruction::LOAD { rel, index });
+                instrs.extend(step_expr);
+                instrs.push(Instruction::BINOP { op: Op::ADD });
+                instrs.push(Instruction::STORE { rel, index });
+                instrs.push(Instruction::JMP { dest: loop_label });
+                instrs.push(Instruction::LABEL {
+                    name: end_label.name,
+                });
+
+                // Destroy loop variable
+                self.env.deallocate_variable(variable);
 
                 instrs
             }
@@ -373,6 +530,8 @@ impl CodegenTarget for BcGen {
         // in public symbols
         self.emit_top_level_def(&module.toplevel);
 
+        // TODO: emit other constructs
+
         // Map this module path to the bytefile bits
         module_map.insert(module.path.clone(), self.bytefile.encode());
 
@@ -383,7 +542,6 @@ impl CodegenTarget for BcGen {
         &mut self,
         modules_codes: ModuleMap,
         current_dir: &PathBuf,
-        flags: &[String],
         dump: bool,
     ) -> Result<Vec<AbsolutGeneratedCodePath>, RunError> {
         let (module_path, bytefile) = modules_codes.iter().next().unwrap();
@@ -421,9 +579,7 @@ impl CodegenTarget for BcGen {
         // Emit END of function
         instructions.push(Instruction::END);
 
-        instructions.iter().for_each(|instr| {
-            self.bytefile.add_instruction(instr).unwrap();
-        });
+        self.bytefile.add_instructions(&instructions).unwrap();
     }
 
     fn emit_type_def(&mut self, type_def_span: &Spannable<TypeDefinition>) {
@@ -433,12 +589,9 @@ impl CodegenTarget for BcGen {
     fn emit_top_level_def(&mut self, top_level: &Vec<Spannable<Statement>>) {
         // Top-level is just a main function, nothing special actually
         // The important thing is that top-level is evaluated on import (if used as module)
-        // or immediately if its a main module (look at docs for more info)
+        // or immediately if its a main module
 
         let top_level_name = "main".to_string();
-        let locals = self.count_locals(top_level);
-        let begin_instr_length = self.bytefile.get_current_offset() + 1 /* 1 byte for BEGIN */ +
-            std::mem::size_of::<i32>() /* byte size of `args` */ + std::mem::size_of::<i32>() /* byte size of `locals` */;
         let top_level_offset = self.bytefile.get_current_offset();
 
         self.emit_function_def(&Spannable {

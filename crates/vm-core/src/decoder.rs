@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::bytecode::*;
 use crate::bytefile::Bytefile;
 use crate::numeric::LeBytes;
@@ -7,6 +9,7 @@ pub enum DecoderError {
     ReadingMoreThenCodeSection,
     InvalidOpcode(u8),
     InvalidInstruction(Instruction),
+    UnknownLabel(String),
 }
 
 impl std::fmt::Display for DecoderError {
@@ -20,6 +23,9 @@ impl std::fmt::Display for DecoderError {
             }
             DecoderError::InvalidInstruction(instruction) => {
                 write!(f, "Invalid instruction: {:?}", instruction)
+            }
+            DecoderError::UnknownLabel(name) => {
+                write!(f, "Unknown label: {}", name)
             }
         }
     }
@@ -90,7 +96,11 @@ impl Decoder {
             (0x10, 0x3) => Ok(Instruction::STI),
             (0x10, 0x4) => Ok(Instruction::STA),
             (0x10, 0x5) => Ok(Instruction::JMP {
-                offset: self.next::<i32>()?,
+                dest: Label {
+                    // TODO: get rid of empty str
+                    name: String::new(),
+                    offset: Some(self.next::<i32>()?),
+                },
             }),
             (0x10, 0x6) => Ok(Instruction::END),
             (0x10, 0x7) => Ok(Instruction::RET),
@@ -113,11 +123,19 @@ impl Decoder {
                 index: self.next::<i32>()?,
             }),
             (0x50, 0x0) => Ok(Instruction::CJMP {
-                offset: self.next::<i32>()?,
+                dest: Label {
+                    // TODO: get rid of empty str
+                    name: String::new(),
+                    offset: Some(self.next::<i32>()?),
+                },
                 kind: CompareJumpKind::ISZERO,
             }),
             (0x50, 0x1) => Ok(Instruction::CJMP {
-                offset: self.next::<i32>()?,
+                dest: Label {
+                    // TODO: get rid of empty str
+                    name: String::new(),
+                    offset: Some(self.next::<i32>()?),
+                },
                 kind: CompareJumpKind::ISNONZERO,
             }),
             (0x50, 0x2) => Ok(Instruction::BEGIN {
@@ -195,8 +213,15 @@ impl Decoder {
             }
             Instruction::STI => buf.push(0x13),
             Instruction::STA => buf.push(0x14),
-            Instruction::JMP { offset } => {
+            Instruction::JMP {
+                dest: Label { name, offset },
+            } => {
                 buf.push(0x15);
+
+                let Some(offset) = offset else {
+                    return Err(DecoderError::UnknownLabel(name.clone()));
+                };
+
                 buf.extend(&offset.to_le_bytes());
             }
             Instruction::END => buf.push(0x16),
@@ -224,17 +249,27 @@ impl Decoder {
                 buf.extend(&index.to_le_bytes());
             }
             Instruction::CJMP {
-                offset,
+                dest: Label { name, offset },
                 kind: CompareJumpKind::ISZERO,
             } => {
                 buf.push(0x50);
+
+                let Some(offset) = offset else {
+                    return Err(DecoderError::UnknownLabel(name.clone()));
+                };
+
                 buf.extend(&offset.to_le_bytes());
             }
             Instruction::CJMP {
-                offset,
+                dest: Label { name, offset },
                 kind: CompareJumpKind::ISNONZERO,
             } => {
                 buf.push(0x51);
+
+                let Some(offset) = offset else {
+                    return Err(DecoderError::UnknownLabel(name.clone()));
+                };
+
                 buf.extend(&offset.to_le_bytes());
             }
             Instruction::BEGIN { args, locals } => {
@@ -292,6 +327,7 @@ impl Decoder {
             Instruction::NULL => {
                 buf.push(0x76);
             }
+            Instruction::LABEL { .. } => {}
             _ => return Err(DecoderError::InvalidInstruction(instruction.clone())),
         }
 
