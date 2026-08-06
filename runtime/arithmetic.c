@@ -277,7 +277,7 @@ RAP_Value RAP_less_than(RAP_Value a, RAP_Value b) {
     return RAP_float_less_than(a, b);
   }
 
-  RAP_FATAL_TYPE_OP_ERR("сравнения", a, b);
+  RAP_FATAL_TYPE_OP_ERR("<", a, b);
 }
 
 RAP_Value RAP_less_or_equal(RAP_Value a, RAP_Value b) {
@@ -287,7 +287,7 @@ RAP_Value RAP_less_or_equal(RAP_Value a, RAP_Value b) {
     return RAP_create_logical_obj(RAP_GET_FLOAT_VAL(a) <= RAP_GET_FLOAT_VAL(b));
   }
 
-  RAP_FATAL_TYPE_OP_ERR("сравнения", a, b);
+  RAP_FATAL_TYPE_OP_ERR("<=", a, b);
 }
 
 RAP_Value RAP_greater_than(RAP_Value a, RAP_Value b) {
@@ -297,7 +297,7 @@ RAP_Value RAP_greater_than(RAP_Value a, RAP_Value b) {
     return RAP_float_greater_than(a, b);
   }
 
-  RAP_FATAL_TYPE_OP_ERR("сравнения", a, b);
+  RAP_FATAL_TYPE_OP_ERR(">", a, b);
 }
 
 RAP_Value RAP_greater_or_equal(RAP_Value a, RAP_Value b) {
@@ -307,7 +307,7 @@ RAP_Value RAP_greater_or_equal(RAP_Value a, RAP_Value b) {
     return RAP_create_logical_obj(RAP_GET_FLOAT_VAL(a) >= RAP_GET_FLOAT_VAL(b));
   }
 
-  RAP_FATAL_TYPE_OP_ERR("сравнения", a, b);
+  RAP_FATAL_TYPE_OP_ERR(">=", a, b);
 }
 
 RAP_Value RAP_equal(RAP_Value a, RAP_Value b) {
@@ -364,7 +364,7 @@ RAP_Value RAP_equal(RAP_Value a, RAP_Value b) {
     return RAP_create_logical_obj(true);
   }
 
-  RAP_FATAL_TYPE_OP_ERR("сравнения", a, b);
+  RAP_FATAL_TYPE_OP_ERR("==", a, b);
 }
 
 RAP_Value RAP_not_equal(RAP_Value a, RAP_Value b) {

@@ -11,8 +11,10 @@ use crate::{
 };
 use core::array;
 use core::ffi::CStr;
+use std::collections::HashMap;
 use vm_core::bytecode::{
-    Builtin, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, Op, UnaryOp, ValueRel,
+    Builtin, CompareJumpKind, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, Label, Op,
+    UnaryOp, ValueRel,
 };
 use vm_core::decoder::{Decoder, DecoderError};
 
@@ -34,7 +36,7 @@ pub struct InstructionTrace {
 }
 
 const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), InterpreterError>;
-    29] = [
+    30] = [
     Interpreter::eval_nop,
     Interpreter::eval_end,
     Interpreter::eval_end, // ret
@@ -64,6 +66,7 @@ const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), In
     Interpreter::eval_constf,
     Interpreter::eval_tuple,
     Interpreter::eval_null,
+    Interpreter::eval_label,
 ];
 
 pub struct Interpreter {
@@ -411,35 +414,39 @@ impl Interpreter {
     }
 
     fn eval_cjmp(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        // let Instruction::CJMP { offset, kind } = instr else {
-        //     return Err(InterpreterError::InvalidObjectPointer);
-        // };
+        let Instruction::CJMP { dest, kind } = instr else {
+            return Err(InterpreterError::InvalidObjectPointer);
+        };
 
-        // let offset_at = offset as usize;
+        let Some(offset_at) = dest.offset else {
+            return Err(InterpreterError::UnknownLabel(dest.name));
+        };
 
-        // match kind {
-        //     CompareJumpKind::ISNONZERO => {
-        //         let obj = self.pop()?;
-        //         let value = obj.unbox();
+        let obj = self.pop()?;
+        let Some(value) = obj.get_bool() else {
+            return Err(InterpreterError::InvalidType("expected Bool"));
+        };
 
-        //         if value != 0 {
-        //             self.decoder.ip = offset_at;
-        //         }
-        //     }
-        //     CompareJumpKind::ISZERO => {
-        //         let obj = self.pop()?;
-        //         let value = obj.unbox();
+        match kind {
+            CompareJumpKind::ISNONZERO => {
+                if value {
+                    self.decoder.ip = offset_at as usize;
+                }
+            }
+            CompareJumpKind::ISZERO => {
+                if !value {
+                    self.decoder.ip = offset_at as usize;
+                }
+            }
+        }
 
-        //         if value == 0 {
-        //             self.decoder.ip = offset_at;
-        //         }
-        //     }
-        // }
+        // println!(
+        //     "cjmp {:?} called to {} | {:x} | {}",
+        //     kind, offset_at, self.decoder.bf.code_section[offset_at as usize], value
+        // );
 
-        // let encoding = self.decoder.next::<u8>()?;
-        // let instr = self.decoder.decode(encoding)?;
-
-        todo!();
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
 
         become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
     }
@@ -622,6 +629,8 @@ impl Interpreter {
     }
 
     fn eval_load(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+        // println!("LOAD called at {}", self.decoder.ip);
+
         let Instruction::LOAD { rel, index } = instr else {
             return Err(InterpreterError::InvalidObjectPointer);
         };
@@ -653,17 +662,20 @@ impl Interpreter {
 
                 // self.push(Object::new_unboxed(element))?;
             },
-            ValueRel::Global => {
+            ValueRel::Global => unsafe {
                 let value = self.globals()[index as usize].clone();
+                // println!("{:#?}", CStr::from_ptr(RAP_stringify_object(value.raw())));
                 self.push(value)?;
-            }
-            ValueRel::Local => {
+            },
+            ValueRel::Local => unsafe {
                 let value = frame
                     .get_local_at(&self.operand_stack.0, self.frame_pointer, index as usize)
                     .unwrap();
 
+                // println!("{:#?}", CStr::from_ptr(RAP_stringify_object(value.raw())));
+
                 self.push(value.clone())?;
-            }
+            },
         }
 
         let encoding = self.decoder.next::<u8>()?;
@@ -673,6 +685,8 @@ impl Interpreter {
     }
 
     fn eval_store(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+        // println!("STORE called at {}", self.decoder.ip);
+
         let Instruction::STORE { rel, index } = instr else {
             return Err(InterpreterError::InvalidObjectPointer);
         };
@@ -989,22 +1003,27 @@ impl Interpreter {
     }
 
     fn eval_jmp(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        // let Instruction::JMP { offset } = instr else {
-        //     return Err(InterpreterError::NotEnoughArguments("JMP"));
-        // };
+        let Instruction::JMP { dest } = instr else {
+            return Err(InterpreterError::NotEnoughArguments("JMP"));
+        };
 
-        // // NOTE: Frame shifting is delegated to `BEGIN` instruction
+        // NOTE: Frame shifting is delegated to `BEGIN` instruction
 
-        // let offset_at = offset as usize;
+        let Some(offset_at) = dest.offset else {
+            return Err(InterpreterError::UnknownLabel(dest.name.clone()));
+        };
 
-        // self.decoder.ip = offset_at;
+        // println!(
+        //     "jmp called to {} | {:x}",
+        //     offset_at, self.decoder.bf.code_section[offset_at as usize]
+        // );
 
-        // let encoding = self.decoder.next::<u8>()?;
-        // let instr = self.decoder.decode(encoding)?;
+        self.decoder.ip = offset_at as usize;
 
-        // become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
 
-        todo!();
+        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
     }
 
     fn eval_string(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
@@ -1044,12 +1063,26 @@ impl Interpreter {
     }
 
     fn eval_binop(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+        // println!("binop called at {}", self.decoder.ip);
+
         let Instruction::BINOP { op } = instr else {
             return Err(InterpreterError::NotEnoughArguments("BINOP"));
         };
 
         let right = self.pop()?;
         let left = self.pop()?;
+
+        // unsafe {
+        //     print!(
+        //         "left: {:#?} ",
+        //         CStr::from_ptr(RAP_stringify_object(left.raw()))
+        //     );
+        //     print!(" {:#?} ", op);
+        //     println!(
+        //         "right: {:#?}",
+        //         CStr::from_ptr(RAP_stringify_object(right.raw()))
+        //     );
+        // }
 
         if matches!(op, Op::DIV | Op::MOD | Op::IDIV) && right.unbox() == 0 {
             return Err(InterpreterError::DivisionByZero);
@@ -1074,6 +1107,13 @@ impl Interpreter {
                 Op::POW => RAP_power(left.raw(), right.raw()),
             }
         };
+
+        // unsafe {
+        //     println!(
+        //         "result: {:#?} ",
+        //         CStr::from_ptr(RAP_stringify_object(result))
+        //     );
+        // }
 
         self.push(Object::new(result))?;
 
@@ -1149,6 +1189,20 @@ impl Interpreter {
     /// Push null value on the operand stack
     fn eval_null(&mut self, _: Instruction) -> Result<(), InterpreterError> {
         self.push(Object::new_null())?;
+
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
+
+        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+    }
+
+    /// Resolves a label to an offset
+    ///
+    /// FIXME: Can it appear here?
+    fn eval_label(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+        // let Instruction::LABEL { name } = instr else {
+        //     return Err(InterpreterError::InvalidOpcode(instr.discriminant()));
+        // };
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
@@ -1281,6 +1335,7 @@ pub enum InterpreterError {
     SexpTagTooLong(usize),
     DecoderError(DecoderError),
     StackOverflow,
+    UnknownLabel(String),
 }
 
 /// Convert a byte, that couldnt be incoded into an interpreter error.
@@ -1361,6 +1416,9 @@ impl core::fmt::Display for InterpreterError {
             }
             InterpreterError::StackOverflow => {
                 write!(f, "Stack overflow")
+            }
+            InterpreterError::UnknownLabel(name) => {
+                write!(f, "Unknown label: {}", name)
             }
         }
     }

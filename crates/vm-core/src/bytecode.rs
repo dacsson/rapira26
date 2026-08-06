@@ -1,5 +1,5 @@
 //! Descriptor of Lama bytecode
-use std::convert::TryFrom;
+use std::{convert::TryFrom, fmt};
 
 pub const LWRITE_NEWLINE_FLAG: i32 = 1 << 30;
 pub const LWRITE_NEWLINE_MASK: i32 = LWRITE_NEWLINE_FLAG - 1;
@@ -30,7 +30,7 @@ pub enum UnaryOp {
 }
 
 /// Scoping rule for a value
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub enum ValueRel {
     Global,
     Local,
@@ -70,6 +70,19 @@ pub enum Builtin {
 pub struct CapturedVar {
     pub rel: ValueRel,
     pub index: i32,
+}
+
+/// Represents a jump point in a bytecode
+///
+/// During compilation its a named point, but later
+/// it should be resolved into a code section offset
+/// in a bytefile
+#[derive(Debug, PartialEq, Clone, PartialOrd)]
+pub struct Label {
+    pub name: String,
+    // TODO: if interpreter resolves at runtime,
+    //       maybe offset is not needed?
+    pub offset: Option<i32>,
 }
 
 #[repr(u8)]
@@ -169,11 +182,11 @@ pub enum Instruction {
     SWAP,
     /// Jumps to the given offset
     JMP {
-        offset: i32,
+        dest: Label,
     },
     /// Set instruction pointer to offset if operand is zero/non-zero
     CJMP {
-        offset: i32,
+        dest: Label,
         kind: CompareJumpKind,
     },
     /// Look up an element of some aggregate
@@ -211,6 +224,10 @@ pub enum Instruction {
     },
     /// Push null value on the operand stack
     NULL,
+    /// Zero-width symbolic marker resolved before bytecode encoding.
+    LABEL {
+        name: String,
+    },
 }
 
 /// Usefull feature to convert subopcode of
@@ -383,49 +400,52 @@ impl std::fmt::Display for ValueRel {
     }
 }
 
-impl Instruction {
-    pub fn get_opcode_name(&self) -> String {
+impl fmt::Display for Instruction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Instruction::NOP => String::from("NOP"),
-            Instruction::END => String::from("END"),
-            Instruction::RET => String::from("RET"),
-            Instruction::BINOP { op } => format!("BINOP {:#?}", op),
-            Instruction::CONST { value } => format!("CONST {}", value),
-            Instruction::STRING { index } => format!("STRING {}", index),
-            Instruction::BEGIN { args, locals } => format!("BEGIN {} {}", args, locals),
-            Instruction::CBEGIN { args, locals } => format!("CBEGIN {} {}", args, locals),
-            Instruction::CLOSURE { offset, arity } => format!("CLOSURE {} {}", offset, arity),
-            Instruction::STORE { rel, index } => format!("STORE {} {}", rel, index),
-            Instruction::LOAD { rel, index } => format!("LOAD {} {}", rel, index),
-            Instruction::CALL { offset, n } => {
-                format!("CALL {} {}", offset, n)
-            }
+            Instruction::NOP => write!(f, "NOP"),
+            Instruction::END => write!(f, "END"),
+            Instruction::RET => write!(f, "RET"),
+            Instruction::BINOP { op } => write!(f, "BINOP {:#?}", op),
+            Instruction::CONST { value } => write!(f, "CONST {}", value),
+            Instruction::STRING { index } => write!(f, "STRING {}", index),
+            Instruction::BEGIN { args, locals } => write!(f, "BEGIN {} {}", args, locals),
+            Instruction::CBEGIN { args, locals } => write!(f, "CBEGIN {} {}", args, locals),
+            Instruction::CLOSURE { offset, arity } => write!(f, "CLOSURE {} {}", offset, arity),
+            Instruction::STORE { rel, index } => write!(f, "STORE {} {}", rel, index),
+            Instruction::LOAD { rel, index } => write!(f, "LOAD {} {}", rel, index),
+            Instruction::CALL { offset, n } => write!(f, "CALL {} {}", offset, n),
             Instruction::CALLBUILTIN { name, n } => {
                 if let Builtin::Barray = name {
-                    format!("CALLB {:#?} {}", name, n)
+                    write!(f, "CALLB {:#?} {}", name, n)
                 } else {
-                    format!("CALL {:#?}", name)
+                    write!(f, "CALL {:#?}", name)
                 }
             }
-            Instruction::CALLC { arity } => format!("CALLC {}", arity),
-            Instruction::LINE { n } => format!("LINE {}", n),
-            Instruction::DROP => String::from("DROP"),
-            Instruction::DUP => String::from("DUP"),
-            Instruction::SWAP => String::from("SWAP"),
-            Instruction::JMP { offset } => format!("JMP {}", offset),
-            Instruction::CJMP { offset, kind } => format!("CJMP {} {:#?}", offset, kind),
-            Instruction::ELEM => String::from("ELEM"),
-            Instruction::STI => String::from("STI"),
-            Instruction::STA => String::from("STA"),
-            Instruction::ARRAY { n } => format!("ARRAY {}", n),
-            Instruction::BOOL { value } => format!("BOOL {}", value),
-            Instruction::UNARY { op } => format!("UNARY {:#?}", op),
-            Instruction::CONSTF { value } => format!("CONSTF {}", value),
-            Instruction::TUPLE { n } => format!("TUPLE {}", n),
-            Instruction::NULL => String::from("NULL"),
+            Instruction::CALLC { arity } => write!(f, "CALLC {}", arity),
+            Instruction::LINE { n } => write!(f, "LINE {}", n),
+            Instruction::DROP => write!(f, "DROP"),
+            Instruction::DUP => write!(f, "DUP"),
+            Instruction::SWAP => write!(f, "SWAP"),
+            Instruction::JMP { dest: offset } => write!(f, "JMP {:#?}", offset),
+            Instruction::CJMP { dest: offset, kind } => {
+                write!(f, "CJMP {:#?} {:#?}", offset, kind)
+            }
+            Instruction::ELEM => write!(f, "ELEM"),
+            Instruction::STI => write!(f, "STI"),
+            Instruction::STA => write!(f, "STA"),
+            Instruction::ARRAY { n } => write!(f, "ARRAY {}", n),
+            Instruction::BOOL { value } => write!(f, "BOOL {}", value),
+            Instruction::UNARY { op } => write!(f, "UNARY {:#?}", op),
+            Instruction::CONSTF { value } => write!(f, "CONSTF {}", value),
+            Instruction::TUPLE { n } => write!(f, "TUPLE {}", n),
+            Instruction::NULL => write!(f, "NULL"),
+            Instruction::LABEL { name } => write!(f, "LABEL {}", name),
         }
     }
+}
 
+impl Instruction {
     pub fn discriminant(&self) -> u8 {
         // SAFETY: Because `Self` is marked `repr(u8)`, its layout is a `repr(C)` `union`
         // between `repr(C)` structs, each of which has the `u8` discriminant as its first

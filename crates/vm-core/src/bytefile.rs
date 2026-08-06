@@ -2,6 +2,7 @@
 
 use crate::bytecode::Instruction;
 use crate::decoder::{Decoder, DecoderError};
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::fmt::Display;
 use std::io::{BufRead, BufReader, Cursor, Read};
@@ -32,8 +33,9 @@ pub struct Bytefile {
     pub public_symbols_number: u32,
     pub public_symbols: Vec<(u32, u32)>,
     pub string_table: Vec<u8>,
-    pub code_section: Vec<u8>, // Kept raw for later interpretation
-    pub main_offset: u32,      // "main" function offset, a.k.a entry point
+    pub code_section: Vec<u8>,      // Kept raw for later interpretation
+    pub main_offset: u32,           // "main" function offset, a.k.a entry point
+    labels: HashMap<String, usize>, // Mapping from label names to their offsets in the code section
 }
 
 #[derive(Debug)]
@@ -49,8 +51,9 @@ pub enum BytefileError {
 }
 
 impl Bytefile {
-    /// Creates a new Bytefile,
-    /// it is not yet saved nor validated
+    /// Creates a new Bytefile
+    ///
+    /// It is not yet saved nor validated
     pub fn new() -> Self {
         Self {
             stringtab_size: 0,
@@ -60,6 +63,7 @@ impl Bytefile {
             string_table: Vec::new(),
             code_section: Vec::new(),
             main_offset: 0,
+            labels: HashMap::new(),
         }
     }
 
@@ -78,7 +82,56 @@ impl Bytefile {
         self.code_section.extend(code);
     }
 
+    /// Encode all instructions and add them to the code section of bytefile
+    pub fn add_instructions(&mut self, instructions: &[Instruction]) -> Result<(), DecoderError> {
+        // TODO: refactor for less O(n) complexity
+
+        let mut instructions = instructions.to_vec();
+
+        // Traverse labels and resolve offsets, using
+        // mock data
+        let mut offset = self.code_section.len();
+        for instruction in &instructions {
+            match instruction {
+                Instruction::LABEL { name } => {
+                    let offset = i32::try_from(offset)
+                        .map_err(|_| DecoderError::ReadingMoreThenCodeSection)?;
+
+                    if self.labels.insert(name.clone(), offset as usize).is_some() {
+                        // FIXME: duplicate
+                        return Err(DecoderError::UnknownLabel(name.clone()));
+                    }
+                }
+
+                Instruction::JMP { .. } | Instruction::CJMP { .. } => {
+                    offset += 5;
+                }
+
+                instruction => {
+                    offset += Decoder::encode(instruction)?.len();
+                }
+            }
+        }
+
+        // Now put resolved offsets into the jump instructions
+        for instruction in &mut instructions {
+            if let Instruction::JMP { dest } | Instruction::CJMP { dest, .. } = instruction {
+                let name = &dest.name;
+                if let Some(offset) = self.labels.get(name) {
+                    dest.offset = Some(*offset as i32);
+                }
+            }
+        }
+
+        // Now that labels are resolved, add instructions to the code section
+        for instruction in instructions {
+            self.add_instruction(&instruction)?;
+        }
+        Ok(())
+    }
+
     /// Adds an instruction to the code section of bytefile, encoding it into byte buffer first
+    // TODO: make private
     pub fn add_instruction(&mut self, instruction: &Instruction) -> Result<(), DecoderError> {
         let encoded = Decoder::encode(instruction)?;
         self.code_section.extend(encoded);
@@ -176,8 +229,6 @@ impl Bytefile {
 
         // Push code section
         output.extend(&self.code_section);
-
-        output.push(0xff);
 
         output
     }
@@ -283,6 +334,7 @@ impl Bytefile {
             string_table,
             code_section,
             main_offset,
+            labels: HashMap::new(),
         })
     }
 
@@ -336,6 +388,7 @@ impl Bytefile {
             string_table: vec![],
             public_symbols: vec![],
             main_offset: 0,
+            labels: HashMap::new(),
         }
     }
 
@@ -349,35 +402,42 @@ impl Bytefile {
 
 impl Display for Bytefile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "--------- Bytefile Dump ----------\n")?;
-        write!(f, " - String Table Size: {}\n", self.stringtab_size)?;
-        write!(f, " - Global Area Size: {}\n", self.global_area_size)?;
+        // FIXME: this is illigal and punishible by death
+        let mut decoder = Decoder::new(self.clone());
+
+        write!(f, "\\ --------- Bytefile Dump ----------\n")?;
+        write!(f, "\\ - String Table Size: {}\n", self.stringtab_size)?;
+        write!(f, "\\ - Global Area Size: {}\n", self.global_area_size)?;
         write!(
             f,
-            " - Public Symbol Table Size: {}\n",
+            "\\ - Public Symbol Table Size: {}\n",
             self.public_symbols_number
         )?;
         write!(
             f,
-            " - Code Section Byte Size: {}\n",
+            "\\ - Code Section Byte Size: {}\n",
             self.code_section.len()
         )?;
 
-        write!(f, " - Public symbols: \n")?;
+        write!(f, "\\ - Public symbols: \n")?;
         for (s, n) in &self.public_symbols {
-            write!(f, "  - {}: {}\n", s, n)?;
+            write!(f, "\\  - {}: {}\n", s, n)?;
         }
 
         let str_table = String::from_utf8(self.string_table.clone()).unwrap();
-        write!(f, " - String table raw: {:?}\n", self.string_table)?;
-        write!(f, " - String Table: {}\n", str_table)?;
+        write!(f, "\\ - String table raw: {:?}\n", self.string_table)?;
+        write!(f, "\\ - String Table: {}\n", str_table)?;
 
-        write!(f, " - Code Section:\n")?;
-        for s in &self.code_section {
-            write!(f, "{:02X?}", s)?;
+        write!(f, "\\-----------------------------\n")?;
+
+        // TODO: mark each function
+        while decoder.ip < self.code_section.len() {
+            let encoding = decoder.next::<u8>().map_err(|_| std::fmt::Error)?;
+            let instr = decoder.decode(encoding).map_err(|_| std::fmt::Error)?;
+            write!(f, "\n{}", instr)?;
         }
 
-        write!(f, "\n-----------------------------\n")
+        write!(f, "")
     }
 }
 
@@ -419,7 +479,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x02, 0x00, 0x00, 0x00, 0x10, 0x03, 0x00,
             0x00, 0x00, 0x01, 0x5a, 0x01, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x18,
             0x5a, 0x02, 0x00, 0x00, 0x00, 0x5a, 0x04, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00,
-            0x00, 0x71, 0x16, 0xff,
+            0x00, 0x71, 0x16,
         ];
 
         let bytefile: Bytefile = Bytefile::parse(data)?;

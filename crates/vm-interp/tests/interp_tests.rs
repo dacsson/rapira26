@@ -8,6 +8,7 @@
 use vm_core::bytecode::*;
 use vm_core::bytefile::Bytefile;
 use vm_core::decoder::Decoder;
+use vm_interp::RAP_TAG_MASK;
 use vm_interp::interpreter::Interpreter;
 
 // The runtime exposes process-global GC stack pointers, so two Interpreter
@@ -240,6 +241,48 @@ fn eval_integer_math_builtins() -> Result<(), Box<dyn std::error::Error>> {
         ])?;
         assert_eq!(smi(result), expected);
     }
+
+    Ok(())
+}
+
+#[test]
+fn eval_complex_logical_expr() -> Result<(), Box<dyn std::error::Error>> {
+    let and = evaluate(&[
+        // 1 > 0 && 2 <= 3
+        Instruction::CONST { value: 1 },
+        Instruction::CONST { value: 0 },
+        Instruction::BINOP { op: Op::GT },
+        Instruction::CONST { value: 2 },
+        Instruction::CONST { value: 3 },
+        Instruction::BINOP { op: Op::LEQ },
+        Instruction::BINOP { op: Op::AND },
+    ])?;
+
+    assert!(((and as u32) & RAP_TAG_MASK) == 0x1);
+    assert!(boolean(and));
+
+    let chained = evaluate(&[
+        // 1 > 0 && 2 <= 3
+        Instruction::CONST { value: 1 },
+        Instruction::CONST { value: 0 },
+        Instruction::BINOP { op: Op::GT },
+        Instruction::CONST { value: 2 },
+        Instruction::CONST { value: 3 },
+        Instruction::BINOP { op: Op::LEQ },
+        Instruction::BINOP { op: Op::AND },
+        // 1 <= 0 && 2 >= 3
+        Instruction::CONST { value: 1 },
+        Instruction::CONST { value: 0 },
+        Instruction::BINOP { op: Op::LEQ },
+        Instruction::CONST { value: 2 },
+        Instruction::CONST { value: 3 },
+        Instruction::BINOP { op: Op::GEQ },
+        Instruction::BINOP { op: Op::AND },
+        Instruction::BINOP { op: Op::OR },
+    ])?;
+
+    assert!(((chained as u32) & RAP_TAG_MASK) == 0x1);
+    assert!(boolean(chained));
 
     Ok(())
 }

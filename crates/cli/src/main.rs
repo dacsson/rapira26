@@ -38,14 +38,6 @@ struct Cli {
     #[arg(long)]
     запуск: bool,
 
-    /// Включить проверку утечек (компилируй с RAP_TEST_LEAKS)
-    #[arg(long)]
-    вкл_проверку_утечек: bool,
-
-    /// Флаги для передачи компилятору бэкенда
-    #[arg(long)]
-    флаги: Vec<String>,
-
     /// Вывести отладочную информацию о проходах оптимизации
     #[arg(long)]
     дамп_опт_дебаг: bool,
@@ -87,6 +79,7 @@ fn run_interpreter(path: &str, dump_bytefile: bool) -> Result<(), Box<dyn std::e
 
     if dump_bytefile {
         println!("{}", bytefile);
+        return Ok(());
     }
 
     let decoder = Decoder::new(bytefile);
@@ -189,7 +182,6 @@ fn main() {
                 &mut BcGen::new(),
                 modules,
                 &env::current_dir().unwrap(),
-                cli.флаги.as_slice(),
                 cli.дамп_код,
             )
             .unwrap_or_else(|error| {

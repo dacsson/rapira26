@@ -2,7 +2,7 @@
 
 use crate::{
     RAP_TAG_MASK, RAP_Value, RAP_create_float_obj, RAP_create_null_obj, RAP_create_text_obj,
-    RAP_create_tuple_obj, isPtr,
+    RAP_create_tuple_obj, isBool, isPtr,
 };
 use core::ffi::CStr;
 
@@ -73,6 +73,15 @@ impl Object {
     /// Extract the integer from a SMI. Mirrors `RAP_SMI_VALUE`.
     pub fn unbox(&self) -> i64 {
         (self.0 as i64) >> 32
+    }
+
+    /// Unbox as boolean
+    pub fn get_bool(&self) -> Option<bool> {
+        if isBool(self.raw()) {
+            Some(((self.raw() >> 2) & 1) != 0)
+        } else {
+            None
+        }
     }
 
     /// Retrieve objects raw underlying value, without any translation

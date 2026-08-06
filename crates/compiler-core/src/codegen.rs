@@ -44,7 +44,6 @@ pub trait CodegenTarget {
         &mut self,
         modules_codes: ModuleMap,
         current_dir: &PathBuf,
-        flags: &[String],
         dump: bool,
     ) -> Result<Vec<AbsolutGeneratedCodePath>, RunError>;
 
@@ -63,11 +62,10 @@ pub fn run_codegen(
     target: &mut dyn CodegenTarget,
     modules: Vec<Module>,
     current_dir: &PathBuf,
-    flags: &[String],
     dump: bool,
 ) -> Result<Vec<AbsolutGeneratedCodePath>, RunError> {
     let code_map = target.generate(modules);
-    let generated_paths = target.compile(code_map, current_dir, flags, dump)?;
+    let generated_paths = target.compile(code_map, current_dir, dump)?;
     Ok(generated_paths)
 }
 
