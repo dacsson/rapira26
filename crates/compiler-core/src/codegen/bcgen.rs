@@ -256,7 +256,7 @@ impl BcGen {
             } => {
                 instrs.extend(self.emit_expr(collection));
 
-                // For Slice, CALLBUILTIN.n is a bound-presence bitmask rather
+                // For Slice, `bound` is a bound-presence bitmask rather
                 // than an argument count: bit 0 = from, bit 1 = to.
                 let mut bounds = 0;
                 if let Some(from) = from {
@@ -268,10 +268,7 @@ impl BcGen {
                     bounds |= 2;
                 }
 
-                instrs.push(Instruction::CALLBUILTIN {
-                    name: Builtin::Slice,
-                    n: bounds,
-                });
+                instrs.push(Instruction::SLICE { bounds });
             }
         }
 
@@ -296,26 +293,63 @@ impl BcGen {
             Statement::Assignment { target, value } => {
                 let mut instrs = self.emit_expr(value);
 
-                // let LValue::Name(name) = &target.node else {
-                //     todo!("Not implemented: {:?}", target.node);
-                // };
+                match &target.node {
+                    LValue::Name(name) => {
+                        let Some((index, rel)) = self.env.find_variable(name) else {
+                            todo!("unknown variable")
+                        };
 
-                let name = match &target.node {
-                    LValue::Name(n) => n,
+                        instrs.push(Instruction::STORE { rel, index });
+                    }
                     LValue::Subscript { collection, index } => {
-                        let Expr::Name(n) = &collection.node else {
+                        let Expr::Name(name) = &collection.node else {
                             todo!("Not implemented: {:?}", target.node);
                         };
-                        n
+
+                        let Some((vindex, rel)) = self.env.find_variable(name) else {
+                            todo!("unknown variable")
+                        };
+
+                        // Stack: [value, index, collection]
+                        // STA pops: collection, index, value
+                        instrs.extend(self.emit_expr(index));
+                        instrs.push(Instruction::LOAD { rel, index: vindex });
+                        instrs.push(Instruction::STA);
                     }
-                    _ => todo!("slice in assignment"),
+                    LValue::Slice {
+                        collection,
+                        from,
+                        to,
+                    } => {
+                        let Expr::Name(name) = &collection.node else {
+                            todo!("Not implemented: {:?}", target.node);
+                        };
+
+                        let Some((vindex, rel)) = self.env.find_variable(name) else {
+                            todo!("unknown variable")
+                        };
+
+                        // collection -> then from/to bounds -> SLICE -> STS
+                        // SLICE: pops (collection, from, to) and pushes a slice
+                        // STS: pops (value, slice) for the assignment
+                        instrs.push(Instruction::LOAD { rel, index: vindex });
+
+                        let mut bounds = 0;
+                        if let Some(from) = from {
+                            instrs.extend(self.emit_expr(from));
+                            bounds |= 1;
+                        }
+                        if let Some(to) = to {
+                            instrs.extend(self.emit_expr(to));
+                            bounds |= 2;
+                        }
+
+                        instrs.push(Instruction::SLICE { bounds });
+                        instrs.push(Instruction::STS);
+                    }
+                    LValue::Field { .. } => todo!(),
                 };
 
-                let Some((index, rel)) = self.env.find_variable(name) else {
-                    todo!("unknown variable")
-                };
-
-                instrs.push(Instruction::STORE { rel, index });
                 instrs
             }
             Statement::Output { no_newline, values } => {

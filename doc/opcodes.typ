@@ -71,11 +71,15 @@ The `BINOP` lower nibble encodes the operator (`0x01`–`0x0f`).
   [`0x10`], [`CONST`], [`i32le value`], [Push immediate integer `value` onto the stack.],
   [`0x11`], [`STRING`], [`i32le index`], [Push the `index`-th string from the string table.],
   [`0x12`], [`TUPLE`], [`i32le n`], [Pop `n` values from the stack, pack them into a tuple, push the tuple.],
-  [`0x13`], [`STI`], [—], [Indirect store: pop reference and value, store value through reference.],
-  [`0x14`], [`STA`], [—], [Indirect store to variable or aggregate: pop aggregate, index, and value; assign.],
+  [`0x13`], [`STS`], [—], [Store to slice: pop slice, then pop value and assign into the slice.],
+  [`0x14`], [`STA`], [—], [Store to aggregate: pop aggregate, pop index, pop value; assign `value` at `index` into `aggregate`.],
   [`0x15`], [`JMP`], [`i32le offset`], [Unconditional jump to `offset` (absolute position in code section).],
   [`0x16`], [`END`], [—], [End of procedure: return top-of-stack value to caller.],
-  [`0x17`], [`RET`], [—], [Return top-of-stack value to caller (explicit return).],
+  [`0x17`],
+  [`SLICE`],
+  [`u8 bounds`],
+  [Push a slice (view) of an aggregate. `bounds` is a bitmask: bit 0 set means `from` is on the stack, bit 1 set means `to` is on the stack. Thus `0` = `[:]`, `1` = `[from:]`, `2` = `[:to]`, `3` = `[from:to]`.],
+
   [`0x18`], [`DROP`], [—], [Discard (pop) the top value from the stack.],
   [`0x19`], [`DUP`], [—], [Duplicate the top value of the stack.],
   [`0x1a`], [`SWAP`], [—], [Swap the two topmost values on the stack.],
@@ -85,6 +89,8 @@ The `BINOP` lower nibble encodes the operator (`0x01`–`0x0f`).
   [`f64le value`],
   [Push immediate 64-bit floating-point `value` (little-endian IEEE 754) onto the stack.],
 )
+
+Opcodes `0x1d`–`0x1f` are unused.
 
 == Group `0x2_` — Load
 
@@ -102,6 +108,7 @@ scope (*value relation*).
 )
 
 Lower nibble: `0x0` = Global, `0x1` = Local, `0x2` = Arg, `0x3` = Capture.
+Opcodes `0x24`–`0x2f` are unused.
 
 == Group `0x3_` — Unary Operations
 
@@ -111,11 +118,12 @@ Unary operations on the top-of-stack value.
   columns: (auto, auto, auto, 1fr),
   table.header([*Opcode*], [*Mnemonic*], [*Operands*], [*Description*]),
 
-  [`0x30`], [`UNARY Negate`], [—], [Pop an integer, push its arithmetic negation (−TOS).],
-  [`0x31`], [`UNARY Not`], [—], [Pop an integer, push 1 if TOS == 0 else 0 (logical not).],
+  [`0x30`], [`UNARY Negate`], [—], [Pop a value, push its arithmetic negation (−TOS).],
+  [`0x31`], [`UNARY Not`], [—], [Pop a value, push 1 if TOS == 0 else 0 (logical not).],
 )
 
 Lower nibble: `0x0` = Negate, `0x1` = Not.
+Opcodes `0x32`–`0x3f` are unused.
 
 == Group `0x4_` — Store
 
@@ -131,6 +139,8 @@ same as `LOAD`.
   [`0x42`], [`STORE arg`], [`i32le index`], [Pop TOS and store into function argument slot `index`.],
   [`0x43`], [`STORE capture`], [`i32le index`], [Pop TOS and store into captured variable at slot `index`.],
 )
+
+Opcodes `0x44`–`0x4f` are unused.
 
 == Group `0x5_` — Control Flow / Procedure Management
 
@@ -153,7 +163,7 @@ same as `LOAD`.
   [`0x54`],
   [`CLOSURE`],
   [`i32le offset`, `i32le arity`],
-  [Construct a closure whose bytecode starts at `offset`. `arity` is the number of captured variables.],
+  [Construct a closure whose bytecode starts at `offset`. `arity` is the number of captured variables. The captured variable descriptors follow in a variable-length encoding (not yet implemented).],
 
   [`0x55`],
   [`CALLC`],
@@ -172,7 +182,13 @@ same as `LOAD`.
   [Annotation: following bytecode corresponds to source line `n`. Used for diagnostics only.],
 )
 
-== Group `0x7_` — Builtin Calls / Bool
+Opcodes `0x57`, `0x59`, `0x5b`–`0x5f` are unused.
+
+== Group `0x6_` — (unused)
+
+All opcodes `0x60`–`0x6f` are unused.
+
+== Group `0x7_` — Builtin Calls / Bool / Null
 
 #table(
   columns: (auto, auto, auto, 1fr),
@@ -182,7 +198,7 @@ same as `LOAD`.
   [`0x71`],
   [`CALLBUILTIN Lwrite`],
   [`i32le n`],
-  [Call built-in `Lwrite`: pop TOS and write it to stdout. `n` encodes flags (e.g. newline bit at `1 << 30`).],
+  [Call built-in `Lwrite`: pop TOS and write it to stdout. `n` encodes flags (e.g. newline bit at `1 << 30`). Always reads 4 operand bytes in the decoder even when `n == 0`.],
 
   [`0x72`], [`CALLBUILTIN Llength`], [—], [Call built-in `Llength`: pop string/array, push its length.],
   [`0x73`],
@@ -205,9 +221,12 @@ same as `LOAD`.
   [`0x7c`], [`CALLBUILTIN Index`], [`i32le n`], [Pop needle and haystack and push the index of the first match.],
 )
 
+Opcodes `0x7d`–`0x7f` are unused.
+
 = Summary Table
 
-All #60 defined opcode bytes at a glance.
+All defined opcode bytes at a glance. "Operand bytes" is the total number of
+additional bytes the instruction consumes beyond the opcode byte itself.
 
 #table(
   columns: (auto, auto, auto),
@@ -232,11 +251,11 @@ All #60 defined opcode bytes at a glance.
   [`0x10`], [`CONST`], [`4`],
   [`0x11`], [`STRING`], [`4`],
   [`0x12`], [`TUPLE`], [`4`],
-  [`0x13`], [`STI`], [`0`],
+  [`0x13`], [`STS`], [`0`],
   [`0x14`], [`STA`], [`0`],
   [`0x15`], [`JMP`], [`4`],
   [`0x16`], [`END`], [`0`],
-  [`0x17`], [`RET`], [`0`],
+  [`0x17`], [`SLICE`], [`1`],
   [`0x18`], [`DROP`], [`0`],
   [`0x19`], [`DUP`], [`0`],
   [`0x1a`], [`SWAP`], [`0`],

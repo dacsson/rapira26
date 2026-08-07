@@ -58,11 +58,6 @@ pub enum Builtin {
     Floor,
     Round,
     Index,
-    /// Create a slice. Here - `n` is a bounds bitmask:
-    /// bit 0 means `from` is on the stack, and bit 1 means `to` is on the stack.
-    /// Thus `n` ranges from 0 (`[:]`) to 3 (`[from:to]`)
-    /// TODO: this can be encoded as enum rather then numbers
-    Slice,
 }
 
 /// A description of the captured variables of a closure.
@@ -92,8 +87,6 @@ pub enum Instruction {
     /// Marks the end of the procedure definition. When executed
     /// returns the top value to the caller of this procedure.
     END,
-    /// Returns the top value to the caller of this procedure.
-    RET,
     /// See [`Op`]
     ///
     /// Example: BINOP ("*")
@@ -192,12 +185,13 @@ pub enum Instruction {
     /// Look up an element of some aggregate
     /// NOTE: takes an operand and index from top of stack
     ELEM,
-    /// Indirect store to variable
-    /// Pop the reference to the variable and the value to store
-    STI,
-    /// Indirect store to a variable or an agregate
-    /// If we store to a variable -> equivalent to STI
-    /// Otherwise -> pop agregate, pop index, pop operand (result) that we assign to
+    /// Store To Slice
+    ///
+    /// Pop slice, pop operand (result) that we assign to
+    STS,
+    /// Store To Aggregate
+    ///
+    /// Pop agregate, pop index, pop operand (result) that we assign to
     STA,
     /// Tests whether the operand is an array of 𝑛 elements.
     ARRAY {
@@ -227,6 +221,15 @@ pub enum Instruction {
     /// Zero-width symbolic marker resolved before bytecode encoding.
     LABEL {
         name: String,
+    },
+    /// Push a slice (view of the aggregate) on the operand stack
+    ///
+    /// Here - `bounds` is a bounds bitmask:
+    /// bit 0 means `from` is on the stack, and bit 1 means `to` is on the stack.
+    /// Thus `bounds` ranges from 0 (`[:]`) to 3 (`[from:to]`)
+    /// TODO: bounds can be encoded as enum rather then numbers
+    SLICE {
+        bounds: u8,
     },
 }
 
@@ -289,7 +292,6 @@ impl TryFrom<u8> for Builtin {
             0xa => Ok(Builtin::Floor),
             0xb => Ok(Builtin::Round),
             0xc => Ok(Builtin::Index),
-            0xd => Ok(Builtin::Slice),
             _ => Err(()),
         }
     }
@@ -375,7 +377,6 @@ impl From<&Builtin> for &i32 {
             Builtin::Floor => &11,
             Builtin::Round => &12,
             Builtin::Index => &13,
-            Builtin::Slice => &14,
         }
     }
 }
@@ -405,7 +406,6 @@ impl fmt::Display for Instruction {
         match self {
             Instruction::NOP => write!(f, "NOP"),
             Instruction::END => write!(f, "END"),
-            Instruction::RET => write!(f, "RET"),
             Instruction::BINOP { op } => write!(f, "BINOP {:#?}", op),
             Instruction::CONST { value } => write!(f, "CONST {}", value),
             Instruction::STRING { index } => write!(f, "STRING {}", index),
@@ -432,7 +432,7 @@ impl fmt::Display for Instruction {
                 write!(f, "CJMP {:#?} {:#?}", offset, kind)
             }
             Instruction::ELEM => write!(f, "ELEM"),
-            Instruction::STI => write!(f, "STI"),
+            Instruction::STS => write!(f, "STS"),
             Instruction::STA => write!(f, "STA"),
             Instruction::ARRAY { n } => write!(f, "ARRAY {}", n),
             Instruction::BOOL { value } => write!(f, "BOOL {}", value),
@@ -441,6 +441,7 @@ impl fmt::Display for Instruction {
             Instruction::TUPLE { n } => write!(f, "TUPLE {}", n),
             Instruction::NULL => write!(f, "NULL"),
             Instruction::LABEL { name } => write!(f, "LABEL {}", name),
+            Instruction::SLICE { bounds } => write!(f, "SLICE {}", bounds),
         }
     }
 }
