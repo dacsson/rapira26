@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::bytecode::*;
 use crate::bytefile::Bytefile;
 use crate::numeric::LeBytes;
@@ -93,7 +91,7 @@ impl Decoder {
             (0x10, 0x2) => Ok(Instruction::TUPLE {
                 n: self.next::<i32>()?,
             }),
-            (0x10, 0x3) => Ok(Instruction::STI),
+            (0x10, 0x3) => Ok(Instruction::STS),
             (0x10, 0x4) => Ok(Instruction::STA),
             (0x10, 0x5) => Ok(Instruction::JMP {
                 dest: Label {
@@ -103,7 +101,9 @@ impl Decoder {
                 },
             }),
             (0x10, 0x6) => Ok(Instruction::END),
-            (0x10, 0x7) => Ok(Instruction::RET),
+            (0x10, 0x7) => Ok(Instruction::SLICE {
+                bounds: self.next::<u8>()?,
+            }),
             (0x10, 0x8) => Ok(Instruction::DROP),
             (0x10, 0x9) => Ok(Instruction::DUP),
             (0x10, 0xa) => Ok(Instruction::SWAP),
@@ -211,7 +211,7 @@ impl Decoder {
                 buf.push(0x12);
                 buf.extend(&n.to_le_bytes());
             }
-            Instruction::STI => buf.push(0x13),
+            Instruction::STS => buf.push(0x13),
             Instruction::STA => buf.push(0x14),
             Instruction::JMP {
                 dest: Label { name, offset },
@@ -225,7 +225,13 @@ impl Decoder {
                 buf.extend(&offset.to_le_bytes());
             }
             Instruction::END => buf.push(0x16),
-            Instruction::RET => buf.push(0x17),
+            Instruction::SLICE { bounds } => {
+                buf.push(0x17);
+
+                // Slice uses n as a bounds bitmask - 0 means
+                // `[:]`, so its zero value must still be encoded explicitly.
+                buf.extend(&bounds.to_le_bytes());
+            }
             Instruction::DROP => buf.push(0x18),
             Instruction::DUP => buf.push(0x19),
             Instruction::SWAP => buf.push(0x1a),
@@ -307,9 +313,8 @@ impl Decoder {
             Instruction::CALLBUILTIN { n, name } if *name != Builtin::Barray => {
                 let name_: &i32 = name.into();
                 buf.push(0x70 | (*name_ as u8) - 1);
-                // Slice uses n as a bounds bitmask - 0 means
-                // `[:]`, so its zero value must still be encoded explicitly.
-                if *n != 0 || *name == Builtin::Slice {
+
+                if *n != 0 {
                     buf.extend(&n.to_le_bytes());
                 }
             }

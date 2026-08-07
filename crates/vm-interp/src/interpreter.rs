@@ -7,7 +7,7 @@ use crate::{
     RAP_divide, RAP_equal, RAP_floor, RAP_floor_divide, RAP_get_tuple_item, RAP_greater_or_equal,
     RAP_greater_than, RAP_index_of, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than,
     RAP_modulo, RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_power, RAP_round,
-    RAP_sign, RAP_sqrt, RAP_stringify_object, RAP_subtract,
+    RAP_set_tuple_item, RAP_sign, RAP_slice_assign, RAP_sqrt, RAP_stringify_object, RAP_subtract,
 };
 use core::array;
 use core::ffi::CStr;
@@ -39,7 +39,6 @@ const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), In
     30] = [
     Interpreter::eval_nop,
     Interpreter::eval_end,
-    Interpreter::eval_end, // ret
     Interpreter::eval_binop,
     Interpreter::eval_const,
     Interpreter::eval_string,
@@ -58,7 +57,7 @@ const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), In
     Interpreter::eval_jmp,
     Interpreter::eval_cjmp,
     Interpreter::eval_elem,
-    Interpreter::eval_sti,
+    Interpreter::eval_sts,
     Interpreter::eval_sta,
     Interpreter::eval_array,
     Interpreter::eval_bool,
@@ -67,6 +66,7 @@ const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), In
     Interpreter::eval_tuple,
     Interpreter::eval_null,
     Interpreter::eval_label,
+    Interpreter::eval_slice,
 ];
 
 pub struct Interpreter {
@@ -413,6 +413,24 @@ impl Interpreter {
         become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
     }
 
+    fn eval_sts(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+        let Instruction::STS = instr else {
+            return Err(InterpreterError::InvalidOpcode(instr.discriminant()));
+        };
+
+        // Stack: [value, slice] (bottom→top), so pop slice first (top),
+        // then value (next down).
+        let slice = self.pop()?;
+        let value = self.pop()?;
+
+        unsafe { RAP_slice_assign(slice.raw(), value.raw()) };
+
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
+
+        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+    }
+
     fn eval_cjmp(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
         let Instruction::CJMP { dest, kind } = instr else {
             return Err(InterpreterError::InvalidObjectPointer);
@@ -550,20 +568,6 @@ impl Interpreter {
                 let haystack = self.pop()?;
                 let needle = self.pop()?;
                 let result = unsafe { RAP_index_of(needle.raw(), haystack.raw()) };
-                self.push(Object::new(result))?;
-            }
-            Builtin::Slice => {
-                // Unlike other builtins, n is not an argument count here:
-                // bit 0 says `from` was pushed, and bit 1 says `to` was pushed.
-                let to = if n & 2 != 0 { self.pop()?.unbox() } else { -1 };
-                let from = if n & 1 != 0 { self.pop()?.unbox() } else { 0 };
-                let collection = self.pop()?;
-                let to = if to < 0 {
-                    Object::new(unsafe { RAP_length(collection.raw()) }).unbox()
-                } else {
-                    to
-                };
-                let result = unsafe { RAP_create_slice(collection.raw(), from, to) };
                 self.push(Object::new(result))?;
             }
         }
@@ -941,65 +945,23 @@ impl Interpreter {
         todo!();
     }
 
-    fn eval_sti(&mut self, _: Instruction) -> Result<(), InterpreterError> {
-        panic!(
-            "Congratulations! Somehow, you emitted a STI instruction, while the compiler itself never should have"
-        )
-    }
+    fn eval_sta(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+        let Instruction::STA = instr else {
+            return Err(InterpreterError::NotEnoughArguments("STI"));
+        };
 
-    fn eval_sta(&mut self, _: Instruction) -> Result<(), InterpreterError> {
-        // let value_obj = self.pop()?;
-        // let index_obj = self.pop()?;
-        // let mut aggregate = self.pop()?;
+        let aggregate = self.pop()?;
+        let index = self.pop()?;
+        let value = self.pop()?;
 
-        // let index = index_obj.unbox() as usize;
-        // let value = value_obj.unbox();
+        let obj = unsafe { RAP_set_tuple_item(aggregate.raw(), index.unbox() as u32, value.raw()) };
 
-        // // check for aggregate
-        // #[cfg(feature = "runtime_checks")]
-        // if aggregate.lama_type().is_none() {
-        //     return Err(InterpreterError::InvalidType(
-        //         "Expected an aggregate type in STA instruction",
-        //     ));
-        // }
+        self.push(Object::new(obj))?;
 
-        // unsafe {
-        //     let length = rtUnbox(Llength(aggregate.as_ptr_mut().unwrap())) as usize;
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
 
-        //     // check for out of bounds access
-        //     #[cfg(feature = "runtime_checks")]
-        //     if (index_obj.unbox()) < 0 || index >= length {
-        //         return Err(InterpreterError::OutOfBoundsAccess(index, length));
-        //     }
-
-        //     let as_ptr = aggregate
-        //         .as_ptr_mut()
-        //         .ok_or(InterpreterError::InvalidObjectPointer)?;
-
-        //     let lama_type = aggregate.lama_type().unwrap();
-
-        //     if lama_type == lama_type_SEXP {
-        //         let sexp = rtToSexp(as_ptr);
-        //         set_sexp_el(&mut *sexp, index, value);
-        //     } else if lama_type == lama_type_STRING {
-        //         let contents = (*rtToData(as_ptr)).contents.as_mut_ptr();
-
-        //         contents.add(index).write(value as i8);
-        //     } else {
-        //         let array = rtToData(as_ptr);
-        //         // NOTE: array stores raw values, no need to unwrap object (i.e. unbox)
-        //         set_array_el(&mut *array, index, value_obj.raw());
-        //     }
-        // }
-
-        // self.push(aggregate)?;
-
-        // let encoding = self.decoder.next::<u8>()?;
-        // let instr = self.decoder.decode(encoding)?;
-
-        // become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
-
-        todo!();
+        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
     }
 
     fn eval_jmp(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
@@ -1203,6 +1165,38 @@ impl Interpreter {
         // let Instruction::LABEL { name } = instr else {
         //     return Err(InterpreterError::InvalidOpcode(instr.discriminant()));
         // };
+
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
+
+        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+    }
+
+    fn eval_slice(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+        let Instruction::SLICE { bounds } = instr else {
+            return Err(InterpreterError::InvalidOpcode(instr.discriminant()));
+        };
+
+        // Unlike other builtins, n is not an argument count here:
+        // bit 0 says `from` was pushed, and bit 1 says `to` was pushed.
+        let to = if bounds & 2 != 0 {
+            self.pop()?.unbox()
+        } else {
+            -1
+        };
+        let from = if bounds & 1 != 0 {
+            self.pop()?.unbox()
+        } else {
+            0
+        };
+        let collection = self.pop()?;
+        let to = if to < 0 {
+            Object::new(unsafe { RAP_length(collection.raw()) }).unbox()
+        } else {
+            to
+        };
+        let result = unsafe { RAP_create_slice(collection.raw(), from, to) };
+        self.push(Object::new(result))?;
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
