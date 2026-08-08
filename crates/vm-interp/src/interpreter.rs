@@ -131,25 +131,25 @@ impl Interpreter {
 
     /// Main interpreter loop
     pub fn run(&mut self) -> Result<(), RunError> {
-        if self.decoder.ip < self.code_section_len {
-            let encoding = self.decoder.next::<u8>()?;
-            let instr = self.decoder.decode(encoding)?;
+        self.decoder.ip = self.decoder.bf.main_offset as usize;
 
-            DISPATCH_TABLE[instr.discriminant() as usize](self, instr.clone()).map_err(
-                |e| -> RunError {
-                    let global_offset = core::mem::size_of::<i32>()
-                        + core::mem::size_of::<i32>()
-                        + core::mem::size_of::<i32>()
-                        + (core::mem::size_of::<i32>()
-                            * 2
-                            * self.decoder.bf.public_symbols_number as usize)
-                        + self.decoder.bf.stringtab_size as usize
-                        + self.decoder.ip;
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
 
-                    RunError::ErrorAtOffset(global_offset, e, instr.clone())
-                },
-            )?
-        }
+        DISPATCH_TABLE[instr.discriminant() as usize](self, instr.clone()).map_err(
+            |e| -> RunError {
+                let global_offset = core::mem::size_of::<i32>()
+                    + core::mem::size_of::<i32>()
+                    + core::mem::size_of::<i32>()
+                    + (core::mem::size_of::<i32>()
+                        * 2
+                        * self.decoder.bf.public_symbols_number as usize)
+                    + self.decoder.bf.stringtab_size as usize
+                    + self.decoder.ip;
+
+                RunError::ErrorAtOffset(global_offset, e, instr.clone())
+            },
+        )?;
 
         Ok(())
     }
@@ -579,23 +579,25 @@ impl Interpreter {
     }
 
     fn eval_call(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        // let Instruction::CALL { offset, .. } = instr else {
-        //     return Err(InterpreterError::InvalidObjectPointer);
-        // };
+        let Instruction::CALL {
+            dest: Label { name, offset },
+            ..
+        } = instr
+        else {
+            return Err(InterpreterError::InvalidObjectPointer);
+        };
 
-        // // Push old instruction pointer
-        // // `BEGIN` instruction will collect it
-        // self.push(Object::new_unboxed(self.decoder.ip as i64))?;
+        // Push old instruction pointer
+        // `BEGIN` instruction will collect it
+        self.push(Object::new_unboxed(self.decoder.ip as i64))?;
 
         // // Push empty closure object
         // self.push(Object::new_empty())?;
 
-        // self.decoder.ip = offset as usize;
+        self.decoder.ip = offset.unwrap() as usize;
 
-        // let encoding = self.decoder.next::<u8>()?;
-        // let instr = self.decoder.decode(encoding)?;
-
-        todo!();
+        let encoding = self.decoder.next::<u8>()?;
+        let instr = self.decoder.decode(encoding)?;
 
         become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
     }
@@ -827,9 +829,9 @@ impl Interpreter {
             return Err(InterpreterError::StackOverflow);
         }
 
-        let closure_obj = self
-            .pop()
-            .map_err(|_| InterpreterError::NotEnoughArguments("BEGIN"))?;
+        // let closure_obj = self
+        //     .pop()
+        //     .map_err(|_| InterpreterError::NotEnoughArguments("BEGIN"))?;
 
         // Top object is either return_ip or a closure obj
         let ret_ip = self
@@ -845,8 +847,8 @@ impl Interpreter {
         }
         self.frame_pointer = self.operand_stack_len + 1;
 
-        // Push closure object onto operand stack
-        self.push(closure_obj)?;
+        // the closure slot must still exist for the frame layout expected
+        self.push(Object::new_empty())?;
 
         // Push arg and local count
         self.push(Object::new_unboxed(args as i64))?;
@@ -864,11 +866,12 @@ impl Interpreter {
             self.push(Object::new_boxed(0))?;
         }
 
-        let mut frame = FrameMetadata::get_from_stack(&self.operand_stack.0, self.frame_pointer)
-            .ok_or(InterpreterError::NotEnoughArguments(
-                "trying to call closure frame",
-            ))?;
-        frame.save_closure(&mut self.operand_stack.0, self.frame_pointer, closure_obj);
+        // TODO:
+        // let mut frame = FrameMetadata::get_from_stack(&self.operand_stack.0, self.frame_pointer)
+        //     .ok_or(InterpreterError::NotEnoughArguments(
+        //         "trying to call closure frame",
+        //     ))?;
+        // frame.save_closure(&mut self.operand_stack.0, self.frame_pointer, closure_obj);
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;

@@ -148,7 +148,7 @@ pub enum Instruction {
     /// function begins at 𝑙 (given as an offset from the start of the byte
     /// code). Pushes the returned value onto the stack.
     CALL {
-        offset: i32,
+        dest: Label,
         n: i32,
     },
     /// calls a builtin function.
@@ -267,10 +267,10 @@ impl TryFrom<u8> for ValueRel {
 
     fn try_from(subopcode: u8) -> Result<Self, Self::Error> {
         match subopcode {
-            0x0 => Ok(ValueRel::Global),
-            0x1 => Ok(ValueRel::Local),
-            0x2 => Ok(ValueRel::Arg),
-            0x3 => Ok(ValueRel::Capture),
+            0x1 => Ok(ValueRel::Global),
+            0x2 => Ok(ValueRel::Local),
+            0x3 => Ok(ValueRel::Arg),
+            0x4 => Ok(ValueRel::Capture),
             _ => Err(()),
         }
     }
@@ -414,7 +414,7 @@ impl fmt::Display for Instruction {
             Instruction::CLOSURE { offset, arity } => write!(f, "CLOSURE {} {}", offset, arity),
             Instruction::STORE { rel, index } => write!(f, "STORE {} {}", rel, index),
             Instruction::LOAD { rel, index } => write!(f, "LOAD {} {}", rel, index),
-            Instruction::CALL { offset, n } => write!(f, "CALL {} {}", offset, n),
+            Instruction::CALL { dest: offset, n } => write!(f, "CALL {:?} {}", offset, n),
             Instruction::CALLBUILTIN { name, n } => {
                 if let Builtin::Barray = name {
                     write!(f, "CALLB {:#?} {}", name, n)

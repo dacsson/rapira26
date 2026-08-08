@@ -156,7 +156,11 @@ impl Decoder {
                 arity: self.next::<i32>()?,
             }),
             (0x50, 0x6) => Ok(Instruction::CALL {
-                offset: self.next::<i32>()?,
+                dest: Label {
+                    // TODO: get rid of empty str
+                    name: String::new(),
+                    offset: Some(self.next::<i32>()?),
+                },
                 n: self.next::<i32>()?,
             }),
             (0x50, 0x8) => Ok(Instruction::ARRAY {
@@ -297,9 +301,17 @@ impl Decoder {
                 buf.push(0x55);
                 buf.extend(&arity.to_le_bytes());
             }
-            Instruction::CALL { offset, n } => {
+            Instruction::CALL {
+                dest: Label { name, offset },
+                n,
+            } => {
                 buf.push(0x56);
+
+                let Some(offset) = offset else {
+                    return Err(DecoderError::UnknownLabel(name.clone()));
+                };
                 buf.extend(&offset.to_le_bytes());
+
                 buf.extend(&n.to_le_bytes());
             }
             Instruction::ARRAY { n } => {
