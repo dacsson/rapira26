@@ -587,6 +587,13 @@ impl Interpreter {
             return Err(InterpreterError::InvalidObjectPointer);
         };
 
+        // unsafe {
+        //     println!(
+        //         "{:#?}",
+        //         CStr::from_ptr(RAP_stringify_object(self.peek().unwrap().raw()))
+        //     );
+        // }
+
         // Push old instruction pointer
         // `BEGIN` instruction will collect it
         self.push(Object::new_unboxed(self.decoder.ip as i64))?;

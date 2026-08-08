@@ -45,10 +45,12 @@ enum Context {
 struct Env {
     /// Locals counter
     local_counter: i32,
+    arg_counter: i32,
     /// Globals counter
     global_counter: i32,
     /// Mapping from local variable names to their bytecode index
     locals: HashMap<String, i32>,
+    args: HashMap<String, i32>,
     /// Mapping from global variable names to their bytecode index
     globals: HashMap<String, i32>,
     /// Current context (global or function)
@@ -72,6 +74,13 @@ impl Env {
         }
     }
 
+    fn allocate_argument(&mut self, name: String) -> (i32, ValueRel) {
+        let index = self.arg_counter;
+        self.args.insert(name, index);
+        self.arg_counter = index + 1;
+        (index, ValueRel::Arg)
+    }
+
     fn deallocate_variable(&mut self, name: &str) -> Option<i32> {
         if let Context::Function = self.context {
             self.locals.remove(name)
@@ -81,9 +90,10 @@ impl Env {
     }
 
     fn find_variable(&self, name: &str) -> Option<(i32, ValueRel)> {
+        let arg = self.args.get(name).map(|id| (*id, ValueRel::Arg));
         let local = self.locals.get(name).map(|id| (*id, ValueRel::Local));
         let global = self.globals.get(name).map(|id| (*id, ValueRel::Global));
-        local.or(global)
+        local.or(arg).or(global)
     }
 }
 
@@ -103,8 +113,10 @@ impl BcGen {
                 // TODO: maybe we can use `count_locals` to
                 //       pre-allocate enough indecies?
                 local_counter: 0,
+                arg_counter: 0,
                 global_counter: 0,
                 locals: HashMap::new(),
+                args: HashMap::new(),
                 globals: HashMap::new(),
                 context: Context::Global,
             },
@@ -229,27 +241,11 @@ impl BcGen {
                 }
             }
             Expr::Name(name) => {
-                // Load variable by index
-                let Some(&index) = self
-                    .env
-                    .locals
-                    .get(name)
-                    .or_else(|| self.env.globals.get(name))
-                else {
+                let Some((index, rel)) = self.env.find_variable(name) else {
                     panic!("Unknown local variable: {}", name);
                 };
 
-                let is_local = self.env.context == Context::Function;
-                let rel = if is_local {
-                    ValueRel::Local
-                } else {
-                    ValueRel::Global
-                };
-
-                instrs.push(Instruction::LOAD {
-                    rel: rel,
-                    index: index,
-                });
+                instrs.push(Instruction::LOAD { rel, index });
             }
             Expr::Subscript { collection, index } => {
                 instrs.extend(self.emit_expr(collection));
@@ -524,13 +520,13 @@ impl BcGen {
                     // goto else
                     instrs.push(Instruction::CJMP {
                         dest: else_label.clone(),
-                        kind: CompareJumpKind::ISNONZERO,
+                        kind: CompareJumpKind::ISZERO,
                     });
                 } else {
                     // goto next block
                     instrs.push(Instruction::CJMP {
                         dest: end_label.clone(),
-                        kind: CompareJumpKind::ISNONZERO,
+                        kind: CompareJumpKind::ISZERO,
                     });
                 }
 
@@ -539,6 +535,11 @@ impl BcGen {
                 }
 
                 if let Some(else_body) = else_body {
+                    // success then branch must skip the else branch
+                    instrs.push(Instruction::JMP {
+                        dest: end_label.clone(),
+                    });
+
                     instrs.push(Instruction::LABEL {
                         name: else_label.unwrap().name.clone(),
                     });
@@ -677,8 +678,15 @@ impl CodegenTarget for BcGen {
         func_def_span: &Spannable<FunctionDefinition>,
     ) -> Vec<Instruction> {
         self.env.context = Context::Function;
-        self.env.local_counter = 0;
         self.env.locals.clear();
+        self.env.local_counter = 0;
+        self.env.args.clear();
+        self.env.arg_counter = 0;
+
+        // Memorize arguments
+        for arg in &func_def_span.node.parameters {
+            self.env.allocate_argument(arg.clone());
+        }
 
         let func_def = &func_def_span.node;
         let locals = self.count_locals(&func_def.body);
