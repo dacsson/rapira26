@@ -102,11 +102,12 @@ impl Bytefile {
                         return Err(DecoderError::UnknownLabel(name.clone()));
                     }
                 }
-
                 Instruction::JMP { .. } | Instruction::CJMP { .. } => {
                     offset += 5;
                 }
-
+                Instruction::CALL { .. } => {
+                    offset += 9; // opcode + target i32 + argument count i32
+                }
                 instruction => {
                     offset += Decoder::encode(instruction)?.len();
                 }
@@ -115,7 +116,10 @@ impl Bytefile {
 
         // Now put resolved offsets into the jump instructions
         for instruction in &mut instructions {
-            if let Instruction::JMP { dest } | Instruction::CJMP { dest, .. } = instruction {
+            if let Instruction::JMP { dest }
+            | Instruction::CJMP { dest, .. }
+            | Instruction::CALL { dest, .. } = instruction
+            {
                 let name = &dest.name;
                 if let Some(offset) = self.labels.get(name) {
                     dest.offset = Some(*offset as i32);

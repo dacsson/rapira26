@@ -8,6 +8,7 @@ use crate::{
     module::{AbsolutModulePath, Module},
 };
 use clap::ValueEnum;
+use vm_core::bytecode::Instruction;
 
 pub enum CodegenWarning {
     UndeclaredVariable(usize, String, usize),
@@ -49,10 +50,16 @@ pub trait CodegenTarget {
 
     // Base constructs that a backend should implement, you
     // can emit more than that if you want to
-    fn emit_procedure_def(&mut self, proc_def_span: &Spannable<ProcedureDefinition>);
-    fn emit_function_def(&mut self, func_def_span: &Spannable<FunctionDefinition>);
-    fn emit_type_def(&mut self, type_def_span: &Spannable<TypeDefinition>);
-    fn emit_top_level_def(&mut self, top_level: &Vec<Spannable<Statement>>);
+    fn emit_procedure_def(
+        &mut self,
+        proc_def_span: &Spannable<ProcedureDefinition>,
+    ) -> Vec<Instruction>;
+    fn emit_function_def(
+        &mut self,
+        func_def_span: &Spannable<FunctionDefinition>,
+    ) -> Vec<Instruction>;
+    fn emit_type_def(&mut self, type_def_span: &Spannable<TypeDefinition>) -> Vec<Instruction>;
+    fn emit_top_level_def(&mut self, top_level: &Vec<Spannable<Statement>>) -> Vec<Instruction>;
 }
 
 /// Generate and compile modules using the given target

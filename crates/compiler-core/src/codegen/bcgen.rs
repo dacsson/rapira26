@@ -208,17 +208,24 @@ impl BcGen {
                     panic!("Anonymous functions not implemented");
                 };
 
+                for argument in arguments {
+                    instrs.extend(self.emit_expr(argument));
+                }
+
                 if let Some(&(_, builtin)) = BUILTIN_FUNCS.iter().find(|(n, _)| name == n) {
                     // A builtin call
-                    for argument in arguments {
-                        instrs.extend(self.emit_expr(argument));
-                    }
                     instrs.push(Instruction::CALLBUILTIN {
                         name: builtin, // why do need to clone this?
                         n: arguments.len() as i32,
                     });
                 } else {
-                    todo!("Function call not implemented");
+                    instrs.push(Instruction::CALL {
+                        dest: Label {
+                            name: name.clone(),
+                            offset: None,
+                        },
+                        n: arguments.len() as i32,
+                    });
                 }
             }
             Expr::Name(name) => {
@@ -485,6 +492,68 @@ impl BcGen {
 
                 instrs
             }
+            Statement::ReturnFromFunction(expr) => {
+                let mut instrs = self.emit_expr(expr);
+
+                instrs.push(Instruction::END);
+
+                instrs
+            }
+            Statement::Conditional {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                let mut instrs = self.emit_expr(condition);
+
+                let begin_label = self.fresh_label("if_begin");
+                let end_label = self.fresh_label("if_skip");
+                let mut else_label = None;
+
+                if let Some(..) = else_body {
+                    else_label = Some(self.fresh_label("else"));
+                }
+
+                // Push begin label
+                instrs.push(Instruction::LABEL {
+                    name: begin_label.name.clone(),
+                });
+
+                // guard
+                if let Some(else_label) = &else_label {
+                    // goto else
+                    instrs.push(Instruction::CJMP {
+                        dest: else_label.clone(),
+                        kind: CompareJumpKind::ISNONZERO,
+                    });
+                } else {
+                    // goto next block
+                    instrs.push(Instruction::CJMP {
+                        dest: end_label.clone(),
+                        kind: CompareJumpKind::ISNONZERO,
+                    });
+                }
+
+                for stmt in then_body {
+                    instrs.extend(self.emit_statement(stmt));
+                }
+
+                if let Some(else_body) = else_body {
+                    instrs.push(Instruction::LABEL {
+                        name: else_label.unwrap().name.clone(),
+                    });
+
+                    for stmt in else_body {
+                        instrs.extend(self.emit_statement(stmt));
+                    }
+                }
+
+                instrs.push(Instruction::LABEL {
+                    name: end_label.name.clone(),
+                });
+
+                instrs
+            }
             _ => panic!("Not implemented: {:?}", stmt),
         }
     }
@@ -497,7 +566,7 @@ impl BcGen {
         let mut count = 0;
         for stmt in body {
             match &stmt.node {
-                Statement::Assignment { .. } => count += 1,
+                Statement::Declaration { .. } => count += 1,
                 Statement::Conditional {
                     then_body,
                     else_body,
@@ -518,7 +587,12 @@ impl BcGen {
                         count += self.count_locals(else_body);
                     }
                 }
-                Statement::Loop(LoopStatement { body, .. }) => {
+                Statement::Loop(LoopStatement { header, body, .. }) => {
+                    // A `for` loop introduces its iteration variable in addition
+                    // to any declarations in the loop body.
+                    if matches!(header, LoopHeader::For { .. }) {
+                        count += 1;
+                    }
                     count += self.count_locals(body);
                 }
                 _ => {}
@@ -562,9 +636,14 @@ impl CodegenTarget for BcGen {
         // First emit top-level, after this call
         // the bytefile should have a main function offset
         // in public symbols
-        self.emit_top_level_def(&module.toplevel);
+        let mut instrs = self.emit_top_level_def(&module.toplevel);
 
         // TODO: emit other constructs
+        for func in &module.functions {
+            instrs.extend(self.emit_function_def(func));
+        }
+
+        self.bytefile.add_instructions(&instrs).unwrap();
 
         // Map this module path to the bytefile bits
         module_map.insert(module.path.clone(), self.bytefile.encode());
@@ -589,14 +668,25 @@ impl CodegenTarget for BcGen {
     fn emit_procedure_def(
         &mut self,
         proc_def_span: &crate::ast::Spannable<crate::ast::ProcedureDefinition>,
-    ) {
+    ) -> Vec<Instruction> {
         todo!()
     }
 
-    fn emit_function_def(&mut self, func_def_span: &Spannable<FunctionDefinition>) {
+    fn emit_function_def(
+        &mut self,
+        func_def_span: &Spannable<FunctionDefinition>,
+    ) -> Vec<Instruction> {
+        self.env.context = Context::Function;
+        self.env.local_counter = 0;
+        self.env.locals.clear();
+
         let func_def = &func_def_span.node;
         let locals = self.count_locals(&func_def.body);
         let mut instructions = Vec::new();
+
+        instructions.push(Instruction::LABEL {
+            name: func_def.name.as_ref().unwrap().clone(),
+        });
 
         // Emit BEGIN of function
         let begin_instr = Instruction::BEGIN {
@@ -613,14 +703,16 @@ impl CodegenTarget for BcGen {
         // Emit END of function
         instructions.push(Instruction::END);
 
-        self.bytefile.add_instructions(&instructions).unwrap();
+        self.env.context = Context::Global;
+
+        instructions
     }
 
-    fn emit_type_def(&mut self, type_def_span: &Spannable<TypeDefinition>) {
+    fn emit_type_def(&mut self, type_def_span: &Spannable<TypeDefinition>) -> Vec<Instruction> {
         todo!()
     }
 
-    fn emit_top_level_def(&mut self, top_level: &Vec<Spannable<Statement>>) {
+    fn emit_top_level_def(&mut self, top_level: &Vec<Spannable<Statement>>) -> Vec<Instruction> {
         // Top-level is just a main function, nothing special actually
         // The important thing is that top-level is evaluated on import (if used as module)
         // or immediately if its a main module
@@ -628,7 +720,7 @@ impl CodegenTarget for BcGen {
         let top_level_name = "main".to_string();
         let top_level_offset = self.bytefile.get_current_offset();
 
-        self.emit_function_def(&Spannable {
+        let instrs = self.emit_function_def(&Spannable {
             node: FunctionDefinition {
                 name: Some(top_level_name.clone()),
                 parameters: Vec::new(),
@@ -654,5 +746,7 @@ impl CodegenTarget for BcGen {
         self.bytefile
             .add_public_symbol(&top_level_name, self.bytefile.main_offset)
             .unwrap();
+
+        instrs
     }
 }
