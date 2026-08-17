@@ -811,13 +811,6 @@ impl<'input> Parser<'input> {
         // Skip newlines before checking for post-condition
         self.skip_newlines();
 
-        // Post-condition (at same indent as loop header, after Dedent)
-        let post_condition = if self.eat(&Token::KwПо) {
-            Some(Box::new(self.parse_expression()?))
-        } else {
-            None
-        };
-
         let end_pos = self.positions().1;
 
         Ok(Spannable::new(
@@ -825,7 +818,6 @@ impl<'input> Parser<'input> {
                 header,
                 while_condition,
                 body,
-                post_condition,
             }),
             (start_pos, end_pos),
         ))

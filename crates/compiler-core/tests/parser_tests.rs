@@ -462,17 +462,6 @@ fn parse_while_condition() {
     }
 }
 
-#[test]
-fn parse_post_condition() {
-    let statement = parse_first_statement("цикл\n  вывод: 1\nпо да");
-    match statement {
-        Statement::Loop(LoopStatement { post_condition, .. }) => {
-            assert!(post_condition.is_some());
-        }
-        other => panic!("expected Loop with post_condition, got {other:?}"),
-    }
-}
-
 // ── Procedure call ──────────────────────────────────────────────────────────
 
 #[test]
