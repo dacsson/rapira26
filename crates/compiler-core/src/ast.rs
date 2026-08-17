@@ -232,7 +232,6 @@ pub struct LoopStatement {
     pub header: LoopHeader,
     pub while_condition: Option<Box<Spannable<Expr>>>, // пока f
     pub body: Vec<Spannable<Statement>>,
-    pub post_condition: Option<Box<Spannable<Expr>>>, // кц по g
 }
 
 #[derive(Debug, Clone, PartialEq)]

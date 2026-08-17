@@ -289,9 +289,6 @@ impl CallGraph {
                 if let Some(condition) = &loop_.while_condition {
                     expressions.push(condition);
                 }
-                if let Some(post_condition) = &loop_.post_condition {
-                    expressions.push(post_condition);
-                }
 
                 expressions.extend(
                     loop_

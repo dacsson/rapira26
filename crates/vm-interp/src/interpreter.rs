@@ -24,10 +24,7 @@ const MAX_SEXP_TAGLEN: usize = 10;
 const MAX_OPERAND_STACK_SIZE: usize = 64;
 
 #[cfg(not(test))]
-const MAX_OPERAND_STACK_SIZE: usize = 1024; // 0x7fffffff;
-
-#[repr(align(16))]
-struct OperandStack([Object; MAX_OPERAND_STACK_SIZE]);
+const MAX_OPERAND_STACK_SIZE: usize = 1024 * 64; // 0x7fffffff;
 
 #[derive(Debug, Clone)]
 pub struct InstructionTrace {
@@ -70,8 +67,7 @@ const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), In
 ];
 
 pub struct Interpreter {
-    operand_stack: OperandStack,
-    operand_stack_len: usize,
+    operand_stack: Vec<Object>,
     frame_pointer: usize,
     /// Bytefile decoder
     decoder: Decoder,
@@ -85,43 +81,30 @@ impl Interpreter {
     /// Create a new interpreter with operand stack filled with
     /// emulated call to main
     pub fn new(decoder: Decoder) -> Self {
-        let mut operand_stack: OperandStack = OperandStack(array::repeat(Object::new_empty()));
-
-        unsafe {
-            __gc_init();
-        }
+        let mut operand_stack: Vec<Object> = Vec::new();
 
         // Put globals at the start of operand stack
         let global_areas_size = decoder.bf.global_area_size as usize;
-        for i in 0..global_areas_size {
-            operand_stack.0[i] = Object::new_empty();
+        for _ in 0..global_areas_size {
+            operand_stack.push(Object::new_empty());
         }
 
         // Emulating call to main
         // TODO: is this needed?
-        operand_stack.0[global_areas_size] = Object::new_empty(); // CLOSURE_OBJ
-        operand_stack.0[global_areas_size + 1] = Object::new_unboxed(2); // ARGS_COUNT
-        operand_stack.0[global_areas_size + 2] = Object::new_empty(); // LOCALS_COUNT
-        operand_stack.0[global_areas_size + 3] = Object::new_empty(); // OLD_FRAME_POINTER
-        operand_stack.0[global_areas_size + 4] = Object::new_empty(); // OLD_IP
-        operand_stack.0[global_areas_size + 5] = Object::new_empty(); // ARGV
-        operand_stack.0[global_areas_size + 6] = Object::new_empty(); // ARGC
-        operand_stack.0[global_areas_size + 7] = Object::new_empty(); // CURR_IP
-
-        unsafe {
-            let ptr_top: *const Object = &operand_stack.0[global_areas_size + 8];
-            __gc_stack_bottom = ptr_top as usize;
-
-            let ptr_bottom: *const Object = &operand_stack.0[0];
-            __gc_stack_top = ptr_bottom as usize;
-        }
+        operand_stack.push(Object::new_empty()); // CLOSURE_OBJ
+        operand_stack.push(Object::new_unboxed(2)); // ARGS_COUNT
+        operand_stack.push(Object::new_empty()); // LOCALS_COUNT
+        operand_stack.push(Object::new_empty()); // OLD_FRAME_POINTER
+        operand_stack.push(Object::new_empty()); // OLD_IP
+        operand_stack.push(Object::new_empty()); // ARGV
+        operand_stack.push(Object::new_empty()); // ARGC
+        operand_stack.push(Object::new_empty()); // CURR_IP
 
         let global_areas_size = decoder.bf.global_area_size as usize;
         let code_section_len = decoder.bf.code_section.len();
 
         Interpreter {
             operand_stack,
-            operand_stack_len: global_areas_size + 8,
             frame_pointer: global_areas_size,
             decoder,
             code_section_len,
@@ -511,10 +494,11 @@ impl Interpreter {
                 // `n` packs the newline flag (bit 30) with the real argument count
                 let newline_bit = n & LWRITE_NEWLINE_FLAG;
                 let n = n & LWRITE_NEWLINE_MASK;
+                let len = self.operand_stack.len();
 
                 if n != 0 {
-                    let borrow_operand_stack_elements = &mut self.operand_stack.0
-                        [self.operand_stack_len - (n as usize) + 1..=self.operand_stack_len];
+                    let borrow_operand_stack_elements =
+                        &mut self.operand_stack[len - (n as usize)..len];
                     for obj in borrow_operand_stack_elements {
                         libc::printf(RAP_stringify_object(obj.raw()));
                     }
@@ -587,13 +571,6 @@ impl Interpreter {
             return Err(InterpreterError::InvalidObjectPointer);
         };
 
-        // unsafe {
-        //     println!(
-        //         "{:#?}",
-        //         CStr::from_ptr(RAP_stringify_object(self.peek().unwrap().raw()))
-        //     );
-        // }
-
         // Push old instruction pointer
         // `BEGIN` instruction will collect it
         self.push(Object::new_unboxed(self.decoder.ip as i64))?;
@@ -648,13 +625,13 @@ impl Interpreter {
             return Err(InterpreterError::InvalidObjectPointer);
         };
 
-        let mut frame = FrameMetadata::get_from_stack(&self.operand_stack.0, self.frame_pointer)
+        let mut frame = FrameMetadata::get_from_stack(&self.operand_stack, self.frame_pointer)
             .ok_or(InterpreterError::NotEnoughArguments("STORE"))?;
 
         match rel {
             ValueRel::Arg => {
                 let value = frame
-                    .get_arg_at(&self.operand_stack.0, self.frame_pointer, index as usize)
+                    .get_arg_at(&self.operand_stack, self.frame_pointer, index as usize)
                     .unwrap();
 
                 self.push(value.clone())?;
@@ -682,7 +659,7 @@ impl Interpreter {
             },
             ValueRel::Local => unsafe {
                 let value = frame
-                    .get_local_at(&self.operand_stack.0, self.frame_pointer, index as usize)
+                    .get_local_at(&self.operand_stack, self.frame_pointer, index as usize)
                     .unwrap();
 
                 // println!("{:#?}", CStr::from_ptr(RAP_stringify_object(value.raw())));
@@ -704,7 +681,7 @@ impl Interpreter {
             return Err(InterpreterError::InvalidObjectPointer);
         };
 
-        let mut frame = FrameMetadata::get_from_stack(&self.operand_stack.0, self.frame_pointer)
+        let mut frame = FrameMetadata::get_from_stack(&self.operand_stack, self.frame_pointer)
             .ok_or(InterpreterError::NotEnoughArguments("STORE"))?;
 
         let value = self.pop()?;
@@ -713,7 +690,7 @@ impl Interpreter {
             ValueRel::Arg => {
                 frame
                     .set_arg_at(
-                        &mut self.operand_stack.0,
+                        &mut self.operand_stack,
                         self.frame_pointer,
                         index as usize,
                         value.clone(),
@@ -723,7 +700,7 @@ impl Interpreter {
             ValueRel::Capture => unsafe {
                 todo!();
                 // let closure = frame
-                //     .get_closure(&mut self.operand_stack.0, self.frame_pointer)
+                //     .get_closure(&mut self.operand_stack, self.frame_pointer)
                 //     .unwrap();
 
                 // let to_data = rtToData(
@@ -739,7 +716,7 @@ impl Interpreter {
             }
             ValueRel::Local => frame
                 .set_local_at(
-                    &mut self.operand_stack.0,
+                    &mut self.operand_stack,
                     self.frame_pointer,
                     index as usize,
                     value.clone(),
@@ -767,7 +744,7 @@ impl Interpreter {
             n_args,
             ret_frame_pointer,
             ret_ip,
-        } = FrameMetadata::get_from_stack(&self.operand_stack.0, self.frame_pointer)
+        } = FrameMetadata::get_from_stack(&self.operand_stack, self.frame_pointer)
             .ok_or(InterpreterError::NotEnoughArguments("END"))?;
 
         for _ in 0..n_locals {
@@ -832,7 +809,7 @@ impl Interpreter {
         let stack_size_for_function = payload >> 16;
         let args = (payload & 0xFFFF) as usize;
 
-        if self.operand_stack_len + stack_size_for_function as usize > MAX_OPERAND_STACK_SIZE {
+        if self.operand_stack.len() + stack_size_for_function as usize > MAX_OPERAND_STACK_SIZE {
             return Err(InterpreterError::StackOverflow);
         }
 
@@ -849,10 +826,10 @@ impl Interpreter {
         let ret_frame_pointer = self.frame_pointer;
 
         // Set new frame pointer as index into operand stack
-        if self.operand_stack.0.is_empty() {
+        if self.operand_stack.is_empty() {
             return Err(InterpreterError::NotEnoughArguments("BEGIN"));
         }
-        self.frame_pointer = self.operand_stack_len + 1;
+        self.frame_pointer = self.operand_stack.len();
 
         // the closure slot must still exist for the frame layout expected
         self.push(Object::new_empty())?;
@@ -1137,11 +1114,16 @@ impl Interpreter {
 
         if n == 0 {
             self.push(Object::new_tuple(0, &mut []))?;
+
+            let encoding = self.decoder.next::<u8>()?;
+            let instr = self.decoder.decode(encoding)?;
+
+            become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
         }
 
         // Take n elements from stack
-        let borrow_operand_stack_elements = &mut self.operand_stack.0
-            [self.operand_stack_len - (n as usize) + 1..=self.operand_stack_len];
+        let len = self.operand_stack.len();
+        let borrow_operand_stack_elements = &mut self.operand_stack[len - (n as usize)..len];
 
         let obj = Object::new_tuple(n as usize, borrow_operand_stack_elements);
 
@@ -1217,27 +1199,15 @@ impl Interpreter {
     /// Push to the operand stack
     #[inline(always)]
     fn push(&mut self, obj: Object) -> Result<(), InterpreterError> {
-        if self.operand_stack_len >= MAX_OPERAND_STACK_SIZE {
+        if self.operand_stack.len() >= MAX_OPERAND_STACK_SIZE {
             return Err(InterpreterError::StackOverflow);
         }
 
-        #[cfg(feature = "runtime_checks")]
-        if (self.operand_stack_len - 1) <= self.global_areas_size {
+        if (self.operand_stack.len() - 1) <= self.global_areas_size {
             return Err(InterpreterError::StackUnderflow);
         }
 
-        unsafe {
-            let ptr_bottom: *const Object = &self.operand_stack.0[0];
-            __gc_stack_top = ptr_bottom as usize;
-
-            self.operand_stack_len += 1;
-            self.operand_stack.0[self.operand_stack_len] = obj;
-
-            // Mutate empty object
-            let ptr_to_top: *const Object = &self.operand_stack.0[self.operand_stack_len];
-
-            __gc_stack_bottom = ptr_to_top as usize;
-        }
+        self.operand_stack.push(obj);
 
         Ok(())
     }
@@ -1245,75 +1215,56 @@ impl Interpreter {
     /// Pop from the operand stack
     #[inline(always)]
     fn pop(&mut self) -> Result<Object, InterpreterError> {
-        #[cfg(feature = "runtime_checks")]
-        if (self.operand_stack_len - 1) <= self.global_areas_size {
+        if (self.operand_stack.len() - 1) <= self.global_areas_size {
             return Err(InterpreterError::StackUnderflow);
         }
 
-        unsafe {
-            // Get top object
-            let ptr_to_top = __gc_stack_bottom as *mut Object;
-
-            // Move top pointer one object to the left
-            __gc_stack_bottom = __gc_stack_bottom - core::mem::size_of::<Object>();
-
-            self.operand_stack_len -= 1;
-
-            Ok(ptr_to_top.read())
-        }
+        let obj = self.operand_stack.pop().unwrap();
+        Ok(obj)
     }
 
     /// Returns the current top object on the operand stack, if any
     pub fn peek(&self) -> Option<Object> {
-        #[cfg(feature = "runtime_checks")]
-        if (self.operand_stack_len - 1) <= self.global_areas_size {
-            return Err(InterpreterError::StackUnderflow);
-        }
-
-        unsafe {
-            // Get top object
-            let ptr_to_top = __gc_stack_bottom as *mut Object;
-            let top = ptr_to_top.read();
-
-            Some(top)
-        }
+        self.operand_stack.last().cloned()
     }
 
     /// Take from the operand stack at `index`, relative to the top of the stack
     /// removes the element and returns it
     fn take(&mut self, index: usize) -> Result<Object, InterpreterError> {
-        #[cfg(feature = "runtime_checks")]
-        if (self.operand_stack_len - index - 1) <= self.global_areas_size {
+        if (self.operand_stack.len() - index - 1) <= self.global_areas_size {
             return Err(InterpreterError::StackUnderflow);
         }
 
-        unsafe {
-            // Move top pointer one object to the left
-            __gc_stack_bottom = __gc_stack_bottom - core::mem::size_of::<Object>();
-        }
-        let relative_index = self.operand_stack_len - index;
+        let relative_index = self.operand_stack.len() - index;
+        let taken = self.operand_stack.remove(relative_index);
 
-        let taken = self.operand_stack.0[relative_index].clone();
+        // unsafe {
+        //     // Move top pointer one object to the left
+        //     __gc_stack_bottom = __gc_stack_bottom - core::mem::size_of::<Object>();
+        // }
+        // let relative_index = self.operand_stack_len - index;
 
-        // Remove taken element and shift remaining elements down
-        if relative_index != self.operand_stack_len {
-            self.operand_stack
-                .0
-                .copy_within(relative_index + 1..=self.operand_stack_len, relative_index);
-        }
+        // let taken = self.operand_stack.0[relative_index].clone();
 
-        self.operand_stack_len -= 1;
+        // // Remove taken element and shift remaining elements down
+        // if relative_index != self.operand_stack_len {
+        //     self.operand_stack
+        //         .0
+        //         .copy_within(relative_index + 1..=self.operand_stack_len, relative_index);
+        // }
+
+        // self.operand_stack_len -= 1;
 
         Ok(taken)
     }
 
     /// Get global objects which occupy 0..global_size area in operand stack
     fn globals(&self) -> &[Object] {
-        &self.operand_stack.0[0..self.global_areas_size]
+        &self.operand_stack[0..self.global_areas_size]
     }
 
     fn globals_mut(&mut self) -> &mut [Object] {
-        &mut self.operand_stack.0[0..self.global_areas_size]
+        &mut self.operand_stack[0..self.global_areas_size]
     }
 }
 
