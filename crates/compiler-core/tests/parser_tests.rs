@@ -380,18 +380,6 @@ fn parse_selection_value_match() {
 // ── Loops ───────────────────────────────────────────────────────────────────
 
 #[test]
-fn parse_infinite_loop() {
-    let statement = parse_first_statement("цикл выход");
-    match statement {
-        Statement::Loop(LoopStatement {
-            header: LoopHeader::Infinite,
-            ..
-        }) => {}
-        other => panic!("expected Loop(Infinite), got {other:?}"),
-    }
-}
-
-#[test]
 fn parse_repeat_loop() {
     let statement = parse_first_statement("повтор 5 цикл вывод: 1");
     match statement {
@@ -454,9 +442,12 @@ fn parse_while_condition() {
     let statement = parse_first_statement("пока да цикл выход");
     match statement {
         Statement::Loop(LoopStatement {
-            while_condition, ..
+            header: LoopHeader::While(condition),
+            ..
         }) => {
-            assert!(while_condition.is_some());
+            let Expr::Literal(Literal::Boolean(true)) = &condition.node else {
+                panic!("expected true condition, got {condition:?}");
+            };
         }
         other => panic!("expected Loop with while_condition, got {other:?}"),
     }

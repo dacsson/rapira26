@@ -70,7 +70,6 @@ impl<'a> FrameMetadata {
     ) -> Option<()> {
         let arg_index = frame_pointer - self.n_args as usize + index;
 
-        #[cfg(feature = "runtime_checks")]
         if arg_index >= stack.len() || index > self.n_args as usize {
             return None;
         }
@@ -100,7 +99,6 @@ impl<'a> FrameMetadata {
     ) -> Option<()> {
         let local_index = frame_pointer + 5 + index;
 
-        #[cfg(feature = "runtime_checks")]
         if local_index >= stack.len() || index > self.n_locals as usize {
             return None;
         }

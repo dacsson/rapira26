@@ -797,28 +797,15 @@ impl<'input> Parser<'input> {
         let start_pos = self.positions().0;
         let header = self.parse_loop_header()?;
 
-        let while_condition = if self.eat(&Token::KwПока) {
-            Some(Box::new(self.parse_expression()?))
-        } else {
-            None
-        };
-
         self.expect(&Token::KwЦикл)?;
 
         // Block or single-line loop body
         let body = self.parse_block_or_single_statement()?;
 
-        // Skip newlines before checking for post-condition
-        self.skip_newlines();
-
         let end_pos = self.positions().1;
 
         Ok(Spannable::new(
-            Statement::Loop(LoopStatement {
-                header,
-                while_condition,
-                body,
-            }),
+            Statement::Loop(LoopStatement { header, body }),
             (start_pos, end_pos),
         ))
     }
@@ -850,9 +837,21 @@ impl<'input> Parser<'input> {
                 to,
                 step,
             })
+        } else if self.eat(&Token::KwПока) {
+            // FIXME: this should have a condition
+            let condition = self.parse_expression()?;
+            Ok(LoopHeader::While(Box::new(condition)))
         } else {
-            // цикл or пока — both mean Infinite header
-            Ok(LoopHeader::Infinite)
+            Err(ParseError::UnexpectedToken {
+                position_start: self.positions().0,
+                position_end: self.positions().1,
+                found: self
+                    .current
+                    .as_ref()
+                    .map(|(_, token, _)| token.clone())
+                    .unwrap(),
+                expected: "для, пока, повтор".to_string(),
+            })
         }
     }
 
