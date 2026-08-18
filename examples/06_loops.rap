@@ -1,16 +1,6 @@
 \ Tests: all four loop forms and выход (break)
 \ No input required.
 
-\ --- infinite loop with выход ---
-I := 1
-цикл
-  если I > 3 то выход
-  вывод: I
-  I = I + 1
-\ => 1
-\ => 2
-\ => 3
-
 \ --- пока (while pre-condition) ---
 N := 5
 пока N > 0 цикл
@@ -26,7 +16,6 @@ K := 0
 пока не СТОП цикл
   K = K + 1
   если K >= 3 то СТОП = да
-по СТОП
 вывод: K
 \ => 3
 
@@ -53,24 +42,17 @@ K := 0
 вывод: ""
 \ => 10 8 6 4 2
 
-\ --- для without от (start defaults to 1) ---
+\ --- для without от (start defaults to 0) ---
 для I шаг 1 цикл
   вывод бпс: I, " "
   если I >= 3 то выход
 вывод: ""
-\ => 1 2 3
+\ => 0 1 2 3
 
 \ --- для от a до b with empty range (a > b, positive step) → body never runs ---
 для I от 5 до 3 цикл
   вывод: "никогда"
 \ => (no output)
-
-\ --- для пока: for loop with an additional while-condition ---
-для I от 1 до 100 пока I * I < 50 цикл
-  вывод бпс: I, " "
-вывод: ""
-\ => 1 2 3 4 5 6 7
-\ (7*7=49 < 50, 8*8=64 >= 50)
 
 \ --- выход inside nested loops exits only the innermost loop ---
 для I от 1 до 3 цикл

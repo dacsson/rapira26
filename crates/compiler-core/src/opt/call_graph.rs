@@ -264,7 +264,9 @@ impl CallGraph {
                 let mut expressions = Vec::new();
 
                 match loop_.header {
-                    LoopHeader::Infinite => {}
+                    LoopHeader::While(ref expr) => {
+                        expressions.push(expr);
+                    }
                     LoopHeader::Repeat(ref expr) => {
                         expressions.push(expr);
                     }
@@ -284,10 +286,6 @@ impl CallGraph {
                             expressions.push(step);
                         }
                     }
-                }
-
-                if let Some(condition) = &loop_.while_condition {
-                    expressions.push(condition);
                 }
 
                 expressions.extend(

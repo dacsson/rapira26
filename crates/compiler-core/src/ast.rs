@@ -230,14 +230,13 @@ pub struct ValueMatchCase {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoopStatement {
     pub header: LoopHeader,
-    pub while_condition: Option<Box<Spannable<Expr>>>, // пока f
     pub body: Vec<Spannable<Statement>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LoopHeader {
-    /// Просто цикл (без условия)
-    Infinite,
+    /// пока f
+    While(Box<Spannable<Expr>>),
     /// повтор N
     Repeat(Box<Spannable<Expr>>),
     /// для i [от a] [до b] [шаг c]

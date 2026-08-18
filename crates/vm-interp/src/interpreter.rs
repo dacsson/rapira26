@@ -685,7 +685,6 @@ impl Interpreter {
             .ok_or(InterpreterError::NotEnoughArguments("STORE"))?;
 
         let value = self.pop()?;
-
         match rel {
             ValueRel::Arg => {
                 frame
@@ -723,8 +722,6 @@ impl Interpreter {
                 )
                 .unwrap(),
         }
-
-        self.push(value)?;
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;

@@ -17,8 +17,9 @@ use vm_core::{
 
 use crate::{
     ast::{
-        BinaryOperator, Expr, FunctionDefinition, LValue, Literal, LoopHeader, LoopStatement,
-        NameDeclarations, SelectionStatement, Spannable, Statement, TypeDefinition, UnaryOperator,
+        BinaryOperator, CallArgument, Expr, FunctionDefinition, LValue, Literal, LoopHeader,
+        LoopStatement, NameDeclarations, SelectionStatement, Spannable, Statement, TypeDefinition,
+        UnaryOperator,
     },
     codegen::{AbsolutGeneratedCodePath, CodegenTarget, ModuleMap, RunError},
     module::Module,
@@ -43,16 +44,20 @@ enum Context {
 }
 
 struct Env {
-    /// Locals counter
     local_counter: i32,
     arg_counter: i32,
-    /// Globals counter
+    label_counter: i32,
     global_counter: i32,
     /// Mapping from local variable names to their bytecode index
     locals: HashMap<String, i32>,
     args: HashMap<String, i32>,
     /// Mapping from global variable names to their bytecode index
     globals: HashMap<String, i32>,
+    /// Currently active loop `end` labels, innermost on top.
+    ///
+    /// An `exit` statement must jump out of the nearest enclosing loop, so
+    /// `ExitLoop` reads the this stack top
+    loop_end_labels: Vec<Label>,
     /// Current context (global or function)
     context: Context,
 }
@@ -95,38 +100,61 @@ impl Env {
         let global = self.globals.get(name).map(|id| (*id, ValueRel::Global));
         local.or(arg).or(global)
     }
+
+    fn fresh_label(&mut self, prefix: &str) -> Label {
+        let name = format!("{prefix}_{}", self.label_counter);
+        self.label_counter += 1;
+
+        Label { name, offset: None }
+    }
+
+    /// Register a loop `end` label so that `exit` inside the loop's body
+    /// jumps to it
+    ///
+    /// Must be paired with [`Self::pop_loop_end`] when the loop
+    /// is finished emitting
+    fn push_loop_end(&mut self, label: Label) {
+        self.loop_end_labels.push(label);
+    }
+
+    /// Forget the most recently pushed loop `end` label
+    fn pop_loop_end(&mut self) {
+        if self.loop_end_labels.pop().is_none() {
+            panic!("Unbalanced push/pop of loop end labels");
+        }
+    }
+
+    /// The end label of the innermost currently emitting loop, if any
+    fn current_loop_end(&self) -> Option<&Label> {
+        self.loop_end_labels.last()
+    }
 }
 
 /// Bytecode generator for the rapira virtual machine
 pub struct BcGen {
     bytefile: Bytefile,
     env: Env,
-    label_counter: usize,
 }
 
 impl BcGen {
     pub fn new() -> Self {
         Self {
             bytefile: Bytefile::new(),
-            label_counter: 0,
             env: Env {
                 // TODO: maybe we can use `count_locals` to
                 //       pre-allocate enough indecies?
                 local_counter: 0,
                 arg_counter: 0,
+                label_counter: 0,
                 global_counter: 0,
+
                 locals: HashMap::new(),
                 args: HashMap::new(),
                 globals: HashMap::new(),
+                loop_end_labels: Vec::new(),
                 context: Context::Global,
             },
         }
-    }
-
-    fn fresh_label(&mut self, prefix: &str) -> Label {
-        let name = format!("{prefix}_{}", self.label_counter);
-        self.label_counter += 1;
-        Label { name, offset: None }
     }
 
     fn emit_expr(&mut self, expr_span: &Spannable<Expr>) -> Vec<Instruction> {
@@ -381,166 +409,171 @@ impl BcGen {
 
                 instrs
             }
-            Statement::Loop(LoopStatement {
-                header,
-                while_condition,
-                body,
-            }) => {
-                if let LoopHeader::Repeat(count) = header {
-                    let mut instrs = Vec::new();
+            Statement::Loop(LoopStatement { header, body }) => {
+                let mut instrs = Vec::new();
 
-                    let (index, rel) = self.env.allocate_variable(format!(
-                        "repeat_{}_{}",
-                        count.position_start, count.position_end
-                    ));
+                match header {
+                    LoopHeader::Repeat(count) => {
+                        let (index, rel) = self.env.allocate_variable(format!(
+                            "repeat_{}_{}",
+                            count.position_start, count.position_end
+                        ));
 
-                    instrs.extend(self.emit_expr(count));
-                    instrs.push(Instruction::STORE { rel, index });
+                        instrs.extend(self.emit_expr(count));
+                        instrs.push(Instruction::STORE { rel, index });
 
-                    let loop_label = self.fresh_label("repeat_loop");
-                    let end_label = self.fresh_label("repeat_end");
+                        let loop_label = self.env.fresh_label("repeat_loop");
+                        let end_label = self.env.fresh_label("repeat_end");
+                        self.env.push_loop_end(end_label.clone());
 
-                    instrs.push(Instruction::LABEL {
-                        name: loop_label.name.clone(),
-                    });
+                        instrs.push(Instruction::LABEL {
+                            name: loop_label.name.clone(),
+                        });
 
-                    // While the remaining count is positive, run the body
-                    instrs.push(Instruction::LOAD { rel, index });
-                    instrs.push(Instruction::CONST { value: 0 });
-                    instrs.push(Instruction::BINOP { op: Op::GT });
-                    instrs.push(Instruction::CJMP {
-                        dest: end_label.clone(),
-                        kind: CompareJumpKind::ISZERO,
-                    });
-
-                    if let Some(condition) = while_condition {
-                        instrs.extend(self.emit_expr(condition));
+                        // While the remaining count is positive, run the body
+                        instrs.push(Instruction::LOAD { rel, index });
+                        instrs.push(Instruction::CONST { value: 0 });
+                        instrs.push(Instruction::BINOP { op: Op::GT });
                         instrs.push(Instruction::CJMP {
                             dest: end_label.clone(),
                             kind: CompareJumpKind::ISZERO,
                         });
-                    }
 
-                    for stmt in body {
-                        instrs.extend(self.emit_statement(stmt));
-                    }
-
-                    // Decrement the remaining count, then re-test the guard
-                    instrs.push(Instruction::LOAD { rel, index });
-                    instrs.push(Instruction::CONST { value: 1 });
-                    instrs.push(Instruction::BINOP { op: Op::SUB });
-                    instrs.push(Instruction::STORE { rel, index });
-                    instrs.push(Instruction::JMP { dest: loop_label });
-                    instrs.push(Instruction::LABEL {
-                        name: end_label.name,
-                    });
-
-                    // Destroy the counter
-                    let counter_name =
-                        format!("repeat_{}_{}", count.position_start, count.position_end);
-                    self.env.deallocate_variable(&counter_name);
-
-                    return instrs;
-                }
-
-                let mut instrs = Vec::new();
-
-                let from: Option<Box<Spannable<Expr>>>;
-                let to: Option<Box<Spannable<Expr>>>;
-                let mut step_expr = vec![Instruction::CONST { value: 1 }];
-                let variable: String;
-
-                match header {
-                    LoopHeader::For {
-                        variable: var,
-                        from: from_expr,
-                        to: to_expr,
-                        step: step_expr_,
-                    } => {
-                        from = from_expr.clone();
-                        to = to_expr.clone();
-                        if let Some(step_expr_) = step_expr_ {
-                            step_expr = self.emit_expr(step_expr_);
+                        for stmt in body {
+                            instrs.extend(self.emit_statement(stmt));
                         }
-                        variable = var.clone();
+
+                        // Decrement the remaining count, then re-test the guard
+                        instrs.push(Instruction::LOAD { rel, index });
+                        instrs.push(Instruction::CONST { value: 1 });
+                        instrs.push(Instruction::BINOP { op: Op::SUB });
+                        instrs.push(Instruction::STORE { rel, index });
+                        instrs.push(Instruction::JMP {
+                            dest: loop_label.clone(),
+                        });
+                        instrs.push(Instruction::LABEL {
+                            name: end_label.name.clone(),
+                        });
+
+                        // Destroy the counter
+                        let counter_name =
+                            format!("repeat_{}_{}", count.position_start, count.position_end);
+                        self.env.deallocate_variable(&counter_name);
+
+                        self.env.pop_loop_end();
+
+                        return instrs;
                     }
-                    _ => todo!("loop form {:#?}", header),
+                    LoopHeader::For {
+                        variable,
+                        from,
+                        to,
+                        step,
+                    } => {
+                        let from_expr = from.as_ref().map(|expr| self.emit_expr(expr));
+                        let to_expr = to.as_ref().map(|expr| self.emit_expr(expr));
+                        let step_expr = step
+                            .as_ref()
+                            .map(|expr| self.emit_expr(expr))
+                            .unwrap_or(vec![Instruction::CONST { value: 1 }]);
+
+                        // TODO: we can make a helper for workin in scopes
+                        //       maybe something like: `do_in_scope(||)`
+
+                        let (index, rel) = self.env.allocate_variable(variable.clone());
+
+                        // Declare loop variable
+                        if let Some(from) = from_expr {
+                            instrs.extend(from);
+                        } else {
+                            // TODO: should we default to 0?
+                            instrs.extend(vec![Instruction::CONST { value: 0 }]);
+                        }
+                        instrs.push(Instruction::STORE { rel, index });
+
+                        let loop_label = self.env.fresh_label("for_loop");
+                        let end_label = self.env.fresh_label("for_end");
+                        self.env.push_loop_end(end_label.clone());
+                        instrs.push(Instruction::LABEL {
+                            name: loop_label.name.clone(),
+                        });
+
+                        // An omitted upper bound makes the `for` loop unbounded.
+                        if let Some(to) = to_expr {
+                            // step > 0 && variable <= to
+                            instrs.extend(step_expr.clone());
+                            instrs.push(Instruction::CONST { value: 0 });
+                            instrs.push(Instruction::BINOP { op: Op::GT });
+                            instrs.push(Instruction::LOAD { rel, index });
+                            instrs.extend(to.clone());
+                            instrs.push(Instruction::BINOP { op: Op::LEQ });
+                            instrs.push(Instruction::BINOP { op: Op::AND });
+
+                            // step <= 0 && variable >= to
+                            instrs.extend(step_expr.clone());
+                            instrs.push(Instruction::CONST { value: 0 });
+                            instrs.push(Instruction::BINOP { op: Op::LEQ });
+                            instrs.push(Instruction::LOAD { rel, index });
+                            instrs.extend(to);
+                            instrs.push(Instruction::BINOP { op: Op::GEQ });
+                            instrs.push(Instruction::BINOP { op: Op::AND });
+
+                            instrs.push(Instruction::BINOP { op: Op::OR });
+
+                            instrs.push(Instruction::CJMP {
+                                dest: end_label.clone(),
+                                kind: CompareJumpKind::ISZERO,
+                            });
+                        }
+
+                        for stmt in body {
+                            instrs.extend(self.emit_statement(stmt));
+                        }
+
+                        // Advance the loop variable before jumping back to the guard.
+                        instrs.push(Instruction::LOAD { rel, index });
+                        instrs.extend(step_expr);
+                        instrs.push(Instruction::BINOP { op: Op::ADD });
+                        instrs.push(Instruction::STORE { rel, index });
+                        instrs.push(Instruction::JMP {
+                            dest: loop_label.clone(),
+                        });
+                        instrs.push(Instruction::LABEL {
+                            name: end_label.name.clone(),
+                        });
+
+                        // Destroy loop variable
+                        self.env.deallocate_variable(&variable);
+
+                        self.env.pop_loop_end();
+                    }
+                    LoopHeader::While(condition) => {
+                        let loop_label = self.env.fresh_label("while_loop");
+                        let end_label = self.env.fresh_label("while_end");
+
+                        instrs.push(Instruction::LABEL {
+                            name: loop_label.name.clone(),
+                        });
+                        instrs.extend(self.emit_expr(condition));
+
+                        self.env.push_loop_end(end_label.clone());
+                        instrs.push(Instruction::CJMP {
+                            dest: end_label.clone(),
+                            kind: CompareJumpKind::ISZERO,
+                        });
+                        for stmt in body {
+                            instrs.extend(self.emit_statement(stmt));
+                        }
+                        instrs.push(Instruction::JMP {
+                            dest: loop_label.clone(),
+                        });
+                        instrs.push(Instruction::LABEL {
+                            name: end_label.name.clone(),
+                        });
+
+                        self.env.pop_loop_end();
+                    }
                 }
-
-                let from_expr = from.as_ref().map(|expr| self.emit_expr(expr));
-                let to_expr = to.as_ref().map(|expr| self.emit_expr(expr));
-
-                // TODO: we can make a helper for workin in scopes
-                //       maybe something like: `do_in_scope(||)`
-
-                let (index, rel) = self.env.allocate_variable(variable.clone());
-
-                // Declare loop variable
-                if let Some(from) = from_expr {
-                    instrs.extend(from);
-                } else {
-                    todo!("unpsecified from bound in loop")
-                }
-                instrs.push(Instruction::STORE { rel, index });
-
-                let loop_label = self.fresh_label("for_loop");
-                let end_label = self.fresh_label("for_end");
-                instrs.push(Instruction::LABEL {
-                    name: loop_label.name.clone(),
-                });
-
-                // An omitted upper bound makes the `for` loop unbounded.
-                if let Some(to) = to_expr {
-                    // step > 0 && variable <= to
-                    instrs.extend(step_expr.clone());
-                    instrs.push(Instruction::CONST { value: 0 });
-                    instrs.push(Instruction::BINOP { op: Op::GT });
-                    instrs.push(Instruction::LOAD { rel, index });
-                    instrs.extend(to.clone());
-                    instrs.push(Instruction::BINOP { op: Op::LEQ });
-                    instrs.push(Instruction::BINOP { op: Op::AND });
-
-                    // step <= 0 && variable >= to
-                    instrs.extend(step_expr.clone());
-                    instrs.push(Instruction::CONST { value: 0 });
-                    instrs.push(Instruction::BINOP { op: Op::LEQ });
-                    instrs.push(Instruction::LOAD { rel, index });
-                    instrs.extend(to);
-                    instrs.push(Instruction::BINOP { op: Op::GEQ });
-                    instrs.push(Instruction::BINOP { op: Op::AND });
-
-                    instrs.push(Instruction::BINOP { op: Op::OR });
-
-                    instrs.push(Instruction::CJMP {
-                        dest: end_label.clone(),
-                        kind: CompareJumpKind::ISZERO,
-                    });
-                }
-
-                if let Some(condition) = while_condition {
-                    instrs.extend(self.emit_expr(condition));
-                    instrs.push(Instruction::CJMP {
-                        dest: end_label.clone(),
-                        kind: CompareJumpKind::ISZERO,
-                    });
-                }
-
-                for stmt in body {
-                    instrs.extend(self.emit_statement(stmt));
-                }
-
-                // Advance the loop variable before jumping back to the guard.
-                instrs.push(Instruction::LOAD { rel, index });
-                instrs.extend(step_expr);
-                instrs.push(Instruction::BINOP { op: Op::ADD });
-                instrs.push(Instruction::STORE { rel, index });
-                instrs.push(Instruction::JMP { dest: loop_label });
-                instrs.push(Instruction::LABEL {
-                    name: end_label.name,
-                });
-
-                // Destroy loop variable
-                self.env.deallocate_variable(&variable);
 
                 instrs
             }
@@ -558,12 +591,12 @@ impl BcGen {
             } => {
                 let mut instrs = self.emit_expr(condition);
 
-                let begin_label = self.fresh_label("if_begin");
-                let end_label = self.fresh_label("if_skip");
+                let begin_label = self.env.fresh_label("if_begin");
+                let end_label = self.env.fresh_label("if_skip");
                 let mut else_label = None;
 
                 if let Some(..) = else_body {
-                    else_label = Some(self.fresh_label("else"));
+                    else_label = Some(self.env.fresh_label("else"));
                 }
 
                 // Push begin label
@@ -597,7 +630,7 @@ impl BcGen {
                     });
 
                     instrs.push(Instruction::LABEL {
-                        name: else_label.unwrap().name.clone(),
+                        name: else_label.clone().unwrap().name.clone(),
                     });
 
                     for stmt in else_body {
@@ -607,6 +640,86 @@ impl BcGen {
 
                 instrs.push(Instruction::LABEL {
                     name: end_label.name.clone(),
+                });
+
+                instrs
+            }
+            Statement::ProcedureCall {
+                procedure,
+                arguments,
+            } => {
+                let mut instrs = vec![];
+
+                let Expr::Name(name) = &procedure.node else {
+                    panic!("Anonymous functions not implemented");
+                };
+
+                for argument in arguments {
+                    let CallArgument::Input(arg) = &argument else {
+                        todo!("inout arguments are not supported");
+                    };
+                    instrs.extend(self.emit_expr(arg));
+                }
+
+                if let Some(&(_, builtin)) = BUILTIN_FUNCS.iter().find(|(n, _)| name == n) {
+                    // A builtin call
+                    instrs.push(Instruction::CALLBUILTIN {
+                        name: builtin, // why do need to clone this?
+                        n: arguments.len() as i32,
+                    });
+                } else {
+                    instrs.push(Instruction::CALL {
+                        dest: Label {
+                            name: name.clone(),
+                            offset: None,
+                        },
+                        n: arguments.len() as i32,
+                    });
+                }
+
+                // Because this is a statement, we need to
+                // discard the return value
+                instrs.push(Instruction::DROP);
+
+                instrs
+            }
+            Statement::Input {
+                text_mode,
+                variables,
+            } => {
+                if *text_mode {
+                    todo!("text_mode in input");
+                }
+
+                let mut instrs = vec![];
+
+                for var in variables {
+                    instrs.push(Instruction::CALLBUILTIN {
+                        name: Builtin::Lread,
+                        n: 0,
+                    });
+
+                    let LValue::Name(name) = &var.node else {
+                        todo!("{:?}", var.node);
+                    };
+
+                    let (index, rel) = self.env.allocate_variable(name.clone());
+                    instrs.push(Instruction::STORE { rel, index });
+                }
+
+                instrs
+            }
+            Statement::ExitLoop => {
+                let mut instrs = vec![];
+
+                // Jump to the end of the innermost enclosing loop, per `exit`
+                // semantics
+                let Some(nearest_end_label) = self.env.current_loop_end() else {
+                    panic!("Nowhere to jump from an early exit");
+                };
+
+                instrs.push(Instruction::JMP {
+                    dest: nearest_end_label.clone(),
                 });
 
                 instrs
@@ -647,7 +760,8 @@ impl BcGen {
                 Statement::Loop(LoopStatement { header, body, .. }) => {
                     // A `for` loop introduces its iteration variable in addition
                     // to any declarations in the loop body.
-                    if matches!(header, LoopHeader::For { .. }) {
+                    // As well as the `repeat` loop (implicit counter variable)
+                    if let LoopHeader::For { .. } | LoopHeader::Repeat { .. } = header {
                         count += 1;
                     }
                     count += self.count_locals(body);
