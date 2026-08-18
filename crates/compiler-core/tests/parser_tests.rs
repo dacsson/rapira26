@@ -622,6 +622,17 @@ fn parse_subscript_expression() {
 }
 
 #[test]
+fn parse_subscript_expression_dot_syntax() {
+    let statement = parse_first_statement("вывод: X.1");
+    match statement {
+        Statement::Output { values, .. } => {
+            assert!(matches!(&values[0].node, Expr::Subscript { .. }));
+        }
+        other => panic!("expected Output, got {other:?}"),
+    }
+}
+
+#[test]
 fn parse_slice_expression() {
     let statement = parse_first_statement("вывод: X[1:3]");
     match statement {
