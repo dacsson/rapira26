@@ -130,8 +130,23 @@ void RAP_check_leaks(void) {
 }
 #endif
 
+// CHECKERS
+
+bool RAP_IS_SMI(RAP_Value value) {
+    return ((value) & RAP_TAG_MASK) == 0x0;
+}
+
+bool RAP_IS_BOOL(RAP_Value value) {
+    return ((value) & RAP_TAG_MASK) == 0x1;
+}
+
+bool RAP_IS_PTR(RAP_Value value) {
+    return ((value) & RAP_TAG_MASK) == 0x3;
+}
+
 // CONSTRUCTORS
 
+// TODO: this should be a heap allocation
 RAP_Value RAP_create_null_obj(void) {
   RAP_TRACK_ALLOC();
   RAP_Object *obj = malloc(sizeof(RAP_Object));
@@ -142,15 +157,15 @@ RAP_Value RAP_create_null_obj(void) {
 
 RAP_Value RAP_create_int_obj(int64_t value) {
   // TODO: BigInts check
-  if (value > INT32_MAX) {
-    // Heap allocate 64 bit ints
-    RAP_TRACK_ALLOC();
-    RAP_Object *obj = malloc(sizeof(RAP_Object));
-    obj->tag = RAP_OBJECT_TAG_INT;
-    obj->int_val = value;
-    obj->refcount = 1;
-    return RAP_CREATE_PTR(obj);
-  }
+  // if (value > INT32_MAX) {
+  //   // Heap allocate 64 bit ints
+  //   RAP_TRACK_ALLOC();
+  //   RAP_Object *obj = malloc(sizeof(RAP_Object));
+  //   obj->tag = RAP_OBJECT_TAG_INT;
+  //   obj->int_val = value;
+  //   obj->refcount = 1;
+  //   return RAP_CREATE_PTR(obj);
+  // }
   // SMI tagged
   RAP_Value obj = RAP_CREATE_SMI(value);
   return obj;
@@ -254,6 +269,11 @@ char *RAP_stringify_object(RAP_Value obj) {
 }
 
 // REFERENCE COUNTING
+
+void RAP_inc_ref(RAP_Value obj) {
+  if (RAP_IS_PTR(obj))
+    RAP_PTR_VALUE(obj)->refcount++;
+}
 
 void inline RAP_dec_ref(RAP_Value obj) {
   if (!RAP_IS_PTR(obj))

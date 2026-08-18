@@ -4,26 +4,6 @@
 #include "rapobject.h"
 #include "rapvalue.h"
 
-// GC INFO
-// TODO: this is dummys right now
-
-extern size_t __gc_stack_top;
-extern size_t __gc_stack_bottom;
-
-// Defined in gc_stub.c. Rapira uses refcounting, not conservative stack
-// scanning, so this is a no-op; the symbols exist only so the VM interpreter
-// (adopted from LaMa) can keep its operand-stack-top pointer in
-// __gc_stack_bottom. Declared (not defined inline) to avoid ODR across TUs.
-void __gc_init(void);
-
-// METADATA
-
-// Should be overriden by compiled module
-// TODO: this not thread safe
-extern char *RAP_curret_module_path;
-extern size_t RAP_current_pos_start;
-extern size_t RAP_current_pos_end;
-
 // CONSTRUCTORS
 
 RAP_Value RAP_create_null_obj(void);
@@ -175,11 +155,7 @@ uint16_t RAP_get_variant_tag(RAP_Value val);
 // REFERENCE COUNTING
 
 // RAP_inc_ref takes a RAP_Value, no-op for inline values (SMI, bool, double)
-#define RAP_inc_ref(val)                                                       \
-  do {                                                                         \
-    if (RAP_IS_PTR(val))                                                       \
-      RAP_PTR_VALUE(val)->refcount++;                                          \
-  } while (0)
+void RAP_inc_ref(RAP_Value obj);
 
 void RAP_dec_ref(RAP_Value obj);
 

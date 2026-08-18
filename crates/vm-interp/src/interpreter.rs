@@ -3,15 +3,16 @@
 use crate::frame::FrameMetadata;
 use crate::object::{Object, ObjectError};
 use crate::{
-    __gc_init, __gc_stack_bottom, __gc_stack_top, RAP_abs, RAP_add, RAP_and, RAP_create_slice,
-    RAP_divide, RAP_equal, RAP_floor, RAP_floor_divide, RAP_get_tuple_item, RAP_greater_or_equal,
-    RAP_greater_than, RAP_index_of, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than,
+    RAP_IS_SMI, RAP_abs, RAP_add, RAP_and, RAP_create_slice, RAP_dec_ref, RAP_divide, RAP_equal,
+    RAP_floor, RAP_floor_divide, RAP_get_tuple_item, RAP_greater_or_equal, RAP_greater_than,
+    RAP_inc_ref, RAP_index_of, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than,
     RAP_modulo, RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_power, RAP_round,
     RAP_set_tuple_item, RAP_sign, RAP_slice_assign, RAP_sqrt, RAP_stringify_object, RAP_subtract,
 };
 use core::array;
 use core::ffi::CStr;
 use std::collections::HashMap;
+use std::ffi::CString;
 use vm_core::bytecode::{
     Builtin, CompareJumpKind, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, Label, Op,
     UnaryOp, ValueRel,
@@ -25,12 +26,6 @@ const MAX_OPERAND_STACK_SIZE: usize = 64;
 
 #[cfg(not(test))]
 const MAX_OPERAND_STACK_SIZE: usize = 1024 * 64; // 0x7fffffff;
-
-#[derive(Debug, Clone)]
-pub struct InstructionTrace {
-    pub instruction: Instruction,
-    pub offset: usize,
-}
 
 const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), InterpreterError>;
     30] = [
@@ -71,8 +66,6 @@ pub struct Interpreter {
     frame_pointer: usize,
     /// Bytefile decoder
     decoder: Decoder,
-    /// Code section length
-    code_section_len: usize,
     /// Globals length
     global_areas_size: usize,
 }
@@ -92,7 +85,7 @@ impl Interpreter {
         // Emulating call to main
         // TODO: is this needed?
         operand_stack.push(Object::new_empty()); // CLOSURE_OBJ
-        operand_stack.push(Object::new_unboxed(2)); // ARGS_COUNT
+        operand_stack.push(Object::new_boxed(2)); // ARGS_COUNT
         operand_stack.push(Object::new_empty()); // LOCALS_COUNT
         operand_stack.push(Object::new_empty()); // OLD_FRAME_POINTER
         operand_stack.push(Object::new_empty()); // OLD_IP
@@ -101,13 +94,11 @@ impl Interpreter {
         operand_stack.push(Object::new_empty()); // CURR_IP
 
         let global_areas_size = decoder.bf.global_area_size as usize;
-        let code_section_len = decoder.bf.code_section.len();
 
         Interpreter {
             operand_stack,
             frame_pointer: global_areas_size,
             decoder,
-            code_section_len,
             global_areas_size,
         }
     }
@@ -133,6 +124,12 @@ impl Interpreter {
                 RunError::ErrorAtOffset(global_offset, e, instr.clone())
             },
         )?;
+
+        // Release every remaining owned reference so the
+        // run ends with a clean heap
+        for obj in self.operand_stack.drain(..) {
+            unsafe { RAP_dec_ref(obj.raw()) };
+        }
 
         Ok(())
     }
@@ -174,7 +171,7 @@ impl Interpreter {
         // let length = arity as usize + 1; // + 1 for offset
 
         // // Push offset - which is a first element to args of Bsexp
-        // self.push(Object::new_unboxed(offset as i64))?;
+        // self.push(Object::new_boxed(offset as i64))?;
 
         // // Read captured variables description from code section
         // for i in 0..arity as usize {
@@ -222,7 +219,7 @@ impl Interpreter {
 
         //             let element = get_captured_variable(&*to_data, desc.index as usize);
 
-        //             self.push(Object::new_unboxed(element))?;
+        //             self.push(Object::new_boxed(element))?;
         //         },
         //         ValueRel::Global => {
         //             let value = self.globals()[desc.index as usize].clone();
@@ -297,7 +294,7 @@ impl Interpreter {
 
         // // Push old instruction pointer
         // // `CBEGIN` instruction will collect it
-        // self.push(Object::new_unboxed(self.decoder.ip as i64))?;
+        // self.push(Object::new_boxed(self.decoder.ip as i64))?;
 
         // // Re-push closure object
         // // `CBEGIN` instruction will collect it
@@ -390,6 +387,9 @@ impl Interpreter {
             unsafe { RAP_get_tuple_item(collection.raw(), u32::try_from(index).unwrap()) };
         self.push(Object::new(element))?;
 
+        unsafe { RAP_dec_ref(collection.raw()) };
+        unsafe { RAP_dec_ref(index_obj.raw()) };
+
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
 
@@ -407,6 +407,10 @@ impl Interpreter {
         let value = self.pop()?;
 
         unsafe { RAP_slice_assign(slice.raw(), value.raw()) };
+
+        // TODO: is this needed?
+        unsafe { RAP_dec_ref(slice.raw()) };
+        unsafe { RAP_dec_ref(value.raw()) };
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
@@ -483,8 +487,11 @@ impl Interpreter {
 
                 // RAP_length returns RAP_Value (boxed SMI)
                 let length = unsafe { RAP_length(obj.raw()) };
+                // Consume the popped argument. If a result-style alias with the
+                // same raw pointer is pushed below, its dec is guarded.
+                unsafe { RAP_dec_ref(obj.raw()) };
 
-                self.push(Object::new_unboxed(length as i64))?;
+                self.push(Object::new(length))?;
             }
             Builtin::Lread => unsafe {
                 // Parses a line of stdin into a typed RAP_Value (int/float/text).
@@ -500,14 +507,19 @@ impl Interpreter {
                     let borrow_operand_stack_elements =
                         &mut self.operand_stack[len - (n as usize)..len];
                     for obj in borrow_operand_stack_elements {
-                        libc::printf(RAP_stringify_object(obj.raw()));
+                        let cstr = CString::from_raw(RAP_stringify_object(obj.raw()));
+                        libc::printf(cstr.as_ptr());
                     }
                     if newline_bit != 0 {
                         libc::printf(c"\n".as_ptr());
                     }
                 }
                 for _ in 0..n {
-                    self.pop()?;
+                    let obj = self.pop()?;
+                    // `printf` borrows the string only for the duration of the
+                    // call
+                    // once printed, the argument's owning reference must be released.
+                    unsafe { RAP_dec_ref(obj.raw()) };
                 }
             },
             Builtin::Lstring => {
@@ -543,6 +555,9 @@ impl Interpreter {
                         _ => unreachable!(),
                     }
                 };
+                // The operand was a reference onto the stack - release it once
+                // the call has consumed it (unless the result aliases it?)
+                unsafe { RAP_dec_ref(value.raw()) };
                 self.push(Object::new(result))?;
             }
             Builtin::Index => {
@@ -552,7 +567,15 @@ impl Interpreter {
                 let haystack = self.pop()?;
                 let needle = self.pop()?;
                 let result = unsafe { RAP_index_of(needle.raw(), haystack.raw()) };
+                unsafe { RAP_dec_ref(haystack.raw()) };
+                unsafe { RAP_dec_ref(needle.raw()) };
                 self.push(Object::new(result))?;
+            }
+            Builtin::Tint => {
+                let value = self.pop()?;
+                let result = unsafe { RAP_IS_SMI(value.raw()) };
+                unsafe { RAP_dec_ref(value.raw()) };
+                self.push(Object::new_bool(result))?;
             }
         }
 
@@ -573,7 +596,7 @@ impl Interpreter {
 
         // Push old instruction pointer
         // `BEGIN` instruction will collect it
-        self.push(Object::new_unboxed(self.decoder.ip as i64))?;
+        self.push(Object::new_boxed(self.decoder.ip as i64))?;
 
         // // Push empty closure object
         // self.push(Object::new_empty())?;
@@ -603,6 +626,8 @@ impl Interpreter {
         self.push(value.clone())?;
         self.push(value)?;
 
+        unsafe { RAP_inc_ref(value.raw()) };
+
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
 
@@ -610,7 +635,8 @@ impl Interpreter {
     }
 
     fn eval_drop(&mut self, _: Instruction) -> Result<(), InterpreterError> {
-        self.pop()?;
+        let obj = self.pop()?;
+        unsafe { RAP_dec_ref(obj.raw()) };
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
@@ -628,16 +654,14 @@ impl Interpreter {
         let mut frame = FrameMetadata::get_from_stack(&self.operand_stack, self.frame_pointer)
             .ok_or(InterpreterError::NotEnoughArguments("STORE"))?;
 
-        match rel {
-            ValueRel::Arg => {
-                let value = frame
-                    .get_arg_at(&self.operand_stack, self.frame_pointer, index as usize)
-                    .unwrap();
-
-                self.push(value.clone())?;
-            }
+        // FIXME: not unwrap
+        let value = match rel {
+            ValueRel::Arg => frame
+                .get_arg_at(&self.operand_stack, self.frame_pointer, index as usize)
+                .unwrap()
+                .clone(),
             ValueRel::Capture => unsafe {
-                todo!();
+                todo!()
                 // let closure = frame
                 //     .get_closure(&mut self.operand_stack.0, self.frame_pointer)
                 //     .unwrap();
@@ -650,23 +674,18 @@ impl Interpreter {
 
                 // let element = get_captured_variable(&*to_data, index as usize);
 
-                // self.push(Object::new_unboxed(element))?;
+                // self.push(Object::new_boxed(element))?;
             },
-            ValueRel::Global => unsafe {
-                let value = self.globals()[index as usize].clone();
-                // println!("{:#?}", CStr::from_ptr(RAP_stringify_object(value.raw())));
-                self.push(value)?;
-            },
-            ValueRel::Local => unsafe {
-                let value = frame
-                    .get_local_at(&self.operand_stack, self.frame_pointer, index as usize)
-                    .unwrap();
+            ValueRel::Global => self.globals()[index as usize].clone(),
+            ValueRel::Local => frame
+                .get_local_at(&self.operand_stack, self.frame_pointer, index as usize)
+                .unwrap()
+                .clone(),
+        };
 
-                // println!("{:#?}", CStr::from_ptr(RAP_stringify_object(value.raw())));
-
-                self.push(value.clone())?;
-            },
-        }
+        // Because we create an alias, we must inc the refcount
+        unsafe { RAP_inc_ref(value.raw()) };
+        self.push(value.clone())?;
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
@@ -685,19 +704,17 @@ impl Interpreter {
             .ok_or(InterpreterError::NotEnoughArguments("STORE"))?;
 
         let value = self.pop()?;
-        match rel {
-            ValueRel::Arg => {
-                frame
-                    .set_arg_at(
-                        &mut self.operand_stack,
-                        self.frame_pointer,
-                        index as usize,
-                        value.clone(),
-                    )
-                    .unwrap();
-            }
+        let old = match rel {
+            ValueRel::Arg => frame
+                .set_arg_at(
+                    &mut self.operand_stack,
+                    self.frame_pointer,
+                    index as usize,
+                    value.clone(),
+                )
+                .unwrap(),
             ValueRel::Capture => unsafe {
-                todo!();
+                todo!()
                 // let closure = frame
                 //     .get_closure(&mut self.operand_stack, self.frame_pointer)
                 //     .unwrap();
@@ -711,7 +728,9 @@ impl Interpreter {
                 // set_captured_variable(&mut *to_data, index as usize, value.raw());
             },
             ValueRel::Global => {
+                let old = self.globals_mut()[index as usize].clone();
                 self.globals_mut()[index as usize] = value.clone();
+                old
             }
             ValueRel::Local => frame
                 .set_local_at(
@@ -721,6 +740,13 @@ impl Interpreter {
                     value.clone(),
                 )
                 .unwrap(),
+        };
+
+        // STORE is a transfer: the values one reference moves from the temp
+        // stack slot to the destination variable slot, so we only release the
+        // previous occupant (own count stays unchanged)
+        if old.raw() != value.raw() {
+            unsafe { RAP_dec_ref(old.raw()) };
         }
 
         let encoding = self.decoder.next::<u8>()?;
@@ -745,7 +771,8 @@ impl Interpreter {
             .ok_or(InterpreterError::NotEnoughArguments("END"))?;
 
         for _ in 0..n_locals {
-            self.pop()?;
+            let obj = self.pop()?;
+            unsafe { RAP_dec_ref(obj.raw()) };
         }
 
         // Pop return ip
@@ -764,7 +791,8 @@ impl Interpreter {
         self.pop()?;
 
         for _ in 0..n_args {
-            self.pop()?;
+            let obj = self.pop()?;
+            unsafe { RAP_dec_ref(obj.raw()) };
         }
 
         // Return to callee's frame pointer
@@ -832,12 +860,12 @@ impl Interpreter {
         self.push(Object::new_empty())?;
 
         // Push arg and local count
-        self.push(Object::new_unboxed(args as i64))?;
-        self.push(Object::new_unboxed(locals as i64))?;
+        self.push(Object::new_boxed(args as i64))?;
+        self.push(Object::new_boxed(locals as i64))?;
 
         // Push return frame pointer and ip
         // 1. Where to return in sack operand
-        self.push(Object::new_unboxed(ret_frame_pointer as i64))?;
+        self.push(Object::new_boxed(ret_frame_pointer as i64))?;
         // 2. Where to return in the bytecode after this call
         self.push(ret_ip)?;
 
@@ -900,12 +928,12 @@ impl Interpreter {
         // self.push(closure_obj)?;
 
         // // Push arg and local count
-        // self.push(Object::new_unboxed(args as i64))?;
-        // self.push(Object::new_unboxed(locals as i64))?;
+        // self.push(Object::new_boxed(args as i64))?;
+        // self.push(Object::new_boxed(locals as i64))?;
 
         // // Push return frame pointer and ip
         // // 1. Where to return in sack operand
-        // self.push(Object::new_unboxed(ret_frame_pointer as i64))?;
+        // self.push(Object::new_boxed(ret_frame_pointer as i64))?;
         // // 2. Where to return in the bytecode after this call
         // self.push(ret_ip)?;
 
@@ -941,6 +969,10 @@ impl Interpreter {
         let obj = unsafe { RAP_set_tuple_item(aggregate.raw(), index.unbox() as u32, value.raw()) };
 
         self.push(Object::new(obj))?;
+
+        unsafe { RAP_dec_ref(aggregate.raw()) };
+        unsafe { RAP_dec_ref(index.raw()) };
+        unsafe { RAP_dec_ref(value.raw()) };
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
@@ -1061,6 +1093,9 @@ impl Interpreter {
         //     );
         // }
 
+        unsafe { RAP_dec_ref(right.raw()) };
+        unsafe { RAP_dec_ref(left.raw()) };
+
         self.push(Object::new(result))?;
 
         let encoding = self.decoder.next::<u8>()?;
@@ -1084,6 +1119,9 @@ impl Interpreter {
         };
 
         self.push(Object::new(result))?;
+
+        // Decref old value
+        unsafe { RAP_dec_ref(value.raw()) };
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
@@ -1185,6 +1223,11 @@ impl Interpreter {
             to
         };
         let result = unsafe { RAP_create_slice(collection.raw(), from, to) };
+        // slice keeps the parent alive via its own reference
+        // (`inc_ref` on the parent) and returns a fresh slice object,
+        // the operand we popped is now consumed so release it
+        unsafe { RAP_dec_ref(collection.raw()) };
+
         self.push(Object::new(result))?;
 
         let encoding = self.decoder.next::<u8>()?;

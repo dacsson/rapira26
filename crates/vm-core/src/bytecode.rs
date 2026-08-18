@@ -58,6 +58,7 @@ pub enum Builtin {
     Floor,
     Round,
     Index,
+    Tint, // Type check for integer
 }
 
 /// A description of the captured variables of a closure.
@@ -292,6 +293,7 @@ impl TryFrom<u8> for Builtin {
             0xa => Ok(Builtin::Floor),
             0xb => Ok(Builtin::Round),
             0xc => Ok(Builtin::Index),
+            0xd => Ok(Builtin::Tint),
             _ => Err(()),
         }
     }
@@ -377,6 +379,7 @@ impl From<&Builtin> for &i32 {
             Builtin::Floor => &11,
             Builtin::Round => &12,
             Builtin::Index => &13,
+            Builtin::Tint => &14,
         }
     }
 }
@@ -462,7 +465,7 @@ mod tests {
     #[test]
     fn discriminant() {
         assert_eq!(Instruction::NOP.discriminant(), 0);
-        assert_eq!(Instruction::BINOP { op: Op::ADD }.discriminant(), 3);
-        assert_eq!(Instruction::BINOP { op: Op::SUB }.discriminant(), 3);
+        assert_eq!(Instruction::BINOP { op: Op::ADD }.discriminant(), 2);
+        assert_eq!(Instruction::BINOP { op: Op::SUB }.discriminant(), 2);
     }
 }

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <stdbool.h>
 
 // Tagged pointer, representation on 64-bit systems:
 // ```
@@ -22,11 +23,11 @@ typedef uintptr_t RAP_Value;
 #define RAP_TAG_MASK 0x3
 
 // Checks if RAP_Value is a 32-bit integer
-#define RAP_IS_SMI(value) (((value) & RAP_TAG_MASK) == 0x0)
+bool RAP_IS_SMI(RAP_Value value);
 // Checks if RAP_Value is a boolean
-#define RAP_IS_BOOL(value) (((value) & RAP_TAG_MASK) == 0x1)
+bool RAP_IS_BOOL(RAP_Value value);
 // Checks if RAP_Value is a pointer
-#define RAP_IS_PTR(value) (((value) & RAP_TAG_MASK) == 0x3)
+bool RAP_IS_PTR(RAP_Value value);
 
 // Get 32-bit integer value from RAP_Value
 #define RAP_SMI_VALUE(value) ((int32_t)((value) >> 32))
