@@ -1,8 +1,8 @@
 //! VM Interpreter
 
-use crate::frame::FrameMetadata;
 use crate::object::{Object, ObjectError};
 use crate::{
+    isPtr,
     RAP_IS_SMI, RAP_abs, RAP_add, RAP_and, RAP_create_slice, RAP_dec_ref, RAP_divide, RAP_equal,
     RAP_floor, RAP_floor_divide, RAP_get_tuple_item, RAP_greater_or_equal, RAP_greater_than,
     RAP_inc_ref, RAP_index_of, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than,
@@ -109,8 +109,9 @@ impl Interpreter {
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
+        let err_instr = instr.clone();
 
-        DISPATCH_TABLE[instr.discriminant() as usize](self, instr.clone()).map_err(
+        DISPATCH_TABLE[instr.discriminant() as usize](self, instr).map_err(
             |e| -> RunError {
                 let global_offset = core::mem::size_of::<i32>()
                     + core::mem::size_of::<i32>()
@@ -121,14 +122,14 @@ impl Interpreter {
                     + self.decoder.bf.stringtab_size as usize
                     + self.decoder.ip;
 
-                RunError::ErrorAtOffset(global_offset, e, instr.clone())
+                RunError::ErrorAtOffset(global_offset, e, err_instr)
             },
         )?;
 
         // Release every remaining owned reference so the
         // run ends with a clean heap
         for obj in self.operand_stack.drain(..) {
-            unsafe { RAP_dec_ref(obj.raw()) };
+            Self::dec_ref_if_ptr(obj);
         }
 
         Ok(())
@@ -387,8 +388,8 @@ impl Interpreter {
             unsafe { RAP_get_tuple_item(collection.raw(), u32::try_from(index).unwrap()) };
         self.push(Object::new(element))?;
 
-        unsafe { RAP_dec_ref(collection.raw()) };
-        unsafe { RAP_dec_ref(index_obj.raw()) };
+        Self::dec_ref_if_ptr(collection);
+        Self::dec_ref_if_ptr(index_obj);
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
@@ -409,8 +410,8 @@ impl Interpreter {
         unsafe { RAP_slice_assign(slice.raw(), value.raw()) };
 
         // TODO: is this needed?
-        unsafe { RAP_dec_ref(slice.raw()) };
-        unsafe { RAP_dec_ref(value.raw()) };
+        Self::dec_ref_if_ptr(slice);
+        Self::dec_ref_if_ptr(value);
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
@@ -489,7 +490,7 @@ impl Interpreter {
                 let length = unsafe { RAP_length(obj.raw()) };
                 // Consume the popped argument. If a result-style alias with the
                 // same raw pointer is pushed below, its dec is guarded.
-                unsafe { RAP_dec_ref(obj.raw()) };
+                Self::dec_ref_if_ptr(obj);
 
                 self.push(Object::new(length))?;
             }
@@ -519,7 +520,7 @@ impl Interpreter {
                     // `printf` borrows the string only for the duration of the
                     // call
                     // once printed, the argument's owning reference must be released.
-                    unsafe { RAP_dec_ref(obj.raw()) };
+                    Self::dec_ref_if_ptr(obj);
                 }
             },
             Builtin::Lstring => {
@@ -557,7 +558,7 @@ impl Interpreter {
                 };
                 // The operand was a reference onto the stack - release it once
                 // the call has consumed it (unless the result aliases it?)
-                unsafe { RAP_dec_ref(value.raw()) };
+                Self::dec_ref_if_ptr(value);
                 self.push(Object::new(result))?;
             }
             Builtin::Index => {
@@ -567,14 +568,14 @@ impl Interpreter {
                 let haystack = self.pop()?;
                 let needle = self.pop()?;
                 let result = unsafe { RAP_index_of(needle.raw(), haystack.raw()) };
-                unsafe { RAP_dec_ref(haystack.raw()) };
-                unsafe { RAP_dec_ref(needle.raw()) };
+                Self::dec_ref_if_ptr(haystack);
+                Self::dec_ref_if_ptr(needle);
                 self.push(Object::new(result))?;
             }
             Builtin::Tint => {
                 let value = self.pop()?;
                 let result = unsafe { RAP_IS_SMI(value.raw()) };
-                unsafe { RAP_dec_ref(value.raw()) };
+                Self::dec_ref_if_ptr(value);
                 self.push(Object::new_bool(result))?;
             }
         }
@@ -623,10 +624,10 @@ impl Interpreter {
 
     fn eval_dup(&mut self, _: Instruction) -> Result<(), InterpreterError> {
         let value = self.pop()?;
-        self.push(value.clone())?;
+        self.push(value)?;
         self.push(value)?;
 
-        unsafe { RAP_inc_ref(value.raw()) };
+        Self::inc_ref_if_ptr(value);
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
@@ -636,7 +637,7 @@ impl Interpreter {
 
     fn eval_drop(&mut self, _: Instruction) -> Result<(), InterpreterError> {
         let obj = self.pop()?;
-        unsafe { RAP_dec_ref(obj.raw()) };
+        Self::dec_ref_if_ptr(obj);
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
@@ -651,15 +652,9 @@ impl Interpreter {
             return Err(InterpreterError::InvalidObjectPointer);
         };
 
-        let mut frame = FrameMetadata::get_from_stack(&self.operand_stack, self.frame_pointer)
-            .ok_or(InterpreterError::NotEnoughArguments("STORE"))?;
-
         // FIXME: not unwrap
         let value = match rel {
-            ValueRel::Arg => frame
-                .get_arg_at(&self.operand_stack, self.frame_pointer, index as usize)
-                .unwrap()
-                .clone(),
+            ValueRel::Arg => self.load_arg(index as usize)?,
             ValueRel::Capture => unsafe {
                 todo!()
                 // let closure = frame
@@ -676,16 +671,13 @@ impl Interpreter {
 
                 // self.push(Object::new_boxed(element))?;
             },
-            ValueRel::Global => self.globals()[index as usize].clone(),
-            ValueRel::Local => frame
-                .get_local_at(&self.operand_stack, self.frame_pointer, index as usize)
-                .unwrap()
-                .clone(),
+            ValueRel::Global => self.globals()[index as usize],
+            ValueRel::Local => self.load_local(index as usize)?,
         };
 
         // Because we create an alias, we must inc the refcount
-        unsafe { RAP_inc_ref(value.raw()) };
-        self.push(value.clone())?;
+        Self::inc_ref_if_ptr(value);
+        self.push(value)?;
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
@@ -700,19 +692,9 @@ impl Interpreter {
             return Err(InterpreterError::InvalidObjectPointer);
         };
 
-        let mut frame = FrameMetadata::get_from_stack(&self.operand_stack, self.frame_pointer)
-            .ok_or(InterpreterError::NotEnoughArguments("STORE"))?;
-
         let value = self.pop()?;
         let old = match rel {
-            ValueRel::Arg => frame
-                .set_arg_at(
-                    &mut self.operand_stack,
-                    self.frame_pointer,
-                    index as usize,
-                    value.clone(),
-                )
-                .unwrap(),
+            ValueRel::Arg => self.store_arg(index as usize, value)?,
             ValueRel::Capture => unsafe {
                 todo!()
                 // let closure = frame
@@ -728,25 +710,18 @@ impl Interpreter {
                 // set_captured_variable(&mut *to_data, index as usize, value.raw());
             },
             ValueRel::Global => {
-                let old = self.globals_mut()[index as usize].clone();
-                self.globals_mut()[index as usize] = value.clone();
+                let old = self.globals()[index as usize];
+                self.globals_mut()[index as usize] = value;
                 old
             }
-            ValueRel::Local => frame
-                .set_local_at(
-                    &mut self.operand_stack,
-                    self.frame_pointer,
-                    index as usize,
-                    value.clone(),
-                )
-                .unwrap(),
+            ValueRel::Local => self.store_local(index as usize, value)?,
         };
 
         // STORE is a transfer: the values one reference moves from the temp
         // stack slot to the destination variable slot, so we only release the
         // previous occupant (own count stays unchanged)
         if old.raw() != value.raw() {
-            unsafe { RAP_dec_ref(old.raw()) };
+            Self::dec_ref_if_ptr(old);
         }
 
         let encoding = self.decoder.next::<u8>()?;
@@ -761,18 +736,14 @@ impl Interpreter {
             .pop()
             .map_err(|_| InterpreterError::NotEnoughArguments("END"))?;
 
-        let FrameMetadata {
-            closure_obj: _,
-            n_locals,
-            n_args,
-            ret_frame_pointer,
-            ret_ip,
-        } = FrameMetadata::get_from_stack(&self.operand_stack, self.frame_pointer)
-            .ok_or(InterpreterError::NotEnoughArguments("END"))?;
+        let n_locals = self.frame_local_count()?;
+        let n_args = self.frame_arg_count()?;
+        let ret_frame_pointer = self.frame_return_pointer()?;
+        let ret_ip = self.frame_return_ip()?;
 
         for _ in 0..n_locals {
             let obj = self.pop()?;
-            unsafe { RAP_dec_ref(obj.raw()) };
+            Self::dec_ref_if_ptr(obj);
         }
 
         // Pop return ip
@@ -792,7 +763,7 @@ impl Interpreter {
 
         for _ in 0..n_args {
             let obj = self.pop()?;
-            unsafe { RAP_dec_ref(obj.raw()) };
+            Self::dec_ref_if_ptr(obj);
         }
 
         // Return to callee's frame pointer
@@ -970,9 +941,9 @@ impl Interpreter {
 
         self.push(Object::new(obj))?;
 
-        unsafe { RAP_dec_ref(aggregate.raw()) };
-        unsafe { RAP_dec_ref(index.raw()) };
-        unsafe { RAP_dec_ref(value.raw()) };
+        Self::dec_ref_if_ptr(aggregate);
+        Self::dec_ref_if_ptr(index);
+        Self::dec_ref_if_ptr(value);
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
@@ -1093,8 +1064,8 @@ impl Interpreter {
         //     );
         // }
 
-        unsafe { RAP_dec_ref(right.raw()) };
-        unsafe { RAP_dec_ref(left.raw()) };
+        Self::dec_ref_if_ptr(right);
+        Self::dec_ref_if_ptr(left);
 
         self.push(Object::new(result))?;
 
@@ -1121,7 +1092,7 @@ impl Interpreter {
         self.push(Object::new(result))?;
 
         // Decref old value
-        unsafe { RAP_dec_ref(value.raw()) };
+        Self::dec_ref_if_ptr(value);
 
         let encoding = self.decoder.next::<u8>()?;
         let instr = self.decoder.decode(encoding)?;
@@ -1226,7 +1197,7 @@ impl Interpreter {
         // slice keeps the parent alive via its own reference
         // (`inc_ref` on the parent) and returns a fresh slice object,
         // the operand we popped is now consumed so release it
-        unsafe { RAP_dec_ref(collection.raw()) };
+        Self::dec_ref_if_ptr(collection);
 
         self.push(Object::new(result))?;
 
@@ -1261,6 +1232,102 @@ impl Interpreter {
 
         let obj = self.operand_stack.pop().unwrap();
         Ok(obj)
+    }
+
+    #[inline(always)]
+    fn inc_ref_if_ptr(obj: Object) {
+        if isPtr(obj.raw()) {
+            unsafe { RAP_inc_ref(obj.raw()) };
+        }
+    }
+
+    #[inline(always)]
+    fn dec_ref_if_ptr(obj: Object) {
+        if isPtr(obj.raw()) {
+            unsafe { RAP_dec_ref(obj.raw()) };
+        }
+    }
+
+    #[inline(always)]
+    fn frame_stack_value(&self, offset: usize, opname: &'static str) -> Result<Object, InterpreterError> {
+        self.operand_stack
+            .get(self.frame_pointer + offset)
+            .copied()
+            .ok_or(InterpreterError::NotEnoughArguments(opname))
+    }
+
+    #[inline(always)]
+    fn frame_arg_count(&self) -> Result<usize, InterpreterError> {
+        Ok(self.frame_stack_value(1, "frame arg count")?.unbox() as usize)
+    }
+
+    #[inline(always)]
+    fn frame_local_count(&self) -> Result<usize, InterpreterError> {
+        Ok(self.frame_stack_value(2, "frame local count")?.unbox() as usize)
+    }
+
+    #[inline(always)]
+    fn frame_return_pointer(&self) -> Result<usize, InterpreterError> {
+        Ok(self.frame_stack_value(3, "frame return pointer")?.unbox() as usize)
+    }
+
+    #[inline(always)]
+    fn frame_return_ip(&self) -> Result<usize, InterpreterError> {
+        Ok(self.frame_stack_value(4, "frame return ip")?.unbox() as usize)
+    }
+
+    #[inline(always)]
+    fn arg_slot_index(&self, index: usize) -> Result<usize, InterpreterError> {
+        let n_args = self.frame_arg_count()?;
+        if index >= n_args {
+            return Err(InterpreterError::NotEnoughArguments("LOAD/STORE arg"));
+        }
+
+        Ok(self.frame_pointer - n_args + index)
+    }
+
+    #[inline(always)]
+    fn local_slot_index(&self, index: usize) -> Result<usize, InterpreterError> {
+        let n_locals = self.frame_local_count()?;
+        if index >= n_locals {
+            return Err(InterpreterError::NotEnoughArguments("LOAD/STORE local"));
+        }
+
+        Ok(self.frame_pointer + 5 + index)
+    }
+
+    #[inline(always)]
+    fn load_arg(&self, index: usize) -> Result<Object, InterpreterError> {
+        let slot = self.arg_slot_index(index)?;
+        self.operand_stack
+            .get(slot)
+            .copied()
+            .ok_or(InterpreterError::NotEnoughArguments("LOAD arg"))
+    }
+
+    #[inline(always)]
+    fn load_local(&self, index: usize) -> Result<Object, InterpreterError> {
+        let slot = self.local_slot_index(index)?;
+        self.operand_stack
+            .get(slot)
+            .copied()
+            .ok_or(InterpreterError::NotEnoughArguments("LOAD local"))
+    }
+
+    #[inline(always)]
+    fn store_arg(&mut self, index: usize, value: Object) -> Result<Object, InterpreterError> {
+        let slot = self.arg_slot_index(index)?;
+        let old = self.operand_stack[slot];
+        self.operand_stack[slot] = value;
+        Ok(old)
+    }
+
+    #[inline(always)]
+    fn store_local(&mut self, index: usize, value: Object) -> Result<Object, InterpreterError> {
+        let slot = self.local_slot_index(index)?;
+        let old = self.operand_stack[slot];
+        self.operand_stack[slot] = value;
+        Ok(old)
     }
 
     /// Returns the current top object on the operand stack, if any

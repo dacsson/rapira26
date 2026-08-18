@@ -515,6 +515,8 @@ impl<'input> Parser<'input> {
                 ))
             }
             // EXPR.FIELD = expr - mutating a field
+            // TODO: or
+            // EXPR.NUM = same as EXPR[NUM]
             Some(Token::Dot) => {
                 self.advance();
                 let field = self.expect_ident()?;
