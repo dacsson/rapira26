@@ -34,9 +34,9 @@ impl Object {
     /// Frame metadata (arg/local counts, return ip, frame pointers) is read
     /// back via [`raw`](Self::raw) in `frame.rs`, so these internal values must
     /// round-trip as plain machine integers — not tagged SMIs.
-    pub fn new_unboxed(value: i64) -> Self {
-        Object(value as usize)
-    }
+    // pub fn new_unboxed(value: i64) -> Self {
+    //     Object(value as usize)
+    // }
 
     /// Box a user integer as a Rapira SMI.
     ///

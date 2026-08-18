@@ -16,6 +16,3 @@ bindgen = "0.72.1"
 default = []
 verbose = []
 runtime_checks = []
-
-[profile.release]
-lto = 'fat'

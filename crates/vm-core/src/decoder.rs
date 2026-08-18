@@ -1,6 +1,7 @@
 use crate::bytecode::*;
 use crate::bytefile::Bytefile;
 use crate::numeric::LeBytes;
+use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug, PartialEq)]
 pub enum DecoderError {
@@ -185,7 +186,7 @@ impl Decoder {
                 value: self.next::<u8>()? != 0,
             }),
             (0x70, 0x6) => Ok(Instruction::NULL),
-            (0x70, 0x7..=0xd) => Ok(Instruction::CALLBUILTIN {
+            (0x70, 0x7..=0xe) => Ok(Instruction::CALLBUILTIN {
                 n: self.next::<i32>()?,
                 name: Builtin::try_from(subopcode).map_err(|_| DecoderError::from(byte))?,
             }),

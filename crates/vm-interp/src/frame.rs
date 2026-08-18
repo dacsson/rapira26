@@ -34,11 +34,11 @@ impl<'a> FrameMetadata {
     /// Accompanies the `BEGIN` instruction.
     #[inline(always)]
     pub fn get_from_stack(stack: &[Object], frame_pointer: usize) -> Option<FrameMetadata> {
-        let closure_obj = stack.get(frame_pointer)?.raw() as i64;
-        let n_args = stack.get(frame_pointer + 1)?.raw() as i64;
-        let n_locals = stack.get(frame_pointer + 2)?.raw() as i64;
-        let ret_frame_pointer = stack.get(frame_pointer + 3)?.raw() as usize;
-        let ret_ip = stack.get(frame_pointer + 4)?.raw() as usize;
+        let closure_obj = stack.get(frame_pointer)?.unbox() as i64;
+        let n_args = stack.get(frame_pointer + 1)?.unbox() as i64;
+        let n_locals = stack.get(frame_pointer + 2)?.unbox() as i64;
+        let ret_frame_pointer = stack.get(frame_pointer + 3)?.unbox() as usize;
+        let ret_ip = stack.get(frame_pointer + 4)?.unbox() as usize;
 
         Some(FrameMetadata {
             closure_obj,
@@ -67,15 +67,16 @@ impl<'a> FrameMetadata {
         frame_pointer: usize,
         index: usize,
         value: Object,
-    ) -> Option<()> {
+    ) -> Option<Object> {
         let arg_index = frame_pointer - self.n_args as usize + index;
 
         if arg_index >= stack.len() || index > self.n_args as usize {
             return None;
         }
 
+        let old = stack[arg_index];
         stack[arg_index] = value;
-        Some(())
+        Some(old)
     }
 
     #[inline(always)]
@@ -96,15 +97,16 @@ impl<'a> FrameMetadata {
         frame_pointer: usize,
         index: usize,
         value: Object,
-    ) -> Option<()> {
+    ) -> Option<Object> {
         let local_index = frame_pointer + 5 + index;
 
         if local_index >= stack.len() || index > self.n_locals as usize {
             return None;
         }
 
+        let old = stack[local_index];
         stack[local_index] = value;
-        Some(())
+        Some(old)
     }
 
     pub fn save_closure(

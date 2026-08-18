@@ -25,7 +25,7 @@ use crate::{
     module::Module,
 };
 
-const BUILTIN_FUNCS: [(&str, Builtin); 9] = [
+const BUILTIN_FUNCS: [(&str, Builtin); 10] = [
     ("abs", Builtin::Abs),
     ("абс", Builtin::Abs),
     ("sign", Builtin::Sign),
@@ -35,6 +35,7 @@ const BUILTIN_FUNCS: [(&str, Builtin); 9] = [
     ("целч", Builtin::Floor),
     ("окрч", Builtin::Round),
     ("индекс", Builtin::Index),
+    ("тип_цел", Builtin::Tint),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -703,7 +704,12 @@ impl BcGen {
                         todo!("{:?}", var.node);
                     };
 
-                    let (index, rel) = self.env.allocate_variable(name.clone());
+                    // Re-use the variable's existing slot if it was already
+                    // declared
+                    let (index, rel) = self
+                        .env
+                        .find_variable(name)
+                        .unwrap_or_else(|| self.env.allocate_variable(name.clone()));
                     instrs.push(Instruction::STORE { rel, index });
                 }
 
@@ -765,6 +771,12 @@ impl BcGen {
                         count += 1;
                     }
                     count += self.count_locals(body);
+                }
+                Statement::Input {
+                    text_mode: _,
+                    variables,
+                } => {
+                    count += variables.len() as usize;
                 }
                 _ => {}
             }
