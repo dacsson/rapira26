@@ -37,11 +37,10 @@ fn lex_loop_keywords() {
 
 #[test]
 fn lex_definition_keywords() {
-    let tokens = tokenize("проц функ возврат чужие свои");
+    let tokens = tokenize("функ возврат чужие свои");
     assert_eq!(
         tokens,
         vec![
-            Token::KwПроц,
             Token::KwФунк,
             Token::KwВозврат,
             Token::KwЧужие,
@@ -52,16 +51,10 @@ fn lex_definition_keywords() {
 
 #[test]
 fn lex_io_keywords() {
-    let tokens = tokenize("вывод ввод бпс текста вызов");
+    let tokens = tokenize("вывод ввод бпс текста");
     assert_eq!(
         tokens,
-        vec![
-            Token::KwВывод,
-            Token::KwВвод,
-            Token::KwБпс,
-            Token::KwТекста,
-            Token::KwВызов,
-        ]
+        vec![Token::KwВывод, Token::KwВвод, Token::KwБпс, Token::KwТекста]
     );
 }
 
@@ -397,21 +390,6 @@ fn lex_output_statement() {
             Token::Text("hello".to_string()),
             Token::Comma,
             Token::Integer(42),
-        ]
-    );
-}
-
-#[test]
-fn lex_procedure_definition_header() {
-    let tokens = tokenize("проц РАМКА (N)");
-    assert_eq!(
-        tokens,
-        vec![
-            Token::KwПроц,
-            Token::Ident("РАМКА".to_string()),
-            Token::LParen,
-            Token::Ident("N".to_string()),
-            Token::RParen,
         ]
     );
 }

@@ -4,7 +4,7 @@ pub mod bcgen;
 use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
-    ast::{FunctionDefinition, ProcedureDefinition, Spannable, Statement, TypeDefinition},
+    ast::{FunctionDefinition, Spannable, Statement, TypeDefinition},
     module::{AbsolutModulePath, Module},
 };
 use clap::ValueEnum;
@@ -50,10 +50,6 @@ pub trait CodegenTarget {
 
     // Base constructs that a backend should implement, you
     // can emit more than that if you want to
-    fn emit_procedure_def(
-        &mut self,
-        proc_def_span: &Spannable<ProcedureDefinition>,
-    ) -> Vec<Instruction>;
     fn emit_function_def(
         &mut self,
         func_def_span: &Spannable<FunctionDefinition>,

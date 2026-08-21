@@ -146,7 +146,6 @@ impl<'input> Parser<'input> {
             self.peek(),
             Some(
                 Token::Ident(_)
-                    | Token::KwВызов
                     | Token::KwЕсли
                     | Token::KwВыбор
                     | Token::KwДля
@@ -191,10 +190,6 @@ impl<'input> Parser<'input> {
             }
 
             match self.peek() {
-                Some(Token::KwПроц) => {
-                    let def = self.parse_procedure_definition()?;
-                    module.add_procedure(def);
-                }
                 Some(Token::KwФунк) => {
                     let def = self.parse_function_definition()?;
                     module.add_function(def);
@@ -246,39 +241,6 @@ impl<'input> Parser<'input> {
             position_start: pos_start,
             position_end: self.positions().1,
         })
-    }
-
-    fn parse_procedure_definition(&mut self) -> Result<Spannable<ProcedureDefinition>, ParseError> {
-        let (pos_start, _, _) = self.expect(&Token::KwПроц)?;
-
-        let name = if matches!(self.peek(), Some(Token::Ident(_))) {
-            Some(self.expect_ident()?)
-        } else {
-            None
-        };
-
-        self.expect(&Token::LParen)?;
-        let parameters = self.parse_proc_parameter_list()?;
-        self.expect(&Token::RParen)?;
-
-        // Body is an indented block
-        self.expect(&Token::Newline)?;
-        self.expect(&Token::Indent)?;
-
-        let name_declarations = self.parse_name_declarations()?;
-        let body = self.parse_statement_list_until(&Token::Dedent)?;
-        self.expect(&Token::Dedent)?;
-
-        Ok(Spannable::new(
-            ProcedureDefinition {
-                name,
-                parameters,
-                name_declarations,
-                body,
-                variables_need_saving: HashSet::new(),
-            },
-            (pos_start, self.positions().1),
-        ))
     }
 
     fn parse_function_definition(&mut self) -> Result<Spannable<FunctionDefinition>, ParseError> {
@@ -342,29 +304,6 @@ impl<'input> Parser<'input> {
             position_start: pos_start,
             position_end: self.positions().1,
         })
-    }
-
-    fn parse_proc_parameter_list(&mut self) -> Result<Vec<ProcParameter>, ParseError> {
-        let mut parameters = Vec::new();
-        if self.peek() == Some(&Token::RParen) {
-            return Ok(parameters);
-        }
-
-        parameters.push(self.parse_proc_parameter()?);
-        while self.eat(&Token::Comma) {
-            parameters.push(self.parse_proc_parameter()?);
-        }
-        Ok(parameters)
-    }
-
-    fn parse_proc_parameter(&mut self) -> Result<ProcParameter, ParseError> {
-        if self.eat(&Token::KwВых) {
-            let name = self.expect_ident()?;
-            Ok(ProcParameter::InOut(name))
-        } else {
-            let name = self.expect_ident()?;
-            Ok(ProcParameter::Input(name))
-        }
     }
 
     fn parse_func_parameter_list(&mut self) -> Result<Vec<String>, ParseError> {
@@ -446,7 +385,6 @@ impl<'input> Parser<'input> {
                 Ok(Spannable::new(Statement::ExitLoop, self.positions()))
             }
             Some(Token::KwВозврат) => self.parse_return(),
-            Some(Token::KwВызов) => self.parse_procedure_call_with_keyword(),
             Some(Token::Ident(_)) => self.parse_ident_statement(),
             Some(_) => {
                 let (position_start, found, position_end) = self.current.as_ref().unwrap();
@@ -474,10 +412,10 @@ impl<'input> Parser<'input> {
         let start_pos = self.positions().0;
 
         match self.peek() {
-            // NAME(args) — procedure call by name
+            // NAME(args) — function call by name
             Some(Token::LParen) => {
                 self.advance(); // consume (
-                let arguments = self.parse_call_argument_list()?;
+                let arguments = self.parse_func_arg_list()?;
                 self.expect(&Token::RParen)?;
                 let end_pos = self.positions().1;
                 Ok(Spannable::new(
@@ -872,47 +810,6 @@ impl<'input> Parser<'input> {
                 Statement::ReturnFromProcedure,
                 (start_pos, self.positions().1),
             ))
-        }
-    }
-
-    fn parse_procedure_call_with_keyword(&mut self) -> Result<Spannable<Statement>, ParseError> {
-        let start_pos = self.positions().0;
-        self.expect(&Token::KwВызов)?;
-        // Parse the callable (name or expression producing a procedure)
-        let procedure = Box::new(self.parse_expr_primary()?);
-        self.expect(&Token::LParen)?;
-        let arguments = self.parse_call_argument_list()?;
-        self.expect(&Token::RParen)?;
-        let end_pos = self.positions().1;
-        Ok(Spannable::new(
-            Statement::ProcedureCall {
-                procedure,
-                arguments,
-            },
-            (start_pos, end_pos),
-        ))
-    }
-
-    fn parse_call_argument_list(&mut self) -> Result<Vec<CallArgument>, ParseError> {
-        let mut arguments = Vec::new();
-        if self.peek() == Some(&Token::RParen) {
-            return Ok(arguments);
-        }
-
-        arguments.push(self.parse_call_argument()?);
-        while self.eat(&Token::Comma) {
-            arguments.push(self.parse_call_argument()?);
-        }
-        Ok(arguments)
-    }
-
-    fn parse_call_argument(&mut self) -> Result<CallArgument, ParseError> {
-        if self.eat(&Token::KwВых) {
-            let target = self.parse_lvalue()?;
-            Ok(CallArgument::InOut(target))
-        } else {
-            let value = self.parse_expression()?;
-            Ok(CallArgument::Input(Box::new(value)))
         }
     }
 

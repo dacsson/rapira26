@@ -33,7 +33,6 @@ pub enum Token {
     KwВыход,  // выход
 
     // Definitions
-    KwПроц,    // проц
     KwФунк,    // функ
     KwВозврат, // возврат
     KwЧужие,   // чужие
@@ -44,7 +43,6 @@ pub enum Token {
     KwВвод,   // ввод
     KwБпс,    // бпс  (вывод бпс — no newline)
     KwТекста, // текста  (ввод текста)
-    KwВызов,  // вызов
 
     // Boolean operators
     KwИ,   // и
@@ -324,7 +322,6 @@ impl<'input> Lexer<'input> {
             "цикл" => Token::KwЦикл,
             "по" => Token::KwПо,
             "выход" => Token::KwВыход,
-            "проц" => Token::KwПроц,
             "функ" => Token::KwФунк,
             "возврат" => Token::KwВозврат,
             "чужие" => Token::KwЧужие,
@@ -333,7 +330,6 @@ impl<'input> Lexer<'input> {
             "ввод" => Token::KwВвод,
             "бпс" => Token::KwБпс,
             "текста" => Token::KwТекста,
-            "вызов" => Token::KwВызов,
             "и" => Token::KwИ,
             "или" => Token::KwИли,
             "не" => Token::KwНе,
@@ -673,7 +669,6 @@ impl std::fmt::Display for Token {
             Token::KwЦикл => write!(f, "цикл"),
             Token::KwПо => write!(f, "по"),
             Token::KwВыход => write!(f, "выход"),
-            Token::KwПроц => write!(f, "проц"),
             Token::KwФунк => write!(f, "функ"),
             Token::KwВозврат => write!(f, "возврат"),
             Token::KwЧужие => write!(f, "чужие"),
@@ -682,7 +677,6 @@ impl std::fmt::Display for Token {
             Token::KwВвод => write!(f, "ввод"),
             Token::KwБпс => write!(f, "бпс"),
             Token::KwТекста => write!(f, "текста"),
-            Token::KwВызов => write!(f, "вызов"),
             Token::KwИ => write!(f, "и"),
             Token::KwИли => write!(f, "или"),
             Token::KwНе => write!(f, "не"),

@@ -11,7 +11,6 @@ use clap::Parser;
 use compiler_core::codegen::bcgen::BcGen;
 use compiler_core::codegen::{CodegenTargetName, run_codegen};
 use compiler_core::module::{build_dependency_graph, dump_dependency_graph};
-use compiler_core::opt::deframe::DeframePass;
 use compiler_core::opt::opt_pass::{OptimizationPassOpts, run_optimizations};
 use compiler_core::pretty::pretty_parse_error;
 use vm_core::bytefile::Bytefile;
@@ -144,17 +143,17 @@ fn main() {
         }
 
         // Apply optimizations
-        run_optimizations(
-            &mut program,
-            &[&DeframePass],
-            &OptimizationPassOpts {
-                dump: cli.дамп_опт_дебаг,
-            },
-        )
-        .unwrap_or_else(|error| {
-            eprintln!("Оптимизация не справилась: {error}");
-            std::process::exit(1);
-        });
+        // run_optimizations(
+        //     &mut program,
+        //     &[&DeframePass],
+        //     &OptimizationPassOpts {
+        //         dump: cli.дамп_опт_дебаг,
+        //     },
+        // )
+        // .unwrap_or_else(|error| {
+        //     eprintln!("Оптимизация не справилась: {error}");
+        //     std::process::exit(1);
+        // });
 
         modules.push(program);
     }

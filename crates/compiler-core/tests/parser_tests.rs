@@ -24,11 +24,6 @@ fn parse_first_statement(source: &str) -> Statement {
     program.toplevel.into_iter().next().unwrap().node
 }
 
-fn parse_first_procedure(source: &str) -> ProcedureDefinition {
-    let program = parse(source);
-    program.procedures.into_iter().next().unwrap().node
-}
-
 fn parse_first_function(source: &str) -> FunctionDefinition {
     let program = parse(source);
     program.functions.into_iter().next().unwrap().node
@@ -456,35 +451,11 @@ fn parse_while_condition() {
 // ── Procedure call ──────────────────────────────────────────────────────────
 
 #[test]
-fn parse_procedure_call_with_вызов() {
-    let statement = parse_first_statement("вызов ПРИВЕТ()");
-    match statement {
-        Statement::ProcedureCall { arguments, .. } => {
-            assert!(arguments.is_empty());
-        }
-        other => panic!("expected ProcedureCall, got {other:?}"),
-    }
-}
-
-#[test]
 fn parse_procedure_call_by_name() {
     let statement = parse_first_statement("ПРИВЕТ(1, 2)");
     match statement {
         Statement::ProcedureCall { arguments, .. } => {
             assert_eq!(arguments.len(), 2);
-        }
-        other => panic!("expected ProcedureCall, got {other:?}"),
-    }
-}
-
-#[test]
-fn parse_procedure_call_inout_arg() {
-    let statement = parse_first_statement("ОБМЕН(вых X, вых Y)");
-    match statement {
-        Statement::ProcedureCall { arguments, .. } => {
-            assert_eq!(arguments.len(), 2);
-            assert!(matches!(&arguments[0], CallArgument::InOut(_)));
-            assert!(matches!(&arguments[1], CallArgument::InOut(_)));
         }
         other => panic!("expected ProcedureCall, got {other:?}"),
     }
@@ -519,30 +490,6 @@ fn parse_input_text_mode() {
 // ── Definitions ─────────────────────────────────────────────────────────────
 
 #[test]
-fn parse_simple_procedure() {
-    let proc_def = parse_first_procedure("проц ПРИВЕТ ()\n  вывод: \"hello\"");
-    assert_eq!(proc_def.name, Some("ПРИВЕТ".to_string()));
-    assert!(proc_def.parameters.is_empty());
-    assert_eq!(proc_def.body.len(), 1);
-}
-
-#[test]
-fn parse_procedure_with_params() {
-    let proc_def = parse_first_procedure("проц ТЕСТ (A, B, вых C)\n  возврат");
-    assert_eq!(proc_def.parameters.len(), 3);
-    assert!(matches!(&proc_def.parameters[0], ProcParameter::Input(name) if name == "A"));
-    assert!(matches!(&proc_def.parameters[1], ProcParameter::Input(name) if name == "B"));
-    assert!(matches!(&proc_def.parameters[2], ProcParameter::InOut(name) if name == "C"));
-}
-
-#[test]
-fn parse_procedure_with_name_declarations() {
-    let proc_def = parse_first_procedure("проц ТЕСТ ()\n  свои: X, Y\n  чужие: Z\n  возврат");
-    assert_eq!(proc_def.name_declarations.own_names, vec!["X", "Y"]);
-    assert_eq!(proc_def.name_declarations.foreign_names, vec!["Z"]);
-}
-
-#[test]
 fn parse_simple_function() {
     let func_def = parse_first_function("функ ОДИН ()\n  возврат 1");
     assert_eq!(func_def.name, Some("ОДИН".to_string()));
@@ -557,19 +504,7 @@ fn parse_function_with_params() {
 }
 
 // ── Return ──────────────────────────────────────────────────────────────────
-
-#[test]
-fn parse_return_from_procedure() {
-    let proc_def = parse_first_procedure("проц ТЕСТ (N)\n  если N <= 0 то возврат\n  вывод: N");
-    // возврат in procedure body should be ReturnFromProcedure
-    match &proc_def.body[0].node {
-        Statement::Conditional { then_body, .. } => {
-            assert!(matches!(&then_body[0].node, Statement::ReturnFromProcedure));
-        }
-        other => panic!("expected Conditional, got {other:?}"),
-    }
-}
-
+//
 #[test]
 fn parse_return_from_function() {
     let func_def = parse_first_function("функ ОДИН ()\n  возврат 1");

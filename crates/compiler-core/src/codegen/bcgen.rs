@@ -17,9 +17,8 @@ use vm_core::{
 
 use crate::{
     ast::{
-        BinaryOperator, CallArgument, Expr, FunctionDefinition, LValue, Literal, LoopHeader,
-        LoopStatement, NameDeclarations, SelectionStatement, Spannable, Statement, TypeDefinition,
-        UnaryOperator,
+        BinaryOperator, Expr, FunctionDefinition, LValue, Literal, LoopHeader, LoopStatement,
+        NameDeclarations, SelectionStatement, Spannable, Statement, TypeDefinition, UnaryOperator,
     },
     codegen::{AbsolutGeneratedCodePath, CodegenTarget, ModuleMap, RunError},
     module::Module,
@@ -655,10 +654,7 @@ impl BcGen {
                     panic!("Anonymous functions not implemented");
                 };
 
-                for argument in arguments {
-                    let CallArgument::Input(arg) = &argument else {
-                        todo!("inout arguments are not supported");
-                    };
+                for arg in arguments {
                     instrs.extend(self.emit_expr(arg));
                 }
 
@@ -846,13 +842,6 @@ impl CodegenTarget for BcGen {
         std::fs::write(&bytefile_path, bytefile).unwrap();
 
         Ok(vec![AbsolutGeneratedCodePath(bytefile_path)])
-    }
-
-    fn emit_procedure_def(
-        &mut self,
-        proc_def_span: &crate::ast::Spannable<crate::ast::ProcedureDefinition>,
-    ) -> Vec<Instruction> {
-        todo!()
     }
 
     fn emit_function_def(
