@@ -24,17 +24,20 @@ use crate::{
     module::Module,
 };
 
-const BUILTIN_FUNCS: [(&str, Builtin); 10] = [
+const BUILTIN_FUNCS: [(&str, Builtin); 13] = [
     ("abs", Builtin::Abs),
     ("абс", Builtin::Abs),
-    ("sign", Builtin::Sign),
-    ("знак", Builtin::Sign),
+    ("тип_корт", Builtin::Ttuple),
+    ("тип_срез", Builtin::Tslice),
     ("корень", Builtin::Sqrt),
     ("sqrt", Builtin::Sqrt),
     ("целч", Builtin::Floor),
     ("окрч", Builtin::Round),
-    ("индекс", Builtin::Index),
     ("тип_цел", Builtin::Tint),
+    ("тип_пуст", Builtin::Tnull),
+    ("тип_текст", Builtin::Ttext),
+    ("тип_лог", Builtin::Tbool),
+    ("тип_вещ", Builtin::Tfloat),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -253,10 +256,13 @@ impl BcGen {
                 }
 
                 if let Some(&(_, builtin)) = BUILTIN_FUNCS.iter().find(|(n, _)| name == n) {
-                    // A builtin call
+                    // A builtin call. Only `Lread`/`Lwrite` pack their argument
+                    // count (and flags) into `n`; they are emitted separately in
+                    // `emit_statement`. Every other builtin emits no payload, so
+                    // `n` must stay 0.
                     instrs.push(Instruction::CALLBUILTIN {
-                        name: builtin, // why do need to clone this?
-                        n: arguments.len() as i32,
+                        name: builtin,
+                        n: 0,
                     });
                 } else {
                     instrs.push(Instruction::CALL {
@@ -659,10 +665,10 @@ impl BcGen {
                 }
 
                 if let Some(&(_, builtin)) = BUILTIN_FUNCS.iter().find(|(n, _)| name == n) {
-                    // A builtin call
+                    // A builtin procedure call; no payload for non-I/O builtins.
                     instrs.push(Instruction::CALLBUILTIN {
-                        name: builtin, // why do need to clone this?
-                        n: arguments.len() as i32,
+                        name: builtin,
+                        n: 0,
                     });
                 } else {
                     instrs.push(Instruction::CALL {
@@ -684,18 +690,22 @@ impl BcGen {
                 text_mode,
                 variables,
             } => {
-                if *text_mode {
-                    todo!("text_mode in input");
-                }
+                let n = if *text_mode {
+                    // clear the `typed_input` bit flag
+                    variables.len() as i32 & !LWRITE_NEWLINE_FLAG
+                } else {
+                    // 1 means do the typed input
+                    variables.len() as i32 | LWRITE_NEWLINE_FLAG
+                };
 
                 let mut instrs = vec![];
 
-                for var in variables {
-                    instrs.push(Instruction::CALLBUILTIN {
-                        name: Builtin::Lread,
-                        n: 0,
-                    });
+                instrs.push(Instruction::CALLBUILTIN {
+                    name: Builtin::Lread,
+                    n,
+                });
 
+                for var in variables {
                     let LValue::Name(name) = &var.node else {
                         todo!("{:?}", var.node);
                     };

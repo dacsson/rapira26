@@ -144,6 +144,30 @@ bool RAP_IS_PTR(RAP_Value value) {
     return ((value) & RAP_TAG_MASK) == 0x3;
 }
 
+bool RAP_IS_FLOAT(RAP_Value value) {
+  return RAP_IS_PTR(value) && RAP_PTR_VALUE(value)->tag == RAP_OBJECT_TAG_FLOAT;
+}
+
+bool RAP_IS_TEXT(RAP_Value value) {
+  return RAP_IS_PTR(value) && RAP_PTR_VALUE(value)->tag == RAP_OBJECT_TAG_TEXT;
+}
+
+bool RAP_IS_TUPLE(RAP_Value value) {
+  return RAP_IS_PTR(value) && RAP_PTR_VALUE(value)->tag == RAP_OBJECT_TAG_TUPLE;
+}
+
+bool RAP_IS_SLICE(RAP_Value value) {
+  return RAP_IS_PTR(value) && RAP_PTR_VALUE(value)->tag == RAP_OBJECT_TAG_SLICE;
+}
+
+bool RAP_IS_NULL(RAP_Value value) {
+  return RAP_IS_PTR(value) && RAP_PTR_VALUE(value)->tag == RAP_OBJECT_TAG_NULL;
+}
+
+bool RAP_IS_VARIANT(RAP_Value value) {
+  return RAP_IS_PTR(value) && RAP_PTR_VALUE(value)->tag == RAP_OBJECT_TAG_VARIANT;
+}
+
 // CONSTRUCTORS
 
 // TODO: this should be a heap allocation

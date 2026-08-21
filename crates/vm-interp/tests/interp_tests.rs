@@ -229,9 +229,9 @@ fn eval_tuple_length_and_element_lookup() -> Result<(), Box<dyn std::error::Erro
 fn eval_integer_math_builtins() -> Result<(), Box<dyn std::error::Error>> {
     let cases = [
         (Builtin::Abs, -7, 7),
-        (Builtin::Sign, -5, -1),
-        (Builtin::Sign, 0, 0),
-        (Builtin::Sign, 3, 1),
+        (Builtin::Ttuple, -5, -1),
+        (Builtin::Ttuple, 0, 0),
+        (Builtin::Ttuple, 3, 1),
     ];
 
     for (name, value, expected) in cases {

@@ -110,18 +110,12 @@ void RAP_frame_set_foreign(struct RAP_CallFrame *frame, const char *name,
 #define RAP_GET_SLICE_VAL(obj) (RAP_PTR_VALUE(obj)->slice_val)
 #define RAP_GET_VARIANT_VAL(obj) (RAP_PTR_VALUE(obj)->variant_val)
 
-#define RAP_IS_FLOAT(v)                                                        \
-  (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_FLOAT)
-#define RAP_IS_TEXT(v)                                                         \
-  (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_TEXT)
-#define RAP_IS_TUPLE(v)                                                        \
-  (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_TUPLE)
-#define RAP_IS_SLICE(v)                                                        \
-  (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_SLICE)
-#define RAP_IS_NULL(v)                                                         \
-  (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_NULL)
-#define RAP_IS_VARIANT(v)                                                      \
-  (RAP_IS_PTR(v) && RAP_PTR_VALUE(v)->tag == RAP_OBJECT_TAG_VARIANT)
+bool RAP_IS_FLOAT(RAP_Value v);
+bool RAP_IS_TEXT(RAP_Value v);
+bool RAP_IS_TUPLE(RAP_Value v);
+bool RAP_IS_SLICE(RAP_Value v);
+bool RAP_IS_NULL(RAP_Value v);
+bool RAP_IS_VARIANT(RAP_Value v);
 
 char *RAP_stringify_object(RAP_Value obj);
 

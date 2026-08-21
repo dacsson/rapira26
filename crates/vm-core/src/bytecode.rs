@@ -50,15 +50,17 @@ pub enum Builtin {
     Lread,
     Lwrite,
     Llength,
-    Lstring, // Load string from string table
-    Barray,
     Abs,
-    Sign,
+    Ttuple,
     Sqrt,
     Floor,
     Round,
-    Index,
+    Tslice,
     Tint, // Type check for integer
+    Tfloat,
+    Ttext,
+    Tbool,
+    Tnull,
 }
 
 /// A description of the captured variables of a closure.
@@ -285,15 +287,17 @@ impl TryFrom<u8> for Builtin {
             0x0 => Ok(Builtin::Lread),
             0x1 => Ok(Builtin::Lwrite),
             0x2 => Ok(Builtin::Llength),
-            0x3 => Ok(Builtin::Lstring),
-            0x4 => Ok(Builtin::Barray),
+            0x3 => Ok(Builtin::Tbool),
+            0x4 => Ok(Builtin::Ttext),
             0x7 => Ok(Builtin::Abs),
-            0x8 => Ok(Builtin::Sign),
+            0x8 => Ok(Builtin::Ttuple),
             0x9 => Ok(Builtin::Sqrt),
             0xa => Ok(Builtin::Floor),
             0xb => Ok(Builtin::Round),
-            0xc => Ok(Builtin::Index),
+            0xc => Ok(Builtin::Tslice),
             0xd => Ok(Builtin::Tint),
+            0xe => Ok(Builtin::Tfloat),
+            0xf => Ok(Builtin::Tnull),
             _ => Err(()),
         }
     }
@@ -304,8 +308,8 @@ impl TryFrom<u8> for CompareJumpKind {
 
     fn try_from(subopcode: u8) -> Result<Self, Self::Error> {
         match subopcode {
-            0x0 => Ok(CompareJumpKind::ISZERO),
-            0x1 => Ok(CompareJumpKind::ISNONZERO),
+            0 => Ok(CompareJumpKind::ISZERO),
+            1 => Ok(CompareJumpKind::ISNONZERO),
             _ => Err(()),
         }
     }
@@ -316,8 +320,8 @@ impl TryFrom<u8> for UnaryOp {
 
     fn try_from(subopcode: u8) -> Result<Self, Self::Error> {
         match subopcode {
-            0x0 => Ok(UnaryOp::Negate),
-            0x1 => Ok(UnaryOp::Not),
+            0 => Ok(UnaryOp::Negate),
+            1 => Ok(UnaryOp::Not),
             _ => Err(()),
         }
     }
@@ -368,18 +372,20 @@ impl From<&ValueRel> for &i32 {
 impl From<&Builtin> for &i32 {
     fn from(builtin: &Builtin) -> Self {
         match builtin {
-            Builtin::Lread => &1,
-            Builtin::Lwrite => &2,
-            Builtin::Llength => &3,
-            Builtin::Lstring => &4,
-            Builtin::Barray => &5,
-            Builtin::Abs => &8,
-            Builtin::Sign => &9,
-            Builtin::Sqrt => &10,
-            Builtin::Floor => &11,
-            Builtin::Round => &12,
-            Builtin::Index => &13,
-            Builtin::Tint => &14,
+            Builtin::Lread => &0,
+            Builtin::Lwrite => &1,
+            Builtin::Llength => &2,
+            Builtin::Tbool => &3,
+            Builtin::Ttext => &4,
+            Builtin::Abs => &7,
+            Builtin::Ttuple => &8,
+            Builtin::Sqrt => &9,
+            Builtin::Floor => &10,
+            Builtin::Round => &11,
+            Builtin::Tslice => &12,
+            Builtin::Tint => &13,
+            Builtin::Tfloat => &14,
+            Builtin::Tnull => &15,
         }
     }
 }
@@ -419,8 +425,8 @@ impl fmt::Display for Instruction {
             Instruction::LOAD { rel, index } => write!(f, "LOAD {} {}", rel, index),
             Instruction::CALL { dest: offset, n } => write!(f, "CALL {:?} {}", offset, n),
             Instruction::CALLBUILTIN { name, n } => {
-                if let Builtin::Barray = name {
-                    write!(f, "CALLB {:#?} {}", name, n)
+                if *n != 0 {
+                    write!(f, "CALL {:#?} {}", name, n)
                 } else {
                     write!(f, "CALL {:#?}", name)
                 }
