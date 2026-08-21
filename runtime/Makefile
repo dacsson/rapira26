@@ -5,7 +5,7 @@ SRCS = core.c text.c tuple.c callable.c arithmetic.c builtins.c io.c variant.c
 OBJS = $(SRCS:%.c=$(BUILD_DIR)/%.o)
 HEADERS = rapobject.h runtime.h runtime_internal.h rapvalue.h
 DEFAULT_CFLAGS = "-Lraperr/target/release -Lraperr -Iraperr/include"
-CFLAGS = -fPIC
+CFLAGS = -fPIC -O3
 
 all: $(LIB_DIR)/librapruntime.a
 

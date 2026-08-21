@@ -8,7 +8,7 @@ use crate::{
     RAP_index_of, RAP_input_text, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than,
     RAP_modulo, RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_power, RAP_round,
     RAP_set_tuple_item, RAP_sign, RAP_slice_assign, RAP_sqrt, RAP_stringify_object, RAP_subtract,
-    isPtr,
+    isPtr, isSMI,
 };
 use core::ffi::CStr;
 use std::ffi::CString;
@@ -1019,24 +1019,32 @@ impl Interpreter {
             return Err(InterpreterError::DivisionByZero);
         }
 
-        let result = unsafe {
-            match op {
-                Op::ADD => RAP_add(left.raw(), right.raw()),
-                Op::SUB => RAP_subtract(left.raw(), right.raw()),
-                Op::MUL => RAP_multiply(left.raw(), right.raw()),
-                Op::DIV => RAP_divide(left.raw(), right.raw()),
-                Op::MOD => RAP_modulo(left.raw(), right.raw()),
-                Op::LT => RAP_less_than(left.raw(), right.raw()),
-                Op::LEQ => RAP_less_or_equal(left.raw(), right.raw()),
-                Op::GT => RAP_greater_than(left.raw(), right.raw()),
-                Op::GEQ => RAP_greater_or_equal(left.raw(), right.raw()),
-                Op::EQ => RAP_equal(left.raw(), right.raw()),
-                Op::NEQ => RAP_not_equal(left.raw(), right.raw()),
-                Op::AND => RAP_and(left.raw(), right.raw()),
-                Op::OR => RAP_or(left.raw(), right.raw()),
-                Op::IDIV => RAP_floor_divide(left.raw(), right.raw()),
-                Op::POW => RAP_power(left.raw(), right.raw()),
-            }
+        let result = if let Some(result) = Self::eval_immediate_binop(&op, left, right) {
+            result
+        } else {
+            let result = unsafe {
+                match op {
+                    Op::ADD => RAP_add(left.raw(), right.raw()),
+                    Op::SUB => RAP_subtract(left.raw(), right.raw()),
+                    Op::MUL => RAP_multiply(left.raw(), right.raw()),
+                    Op::DIV => RAP_divide(left.raw(), right.raw()),
+                    Op::MOD => RAP_modulo(left.raw(), right.raw()),
+                    Op::LT => RAP_less_than(left.raw(), right.raw()),
+                    Op::LEQ => RAP_less_or_equal(left.raw(), right.raw()),
+                    Op::GT => RAP_greater_than(left.raw(), right.raw()),
+                    Op::GEQ => RAP_greater_or_equal(left.raw(), right.raw()),
+                    Op::EQ => RAP_equal(left.raw(), right.raw()),
+                    Op::NEQ => RAP_not_equal(left.raw(), right.raw()),
+                    Op::AND => RAP_and(left.raw(), right.raw()),
+                    Op::OR => RAP_or(left.raw(), right.raw()),
+                    Op::IDIV => RAP_floor_divide(left.raw(), right.raw()),
+                    Op::POW => RAP_power(left.raw(), right.raw()),
+                }
+            };
+
+            Self::dec_ref_if_ptr(right);
+            Self::dec_ref_if_ptr(left);
+            Object::new(result)
         };
 
         // unsafe {
@@ -1046,12 +1054,62 @@ impl Interpreter {
         //     );
         // }
 
-        Self::dec_ref_if_ptr(right);
-        Self::dec_ref_if_ptr(left);
-
-        self.push(Object::new(result))?;
+        self.push(result)?;
 
         become self.dispatch()
+    }
+
+    /// Evaluate operations whose operands are represented entirely inside a
+    /// `RAP_Value`. This avoids crossing the Rust/C boundary for the common
+    /// integer and boolean cases while retaining the generic runtime fallback
+    /// for floats and aggregate values.
+    #[inline(always)]
+    fn eval_immediate_binop(op: &Op, left: Object, right: Object) -> Option<Object> {
+        if isSMI(left.raw()) && isSMI(right.raw()) {
+            let left = left.unbox();
+            let right = right.unbox();
+
+            let result = match op {
+                Op::ADD => Object::new_boxed(left + right),
+                Op::SUB => Object::new_boxed(left - right),
+                Op::MUL => Object::new_boxed(left * right),
+                Op::DIV if left % right == 0 => Object::new_boxed(left / right),
+                Op::MOD => {
+                    let mut remainder = left % right;
+                    if remainder != 0 && ((remainder < 0) != (right < 0)) {
+                        remainder += right;
+                    }
+                    Object::new_boxed(remainder)
+                }
+                Op::LT => Object::new_bool(left < right),
+                Op::LEQ => Object::new_bool(left <= right),
+                Op::GT => Object::new_bool(left > right),
+                Op::GEQ => Object::new_bool(left >= right),
+                Op::EQ => Object::new_bool(left == right),
+                Op::NEQ => Object::new_bool(left != right),
+                Op::IDIV => {
+                    let mut quotient = left / right;
+                    let remainder = left % right;
+                    if remainder != 0 && ((remainder < 0) != (right < 0)) {
+                        quotient -= 1;
+                    }
+                    Object::new_boxed(quotient)
+                }
+                _ => return None,
+            };
+            return Some(result);
+        }
+
+        let (Some(left), Some(right)) = (left.get_bool(), right.get_bool()) else {
+            return None;
+        };
+        match op {
+            Op::EQ => Some(Object::new_bool(left == right)),
+            Op::NEQ => Some(Object::new_bool(left != right)),
+            Op::AND => Some(Object::new_bool(left && right)),
+            Op::OR => Some(Object::new_bool(left || right)),
+            _ => None,
+        }
     }
 
     fn eval_unary(&mut self) -> Result<(), InterpreterError> {
@@ -1457,5 +1515,51 @@ impl core::fmt::Display for RunError {
 impl From<DecoderError> for RunError {
     fn from(err: DecoderError) -> Self {
         RunError::DecoderError(err)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn immediate_integer(left: i64, op: Op, right: i64) -> i64 {
+        Interpreter::eval_immediate_binop(&op, Object::new_boxed(left), Object::new_boxed(right))
+            .expect("integer operation should use the immediate fast path")
+            .unbox()
+    }
+
+    #[test]
+    fn immediate_modulo_uses_floor_division_semantics() {
+        for (left, right, expected) in [(7, 2, 1), (-7, 2, 1), (7, -2, -1), (-7, -2, -1)] {
+            assert_eq!(immediate_integer(left, Op::MOD, right), expected);
+
+            let runtime_result = unsafe {
+                RAP_modulo(
+                    Object::new_boxed(left).raw(),
+                    Object::new_boxed(right).raw(),
+                )
+            };
+            assert_eq!(Object::new(runtime_result).unbox(), expected);
+        }
+    }
+
+    #[test]
+    fn immediate_floor_division_rounds_toward_negative_infinity() {
+        for (left, right, expected) in [(7, 2, 3), (-7, 2, -4), (7, -2, -4), (-7, -2, 3)] {
+            assert_eq!(immediate_integer(left, Op::IDIV, right), expected);
+        }
+    }
+
+    #[test]
+    fn immediate_boolean_operations_stay_unboxed() {
+        for (op, expected) in [(Op::AND, false), (Op::OR, true), (Op::NEQ, true)] {
+            let result = Interpreter::eval_immediate_binop(
+                &op,
+                Object::new_bool(true),
+                Object::new_bool(false),
+            )
+            .expect("boolean operation should use the immediate fast path");
+            assert_eq!(result.get_bool(), Some(expected));
+        }
     }
 }

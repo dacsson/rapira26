@@ -35,8 +35,15 @@ inline RAP_Value RAP_integer_modulo(RAP_Value a, RAP_Value b) {
   // Spec §2.2.4.2: remainder = A - A//B * B (where // is floor division)
   int64_t av = RAP_SMI_VALUE(a);
   int64_t bv = RAP_SMI_VALUE(b);
-  int64_t quotient = (int64_t)floor((double)av / bv);
-  return RAP_create_int_obj(av - quotient * bv);
+  int64_t remainder = av % bv;
+
+  // C truncates integer division toward zero, while Rapira floor division
+  // rounds toward negative infinity.  When the signs differ, move a non-zero
+  // remainder toward the divisor to preserve `a == (a // b) * b + a % b`.
+  if (remainder != 0 && ((remainder < 0) != (bv < 0)))
+    remainder += bv;
+
+  return RAP_create_int_obj(remainder);
 }
 
 inline RAP_Value RAP_integer_add(RAP_Value a, RAP_Value b) {
