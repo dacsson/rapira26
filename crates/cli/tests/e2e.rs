@@ -181,43 +181,28 @@ fn e2e_06_loops() {
 }
 
 #[test]
-fn e2e_07_procedures() {
-    assert_rap_output("07_procedures.rap");
+fn e2e_07_functions() {
+    assert_rap_output("07_functions.rap");
 }
 
 #[test]
-fn e2e_08_functions() {
-    assert_rap_output("08_functions.rap");
+fn e2e_08_type_checks() {
+    assert_rap_output("08_type_checks.rap");
 }
 
 #[test]
-fn e2e_09_scoping() {
-    assert_rap_output("09_scoping.rap");
+fn e2e_09_spec_examples() {
+    assert_rap_output("09_spec_examples.rap");
 }
 
 #[test]
-fn e2e_10_return_parameters() {
-    assert_rap_output("10_return_parameters.rap");
+fn e2e_10_input() {
+    assert_rap_output("10_input.rap");
 }
 
 #[test]
-fn e2e_11_type_checks() {
-    assert_rap_output("11_type_checks.rap");
-}
-
-#[test]
-fn e2e_12_spec_examples() {
-    assert_rap_output("12_spec_examples.rap");
-}
-
-#[test]
-fn e2e_13_input() {
-    assert_rap_output("13_input.rap");
-}
-
-#[test]
-fn e2e_14_user_types() {
-    assert_rap_output("14_user_types.rap");
+fn e2e_11_user_types() {
+    assert_rap_output("11_user_types.rap");
 }
 
 // ── Unit tests for the expected-output parser ──────────────────

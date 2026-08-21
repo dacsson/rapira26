@@ -1,7 +1,6 @@
 use crate::bytecode::*;
 use crate::bytefile::Bytefile;
 use crate::numeric::LeBytes;
-use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug, PartialEq)]
 pub enum DecoderError {
@@ -170,26 +169,28 @@ impl Decoder {
             (0x50, 0xa) => Ok(Instruction::LINE {
                 n: self.next::<i32>()?,
             }),
-            (0x70, _) if subopcode <= 0x3 && subopcode != 1 => Ok(Instruction::CALLBUILTIN {
-                n: 0,
-                name: Builtin::try_from(subopcode).map_err(|_| DecoderError::from(byte))?,
-            }),
-            (0x70, 0x4) => Ok(Instruction::CALLBUILTIN {
+            (0x70, 0x0) => Ok(Instruction::CALLBUILTIN {
+                // `n` packs the [un]typed flag and arg count
                 n: self.next::<i32>()?,
-                name: Builtin::Barray,
+                name: Builtin::Lread,
             }),
             (0x70, 0x1) => Ok(Instruction::CALLBUILTIN {
+                // `n` packs the newline flag and arg count
                 n: self.next::<i32>()?,
                 name: Builtin::Lwrite,
             }),
+            (0x70, _)
+                if [0x3, 0x4, 0x7, 0x8, 0x9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf].contains(&subopcode) =>
+            {
+                Ok(Instruction::CALLBUILTIN {
+                    n: 0,
+                    name: Builtin::try_from(subopcode).map_err(|_| DecoderError::from(byte))?,
+                })
+            }
             (0x70, 0x5) => Ok(Instruction::BOOL {
                 value: self.next::<u8>()? != 0,
             }),
             (0x70, 0x6) => Ok(Instruction::NULL),
-            (0x70, 0x7..=0xe) => Ok(Instruction::CALLBUILTIN {
-                n: self.next::<i32>()?,
-                name: Builtin::try_from(subopcode).map_err(|_| DecoderError::from(byte))?,
-            }),
             _ => Err(DecoderError::InvalidOpcode(byte)),
         }
     }
@@ -323,20 +324,19 @@ impl Decoder {
                 buf.push(0x5a);
                 buf.extend(&n.to_le_bytes());
             }
-            Instruction::CALLBUILTIN { n, name } if *name != Builtin::Barray => {
+            Instruction::CALLBUILTIN { n, name } => {
                 let name_: &i32 = name.into();
-                buf.push(0x70 | (*name_ as u8) - 1);
+                buf.push(0x70 | (*name_ as u8));
 
+                // println!("{:?} to u8: {:x}", name, *name_ as u8);
+
+                // NOTE: not all builtins need to push n,
+                // however some use this as arg count as well as
+                // pack their flags into the lower bits of the opcode
+                // like `Builtin::Lread` or `Builtin::Lwrite`
                 if *n != 0 {
                     buf.extend(&n.to_le_bytes());
                 }
-            }
-            Instruction::CALLBUILTIN {
-                n,
-                name: Builtin::Barray,
-            } => {
-                buf.push(0x74);
-                buf.extend(&n.to_le_bytes());
             }
             Instruction::BOOL { value } => {
                 buf.push(0x75);

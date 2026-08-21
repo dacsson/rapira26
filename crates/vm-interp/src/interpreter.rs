@@ -2,9 +2,10 @@
 
 use crate::object::{Object, ObjectError};
 use crate::{
-    RAP_IS_SMI, RAP_abs, RAP_add, RAP_and, RAP_create_slice, RAP_dec_ref, RAP_divide, RAP_equal,
-    RAP_floor, RAP_floor_divide, RAP_get_tuple_item, RAP_greater_or_equal, RAP_greater_than,
-    RAP_inc_ref, RAP_index_of, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than,
+    RAP_IS_BOOL, RAP_IS_FLOAT, RAP_IS_NULL, RAP_IS_SLICE, RAP_IS_SMI, RAP_IS_TEXT, RAP_IS_TUPLE,
+    RAP_abs, RAP_add, RAP_and, RAP_create_slice, RAP_dec_ref, RAP_divide, RAP_equal, RAP_floor,
+    RAP_floor_divide, RAP_get_tuple_item, RAP_greater_or_equal, RAP_greater_than, RAP_inc_ref,
+    RAP_index_of, RAP_input_text, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than,
     RAP_modulo, RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_power, RAP_round,
     RAP_set_tuple_item, RAP_sign, RAP_slice_assign, RAP_sqrt, RAP_stringify_object, RAP_subtract,
     isPtr,
@@ -485,31 +486,14 @@ impl Interpreter {
         let subopcode = self.current_opcode & 0x0f;
         let name = Builtin::try_from(subopcode)
             .map_err(|_| InterpreterError::InvalidOpcode(self.current_opcode))?;
-        let n = if subopcode == 1 || subopcode >= 4 {
+
+        let n = if [0x0, 0x1].contains(&subopcode) {
             self.decoder.next::<i32>()?
         } else {
             0
         };
 
         match name {
-            Builtin::Barray => unsafe {
-                // let length = n as usize;
-
-                // let borrow_operand_stack_elements = &mut self.operand_stack.0
-                //     [self.operand_stack_len - length + 1..=self.operand_stack_len];
-                // let array = new_array(borrow_operand_stack_elements);
-
-                // // remove args
-                // for _ in 0..length {
-                //     self.pop()?;
-                // }
-
-                // self.push(
-                //     Object::try_from(array).map_err(|_| InterpreterError::InvalidObjectPointer)?,
-                // )?;
-
-                todo!()
-            },
             Builtin::Llength => {
                 let obj = self.pop()?;
 
@@ -522,8 +506,23 @@ impl Interpreter {
                 self.push(Object::new(length))?;
             }
             Builtin::Lread => unsafe {
+                // `n` packs the format flag (bit 30) with arg count
+                // signaling whether we want typed or unptyed (text) input
+                let typed_bit = n & LWRITE_NEWLINE_FLAG;
+                let is_typed = typed_bit != 0;
+                let n = n & LWRITE_NEWLINE_MASK;
+                let arg_count = n as usize;
+
+                let RAP_input_func = if is_typed {
+                    RAP_input_value
+                } else {
+                    RAP_input_text
+                };
+
                 // Parses a line of stdin into a typed RAP_Value (int/float/text).
-                self.push(Object::new(RAP_input_value()))?;
+                for _ in 0..arg_count {
+                    self.push(Object::new(RAP_input_func()))?;
+                }
             },
             Builtin::Lwrite => unsafe {
                 // `n` packs the newline flag (bit 30) with the real argument count
@@ -550,33 +549,12 @@ impl Interpreter {
                     Self::dec_ref_if_ptr(obj);
                 }
             },
-            Builtin::Lstring => {
-                todo!();
-                // let obj = self.pop()?;
-
-                // let mut slice: [i64; 1] = [obj.raw()];
-
-                // unsafe {
-                //     let ptr = Lstring(slice.as_mut_ptr());
-                //     let contents = (*rtToData(ptr)).contents.as_ptr();
-
-                //     self.push(
-                //         Object::try_from(contents)
-                //             .map_err(|_| InterpreterError::InvalidStringPointer)?,
-                //     )?;
-                // }
-            }
-            Builtin::Abs | Builtin::Sign | Builtin::Sqrt | Builtin::Floor | Builtin::Round => {
-                if n != 1 {
-                    return Err(InterpreterError::NotEnoughArguments(
-                        "unary arithmetic builtin",
-                    ));
-                }
+            Builtin::Abs | Builtin::Sqrt | Builtin::Floor | Builtin::Round => {
+                // These are always unary by construction
                 let value = self.pop()?;
                 let result = unsafe {
                     match name {
                         Builtin::Abs => RAP_abs(value.raw()),
-                        Builtin::Sign => RAP_sign(value.raw()),
                         Builtin::Sqrt => RAP_sqrt(value.raw()),
                         Builtin::Floor => RAP_floor(value.raw()),
                         Builtin::Round => RAP_round(value.raw()),
@@ -588,20 +566,45 @@ impl Interpreter {
                 Self::dec_ref_if_ptr(value);
                 self.push(Object::new(result))?;
             }
-            Builtin::Index => {
-                if n != 2 {
-                    return Err(InterpreterError::NotEnoughArguments("индекс"));
-                }
-                let haystack = self.pop()?;
-                let needle = self.pop()?;
-                let result = unsafe { RAP_index_of(needle.raw(), haystack.raw()) };
-                Self::dec_ref_if_ptr(haystack);
-                Self::dec_ref_if_ptr(needle);
-                self.push(Object::new(result))?;
-            }
             Builtin::Tint => {
                 let value = self.pop()?;
                 let result = unsafe { RAP_IS_SMI(value.raw()) };
+                Self::dec_ref_if_ptr(value);
+                self.push(Object::new_bool(result))?;
+            }
+            Builtin::Tbool => {
+                let value = self.pop()?;
+                let result = unsafe { RAP_IS_BOOL(value.raw()) };
+                Self::dec_ref_if_ptr(value);
+                self.push(Object::new_bool(result))?;
+            }
+            Builtin::Tfloat => {
+                let value = self.pop()?;
+                let result = unsafe { RAP_IS_FLOAT(value.raw()) };
+                Self::dec_ref_if_ptr(value);
+                self.push(Object::new_bool(result))?;
+            }
+            Builtin::Ttext => {
+                let value = self.pop()?;
+                let result = unsafe { RAP_IS_TEXT(value.raw()) };
+                Self::dec_ref_if_ptr(value);
+                self.push(Object::new_bool(result))?;
+            }
+            Builtin::Ttuple => {
+                let value = self.pop()?;
+                let result = unsafe { RAP_IS_TUPLE(value.raw()) };
+                Self::dec_ref_if_ptr(value);
+                self.push(Object::new_bool(result))?;
+            }
+            Builtin::Tslice => {
+                let value = self.pop()?;
+                let result = unsafe { RAP_IS_SLICE(value.raw()) };
+                Self::dec_ref_if_ptr(value);
+                self.push(Object::new_bool(result))?;
+            }
+            Builtin::Tnull => {
+                let value = self.pop()?;
+                let result = unsafe { RAP_IS_NULL(value.raw()) };
                 Self::dec_ref_if_ptr(value);
                 self.push(Object::new_bool(result))?;
             }
