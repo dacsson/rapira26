@@ -13,8 +13,7 @@ use crate::{
 use core::ffi::CStr;
 use std::ffi::CString;
 use vm_core::bytecode::{
-    Builtin, CompareJumpKind, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, Op, UnaryOp,
-    ValueRel,
+    Builtin, CompareJumpKind, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, UnaryOp,
 };
 use vm_core::decoder::{Decoder, DecoderError};
 
@@ -26,7 +25,9 @@ const MAX_OPERAND_STACK_SIZE: usize = 64;
 #[cfg(not(test))]
 const MAX_OPERAND_STACK_SIZE: usize = 1024 * 64; // 0x7fffffff;
 
-const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 30] = [
+const INVALID_HANDLER: u8 = u8::MAX;
+
+const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 36] = [
     Interpreter::eval_nop,
     Interpreter::eval_end,
     Interpreter::eval_binop,
@@ -35,8 +36,10 @@ const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 30]
     Interpreter::eval_begin,
     Interpreter::eval_cbegin,
     Interpreter::eval_closure,
-    Interpreter::eval_store,
-    Interpreter::eval_load,
+    // Despite LOAD/STOREs being a single opcode we split
+    // on different functions to take advantage of branch prediction
+    Interpreter::eval_store_global,
+    Interpreter::eval_load_global,
     Interpreter::eval_call,
     Interpreter::eval_call_builtin,
     Interpreter::eval_callc,
@@ -57,7 +60,76 @@ const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 30]
     Interpreter::eval_null,
     Interpreter::eval_label,
     Interpreter::eval_slice,
+    Interpreter::eval_load_local,
+    Interpreter::eval_load_arg,
+    Interpreter::eval_load_capture,
+    Interpreter::eval_store_local,
+    Interpreter::eval_store_arg,
+    Interpreter::eval_store_capture,
 ];
+
+const fn build_dispatch_indices() -> [u8; 256] {
+    let mut table = [INVALID_HANDLER; 256];
+
+    table[0x00] = 0;
+    let mut opcode = 0x01;
+    while opcode <= 0x0f {
+        table[opcode] = 2;
+        opcode += 1;
+    }
+
+    table[0x10] = 3;
+    table[0x11] = 4;
+    table[0x12] = 26;
+    table[0x13] = 20;
+    table[0x14] = 21;
+    table[0x15] = 17;
+    table[0x16] = 1;
+    table[0x17] = 29;
+    table[0x18] = 14;
+    table[0x19] = 15;
+    table[0x1a] = 16;
+    table[0x1b] = 19;
+    table[0x1c] = 25;
+
+    table[0x21] = 9;
+    table[0x22] = 30;
+    table[0x23] = 31;
+    table[0x24] = 32;
+    table[0x30] = 24;
+    table[0x31] = 24;
+    table[0x41] = 8;
+    table[0x42] = 33;
+    table[0x43] = 34;
+    table[0x44] = 35;
+
+    table[0x50] = 18;
+    table[0x51] = 18;
+    table[0x52] = 5;
+    table[0x53] = 6;
+    table[0x54] = 7;
+    table[0x55] = 12;
+    table[0x56] = 10;
+    table[0x58] = 22;
+    table[0x5a] = 13;
+
+    table[0x70] = 11;
+    table[0x71] = 11;
+    table[0x72] = 11;
+    table[0x73] = 11;
+    table[0x74] = 11;
+    table[0x75] = 23;
+    table[0x76] = 27;
+    opcode = 0x77;
+    while opcode <= 0x7f {
+        table[opcode] = 11;
+        opcode += 1;
+    }
+
+    table
+}
+
+const DISPATCH_INDICES: [u8; 256] = build_dispatch_indices();
 
 pub struct Interpreter {
     operand_stack: Vec<Object>,
@@ -133,53 +205,15 @@ impl Interpreter {
         Ok(())
     }
 
-    // TODO: should be self-generated
-    #[inline(always)]
-    fn handler_index(opcode: u8) -> Option<usize> {
-        let group = opcode & 0xf0;
-        let sub = opcode & 0x0f;
-        Some(match (group, sub) {
-            (0x00, 0) => 0,
-            (0x00, 1..=15) => 2,
-            (0x10, 0) => 3,
-            (0x10, 1) => 4,
-            (0x10, 2) => 26,
-            (0x10, 3) => 20,
-            (0x10, 4) => 21,
-            (0x10, 5) => 17,
-            (0x10, 6) => 1,
-            (0x10, 7) => 29,
-            (0x10, 8) => 14,
-            (0x10, 9) => 15,
-            (0x10, 10) => 16,
-            (0x10, 11) => 19,
-            (0x10, 12) => 25,
-            (0x20..=0x2f, _) => 9,
-            (0x30..=0x3f, _) => 24,
-            (0x40..=0x4f, _) => 8,
-            (0x50, 0) | (0x50, 1) => 18,
-            (0x50, 2) => 5,
-            (0x50, 3) => 6,
-            (0x50, 4) => 7,
-            (0x50, 5) => 12,
-            (0x50, 6) => 10,
-            (0x50, 8) => 22,
-            (0x50, 10) => 13,
-            (0x70, 0..=15) if sub == 5 => 23,
-            (0x70, 0..=15) if sub == 6 => 27,
-            (0x70, 0..=15) => 11,
-            _ => return None,
-        })
-    }
-
     #[inline(always)]
     fn dispatch(&mut self) -> Result<(), InterpreterError> {
         let opcode = self.decoder.next::<u8>()?;
-        let Some(index) = Self::handler_index(opcode) else {
+        let index = DISPATCH_INDICES[opcode as usize];
+        if index == INVALID_HANDLER {
             return Err(InterpreterError::InvalidOpcode(opcode));
-        };
+        }
         self.current_opcode = opcode;
-        become DISPATCH_TABLE[index](self)
+        become DISPATCH_TABLE[index as usize](self)
     }
 
     fn eval_bool(&mut self) -> Result<(), InterpreterError> {
@@ -655,83 +689,79 @@ impl Interpreter {
         become self.dispatch()
     }
 
-    fn eval_load(&mut self) -> Result<(), InterpreterError> {
-        // println!("LOAD called at {}", self.decoder.ip);
-
-        let rel = ValueRel::try_from(self.current_opcode & 0x0f)
-            .map_err(|_| InterpreterError::InvalidOpcode(self.current_opcode))?;
+    fn eval_load_global(&mut self) -> Result<(), InterpreterError> {
         let index = self.decoder.next::<i32>()? as usize;
+        let value = self.globals()[index];
 
-        // FIXME: not unwrap
-        let value = match rel {
-            ValueRel::Arg => self.load_arg(index)?,
-            ValueRel::Capture => unsafe {
-                todo!()
-                // let closure = frame
-                //     .get_closure(&mut self.operand_stack.0, self.frame_pointer)
-                //     .unwrap();
-
-                // let to_data = rtToData(
-                //     closure
-                //         .as_ptr_mut()
-                //         .ok_or(InterpreterError::InvalidObjectPointer)?,
-                // );
-
-                // let element = get_captured_variable(&*to_data, index as usize);
-
-                // self.push(Object::new_boxed(element))?;
-            },
-            ValueRel::Global => self.globals()[index],
-            ValueRel::Local => self.load_local(index)?,
-        };
-
-        // Because we create an alias, we must inc the refcount
         Self::inc_ref_if_ptr(value);
         self.push(value)?;
 
         become self.dispatch()
     }
 
-    fn eval_store(&mut self) -> Result<(), InterpreterError> {
-        // println!("STORE called at {}", self.decoder.ip);
-
-        let rel = ValueRel::try_from(self.current_opcode & 0x0f)
-            .map_err(|_| InterpreterError::InvalidOpcode(self.current_opcode))?;
+    fn eval_load_local(&mut self) -> Result<(), InterpreterError> {
         let index = self.decoder.next::<i32>()? as usize;
+        let value = self.load_local(index)?;
 
+        Self::inc_ref_if_ptr(value);
+        self.push(value)?;
+
+        become self.dispatch()
+    }
+
+    fn eval_load_arg(&mut self) -> Result<(), InterpreterError> {
+        let index = self.decoder.next::<i32>()? as usize;
+        let value = self.load_arg(index)?;
+
+        Self::inc_ref_if_ptr(value);
+        self.push(value)?;
+
+        become self.dispatch()
+    }
+
+    fn eval_load_capture(&mut self) -> Result<(), InterpreterError> {
+        todo!("captured-variable loads are not implemented")
+    }
+
+    fn eval_store_global(&mut self) -> Result<(), InterpreterError> {
+        let index = self.decoder.next::<i32>()? as usize;
         let value = self.pop()?;
-        let old = match rel {
-            ValueRel::Arg => self.store_arg(index, value)?,
-            ValueRel::Capture => unsafe {
-                todo!()
-                // let closure = frame
-                //     .get_closure(&mut self.operand_stack, self.frame_pointer)
-                //     .unwrap();
+        let old = self.globals()[index];
+        self.globals_mut()[index] = value;
 
-                // let to_data = rtToData(
-                //     closure
-                //         .as_ptr_mut()
-                //         .ok_or(InterpreterError::InvalidObjectPointer)?,
-                // );
-
-                // set_captured_variable(&mut *to_data, index as usize, value.raw());
-            },
-            ValueRel::Global => {
-                let old = self.globals()[index];
-                self.globals_mut()[index] = value;
-                old
-            }
-            ValueRel::Local => self.store_local(index, value)?,
-        };
-
-        // STORE is a transfer: the values one reference moves from the temp
-        // stack slot to the destination variable slot, so we only release the
-        // previous occupant (own count stays unchanged)
         if old.raw() != value.raw() {
             Self::dec_ref_if_ptr(old);
         }
 
         become self.dispatch()
+    }
+
+    fn eval_store_local(&mut self) -> Result<(), InterpreterError> {
+        let index = self.decoder.next::<i32>()? as usize;
+        let value = self.pop()?;
+        let old = self.store_local(index, value)?;
+
+        if old.raw() != value.raw() {
+            Self::dec_ref_if_ptr(old);
+        }
+
+        become self.dispatch()
+    }
+
+    fn eval_store_arg(&mut self) -> Result<(), InterpreterError> {
+        let index = self.decoder.next::<i32>()? as usize;
+        let value = self.pop()?;
+        let old = self.store_arg(index, value)?;
+
+        if old.raw() != value.raw() {
+            Self::dec_ref_if_ptr(old);
+        }
+
+        become self.dispatch()
+    }
+
+    fn eval_store_capture(&mut self) -> Result<(), InterpreterError> {
+        todo!("captured-variable stores are not implemented")
     }
 
     fn eval_end(&mut self) -> Result<(), InterpreterError> {
@@ -997,8 +1027,7 @@ impl Interpreter {
     fn eval_binop(&mut self) -> Result<(), InterpreterError> {
         // println!("binop called at {}", self.decoder.ip);
 
-        let op = Op::try_from(self.current_opcode & 0x0f)
-            .map_err(|_| InterpreterError::InvalidOpcode(self.current_opcode))?;
+        let subopcode = self.current_opcode & 0x0f;
 
         let right = self.pop()?;
         let left = self.pop()?;
@@ -1015,30 +1044,31 @@ impl Interpreter {
         //     );
         // }
 
-        if matches!(op, Op::DIV | Op::MOD | Op::IDIV) && right.unbox() == 0 {
+        if matches!(subopcode, 0x4 | 0x5 | 0xe) && right.unbox() == 0 {
             return Err(InterpreterError::DivisionByZero);
         }
 
-        let result = if let Some(result) = Self::eval_immediate_binop(&op, left, right) {
+        let result = if let Some(result) = Self::eval_immediate_binop(subopcode, left, right) {
             result
         } else {
             let result = unsafe {
-                match op {
-                    Op::ADD => RAP_add(left.raw(), right.raw()),
-                    Op::SUB => RAP_subtract(left.raw(), right.raw()),
-                    Op::MUL => RAP_multiply(left.raw(), right.raw()),
-                    Op::DIV => RAP_divide(left.raw(), right.raw()),
-                    Op::MOD => RAP_modulo(left.raw(), right.raw()),
-                    Op::LT => RAP_less_than(left.raw(), right.raw()),
-                    Op::LEQ => RAP_less_or_equal(left.raw(), right.raw()),
-                    Op::GT => RAP_greater_than(left.raw(), right.raw()),
-                    Op::GEQ => RAP_greater_or_equal(left.raw(), right.raw()),
-                    Op::EQ => RAP_equal(left.raw(), right.raw()),
-                    Op::NEQ => RAP_not_equal(left.raw(), right.raw()),
-                    Op::AND => RAP_and(left.raw(), right.raw()),
-                    Op::OR => RAP_or(left.raw(), right.raw()),
-                    Op::IDIV => RAP_floor_divide(left.raw(), right.raw()),
-                    Op::POW => RAP_power(left.raw(), right.raw()),
+                match subopcode {
+                    0x1 => RAP_add(left.raw(), right.raw()),
+                    0x2 => RAP_subtract(left.raw(), right.raw()),
+                    0x3 => RAP_multiply(left.raw(), right.raw()),
+                    0x4 => RAP_divide(left.raw(), right.raw()),
+                    0x5 => RAP_modulo(left.raw(), right.raw()),
+                    0x6 => RAP_less_than(left.raw(), right.raw()),
+                    0x7 => RAP_less_or_equal(left.raw(), right.raw()),
+                    0x8 => RAP_greater_than(left.raw(), right.raw()),
+                    0x9 => RAP_greater_or_equal(left.raw(), right.raw()),
+                    0xa => RAP_equal(left.raw(), right.raw()),
+                    0xb => RAP_not_equal(left.raw(), right.raw()),
+                    0xc => RAP_and(left.raw(), right.raw()),
+                    0xd => RAP_or(left.raw(), right.raw()),
+                    0xe => RAP_floor_divide(left.raw(), right.raw()),
+                    0xf => RAP_power(left.raw(), right.raw()),
+                    _ => return Err(InterpreterError::InvalidOpcode(self.current_opcode)),
                 }
             };
 
@@ -1064,30 +1094,30 @@ impl Interpreter {
     /// integer and boolean cases while retaining the generic runtime fallback
     /// for floats and aggregate values.
     #[inline(always)]
-    fn eval_immediate_binop(op: &Op, left: Object, right: Object) -> Option<Object> {
+    fn eval_immediate_binop(subopcode: u8, left: Object, right: Object) -> Option<Object> {
         if isSMI(left.raw()) && isSMI(right.raw()) {
             let left = left.unbox();
             let right = right.unbox();
 
-            let result = match op {
-                Op::ADD => Object::new_boxed(left + right),
-                Op::SUB => Object::new_boxed(left - right),
-                Op::MUL => Object::new_boxed(left * right),
-                Op::DIV if left % right == 0 => Object::new_boxed(left / right),
-                Op::MOD => {
+            let result = match subopcode {
+                0x1 => Object::new_boxed(left + right),
+                0x2 => Object::new_boxed(left - right),
+                0x3 => Object::new_boxed(left * right),
+                0x4 if left % right == 0 => Object::new_boxed(left / right),
+                0x5 => {
                     let mut remainder = left % right;
                     if remainder != 0 && ((remainder < 0) != (right < 0)) {
                         remainder += right;
                     }
                     Object::new_boxed(remainder)
                 }
-                Op::LT => Object::new_bool(left < right),
-                Op::LEQ => Object::new_bool(left <= right),
-                Op::GT => Object::new_bool(left > right),
-                Op::GEQ => Object::new_bool(left >= right),
-                Op::EQ => Object::new_bool(left == right),
-                Op::NEQ => Object::new_bool(left != right),
-                Op::IDIV => {
+                0x6 => Object::new_bool(left < right),
+                0x7 => Object::new_bool(left <= right),
+                0x8 => Object::new_bool(left > right),
+                0x9 => Object::new_bool(left >= right),
+                0xa => Object::new_bool(left == right),
+                0xb => Object::new_bool(left != right),
+                0xe => {
                     let mut quotient = left / right;
                     let remainder = left % right;
                     if remainder != 0 && ((remainder < 0) != (right < 0)) {
@@ -1103,11 +1133,11 @@ impl Interpreter {
         let (Some(left), Some(right)) = (left.get_bool(), right.get_bool()) else {
             return None;
         };
-        match op {
-            Op::EQ => Some(Object::new_bool(left == right)),
-            Op::NEQ => Some(Object::new_bool(left != right)),
-            Op::AND => Some(Object::new_bool(left && right)),
-            Op::OR => Some(Object::new_bool(left || right)),
+        match subopcode {
+            0xa => Some(Object::new_bool(left == right)),
+            0xb => Some(Object::new_bool(left != right)),
+            0xc => Some(Object::new_bool(left && right)),
+            0xd => Some(Object::new_bool(left || right)),
             _ => None,
         }
     }
@@ -1522,16 +1552,34 @@ impl From<DecoderError> for RunError {
 mod tests {
     use super::*;
 
-    fn immediate_integer(left: i64, op: Op, right: i64) -> i64 {
-        Interpreter::eval_immediate_binop(&op, Object::new_boxed(left), Object::new_boxed(right))
-            .expect("integer operation should use the immediate fast path")
-            .unbox()
+    #[test]
+    fn dispatch_table_specializes_variable_access() {
+        assert_eq!(DISPATCH_INDICES[0x21], 9);
+        assert_eq!(DISPATCH_INDICES[0x22], 30);
+        assert_eq!(DISPATCH_INDICES[0x23], 31);
+        assert_eq!(DISPATCH_INDICES[0x24], 32);
+        assert_eq!(DISPATCH_INDICES[0x41], 8);
+        assert_eq!(DISPATCH_INDICES[0x42], 33);
+        assert_eq!(DISPATCH_INDICES[0x43], 34);
+        assert_eq!(DISPATCH_INDICES[0x44], 35);
+        assert_eq!(DISPATCH_INDICES[0x20], INVALID_HANDLER);
+        assert_eq!(DISPATCH_INDICES[0x45], INVALID_HANDLER);
+    }
+
+    fn immediate_integer(left: i64, subopcode: u8, right: i64) -> i64 {
+        Interpreter::eval_immediate_binop(
+            subopcode,
+            Object::new_boxed(left),
+            Object::new_boxed(right),
+        )
+        .expect("integer operation should use the immediate fast path")
+        .unbox()
     }
 
     #[test]
     fn immediate_modulo_uses_floor_division_semantics() {
         for (left, right, expected) in [(7, 2, 1), (-7, 2, 1), (7, -2, -1), (-7, -2, -1)] {
-            assert_eq!(immediate_integer(left, Op::MOD, right), expected);
+            assert_eq!(immediate_integer(left, 0x5, right), expected);
 
             let runtime_result = unsafe {
                 RAP_modulo(
@@ -1546,15 +1594,15 @@ mod tests {
     #[test]
     fn immediate_floor_division_rounds_toward_negative_infinity() {
         for (left, right, expected) in [(7, 2, 3), (-7, 2, -4), (7, -2, -4), (-7, -2, 3)] {
-            assert_eq!(immediate_integer(left, Op::IDIV, right), expected);
+            assert_eq!(immediate_integer(left, 0xe, right), expected);
         }
     }
 
     #[test]
     fn immediate_boolean_operations_stay_unboxed() {
-        for (op, expected) in [(Op::AND, false), (Op::OR, true), (Op::NEQ, true)] {
+        for (subopcode, expected) in [(0xc, false), (0xd, true), (0xb, true)] {
             let result = Interpreter::eval_immediate_binop(
-                &op,
+                subopcode,
                 Object::new_bool(true),
                 Object::new_bool(false),
             )
