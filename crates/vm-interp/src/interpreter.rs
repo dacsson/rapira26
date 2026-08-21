@@ -2,20 +2,18 @@
 
 use crate::object::{Object, ObjectError};
 use crate::{
-    isPtr,
     RAP_IS_SMI, RAP_abs, RAP_add, RAP_and, RAP_create_slice, RAP_dec_ref, RAP_divide, RAP_equal,
     RAP_floor, RAP_floor_divide, RAP_get_tuple_item, RAP_greater_or_equal, RAP_greater_than,
     RAP_inc_ref, RAP_index_of, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than,
     RAP_modulo, RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_power, RAP_round,
     RAP_set_tuple_item, RAP_sign, RAP_slice_assign, RAP_sqrt, RAP_stringify_object, RAP_subtract,
+    isPtr,
 };
-use core::array;
 use core::ffi::CStr;
-use std::collections::HashMap;
 use std::ffi::CString;
 use vm_core::bytecode::{
-    Builtin, CompareJumpKind, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, Label, Op,
-    UnaryOp, ValueRel,
+    Builtin, CompareJumpKind, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, Op, UnaryOp,
+    ValueRel,
 };
 use vm_core::decoder::{Decoder, DecoderError};
 
@@ -27,8 +25,7 @@ const MAX_OPERAND_STACK_SIZE: usize = 64;
 #[cfg(not(test))]
 const MAX_OPERAND_STACK_SIZE: usize = 1024 * 64; // 0x7fffffff;
 
-const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), InterpreterError>;
-    30] = [
+const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 30] = [
     Interpreter::eval_nop,
     Interpreter::eval_end,
     Interpreter::eval_binop,
@@ -64,8 +61,11 @@ const DISPATCH_TABLE: [fn(&mut Interpreter, instr: Instruction) -> Result<(), In
 pub struct Interpreter {
     operand_stack: Vec<Object>,
     frame_pointer: usize,
+    frame_arg_count: usize,
+    frame_local_count: usize,
     /// Bytefile decoder
     decoder: Decoder,
+    current_opcode: u8,
     /// Globals length
     global_areas_size: usize,
 }
@@ -98,7 +98,10 @@ impl Interpreter {
         Interpreter {
             operand_stack,
             frame_pointer: global_areas_size,
+            frame_arg_count: 2,
+            frame_local_count: 0,
             decoder,
+            current_opcode: 0,
             global_areas_size,
         }
     }
@@ -107,24 +110,18 @@ impl Interpreter {
     pub fn run(&mut self) -> Result<(), RunError> {
         self.decoder.ip = self.decoder.bf.main_offset as usize;
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-        let err_instr = instr.clone();
+        self.dispatch().map_err(|e| -> RunError {
+            let global_offset = core::mem::size_of::<i32>()
+                + core::mem::size_of::<i32>()
+                + core::mem::size_of::<i32>()
+                + (core::mem::size_of::<i32>()
+                    * 2
+                    * self.decoder.bf.public_symbols_number as usize)
+                + self.decoder.bf.stringtab_size as usize
+                + self.decoder.ip;
 
-        DISPATCH_TABLE[instr.discriminant() as usize](self, instr).map_err(
-            |e| -> RunError {
-                let global_offset = core::mem::size_of::<i32>()
-                    + core::mem::size_of::<i32>()
-                    + core::mem::size_of::<i32>()
-                    + (core::mem::size_of::<i32>()
-                        * 2
-                        * self.decoder.bf.public_symbols_number as usize)
-                    + self.decoder.bf.stringtab_size as usize
-                    + self.decoder.ip;
-
-                RunError::ErrorAtOffset(global_offset, e, err_instr)
-            },
-        )?;
+            RunError::ErrorAtOffset(global_offset, e, Instruction::END)
+        })?;
 
         // Release every remaining owned reference so the
         // run ends with a clean heap
@@ -135,34 +132,73 @@ impl Interpreter {
         Ok(())
     }
 
-    fn eval_bool(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        let Instruction::BOOL { value: index } = instr else {
-            return Err(InterpreterError::NotEnoughArguments("BOOL"));
+    // TODO: should be self-generated
+    #[inline(always)]
+    fn handler_index(opcode: u8) -> Option<usize> {
+        let group = opcode & 0xf0;
+        let sub = opcode & 0x0f;
+        Some(match (group, sub) {
+            (0x00, 0) => 0,
+            (0x00, 1..=15) => 2,
+            (0x10, 0) => 3,
+            (0x10, 1) => 4,
+            (0x10, 2) => 26,
+            (0x10, 3) => 20,
+            (0x10, 4) => 21,
+            (0x10, 5) => 17,
+            (0x10, 6) => 1,
+            (0x10, 7) => 29,
+            (0x10, 8) => 14,
+            (0x10, 9) => 15,
+            (0x10, 10) => 16,
+            (0x10, 11) => 19,
+            (0x10, 12) => 25,
+            (0x20..=0x2f, _) => 9,
+            (0x30..=0x3f, _) => 24,
+            (0x40..=0x4f, _) => 8,
+            (0x50, 0) | (0x50, 1) => 18,
+            (0x50, 2) => 5,
+            (0x50, 3) => 6,
+            (0x50, 4) => 7,
+            (0x50, 5) => 12,
+            (0x50, 6) => 10,
+            (0x50, 8) => 22,
+            (0x50, 10) => 13,
+            (0x70, 0..=15) if sub == 5 => 23,
+            (0x70, 0..=15) if sub == 6 => 27,
+            (0x70, 0..=15) => 11,
+            _ => return None,
+        })
+    }
+
+    #[inline(always)]
+    fn dispatch(&mut self) -> Result<(), InterpreterError> {
+        let opcode = self.decoder.next::<u8>()?;
+        let Some(index) = Self::handler_index(opcode) else {
+            return Err(InterpreterError::InvalidOpcode(opcode));
         };
+        self.current_opcode = opcode;
+        become DISPATCH_TABLE[index](self)
+    }
+
+    fn eval_bool(&mut self) -> Result<(), InterpreterError> {
+        let index = self.decoder.next::<u8>()? != 0;
 
         self.push(Object::new_bool(index))?;
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_line(&mut self, _: Instruction) -> Result<(), InterpreterError> {
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+    fn eval_line(&mut self) -> Result<(), InterpreterError> {
+        let _ = self.decoder.next::<i32>()?;
+        become self.dispatch()
     }
 
-    fn eval_nop(&mut self, _: Instruction) -> Result<(), InterpreterError> {
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+    fn eval_nop(&mut self) -> Result<(), InterpreterError> {
+        become self.dispatch()
     }
 
-    fn eval_closure(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+    fn eval_closure(&mut self) -> Result<(), InterpreterError> {
         // let Instruction::CLOSURE { offset, arity } = instr else {
         //     return Err(InterpreterError::InvalidObjectPointer);
         // };
@@ -267,10 +303,10 @@ impl Interpreter {
 
         todo!();
 
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        unreachable!()
     }
 
-    fn eval_callc(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+    fn eval_callc(&mut self) -> Result<(), InterpreterError> {
         // let Instruction::CALLC { arity } = instr else {
         //     return Err(InterpreterError::InvalidObjectPointer);
         // };
@@ -318,14 +354,14 @@ impl Interpreter {
 
         todo!();
 
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        unreachable!()
     }
 
-    fn eval_load_ref(&mut self, _: Instruction) -> Result<(), InterpreterError> {
+    fn eval_load_ref(&mut self) -> Result<(), InterpreterError> {
         panic!("You shouldn't be here")
     }
 
-    fn eval_array(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+    fn eval_array(&mut self) -> Result<(), InterpreterError> {
         // let Instruction::ARRAY { n } = instr else {
         //     return Err(InterpreterError::InvalidObjectPointer);
         // };
@@ -366,10 +402,10 @@ impl Interpreter {
 
         todo!();
 
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        unreachable!()
     }
 
-    fn eval_elem(&mut self, _: Instruction) -> Result<(), InterpreterError> {
+    fn eval_elem(&mut self) -> Result<(), InterpreterError> {
         let index_obj = self.pop()?;
         let collection = self.pop()?;
         let index = index_obj.unbox();
@@ -391,17 +427,10 @@ impl Interpreter {
         Self::dec_ref_if_ptr(collection);
         Self::dec_ref_if_ptr(index_obj);
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_sts(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        let Instruction::STS = instr else {
-            return Err(InterpreterError::InvalidOpcode(instr.discriminant()));
-        };
-
+    fn eval_sts(&mut self) -> Result<(), InterpreterError> {
         // Stack: [value, slice] (bottom→top), so pop slice first (top),
         // then value (next down).
         let slice = self.pop()?;
@@ -413,19 +442,15 @@ impl Interpreter {
         Self::dec_ref_if_ptr(slice);
         Self::dec_ref_if_ptr(value);
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_cjmp(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        let Instruction::CJMP { dest, kind } = instr else {
-            return Err(InterpreterError::InvalidObjectPointer);
-        };
-
-        let Some(offset_at) = dest.offset else {
-            return Err(InterpreterError::UnknownLabel(dest.name));
+    fn eval_cjmp(&mut self) -> Result<(), InterpreterError> {
+        let offset_at = self.decoder.next::<i32>()?;
+        let kind = match self.current_opcode & 0x0f {
+            0 => CompareJumpKind::ISZERO,
+            1 => CompareJumpKind::ISNONZERO,
+            _ => return Err(InterpreterError::InvalidOpcode(self.current_opcode)),
         };
 
         let obj = self.pop()?;
@@ -451,17 +476,19 @@ impl Interpreter {
         //     kind, offset_at, self.decoder.bf.code_section[offset_at as usize], value
         // );
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_call_builtin(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+    fn eval_call_builtin(&mut self) -> Result<(), InterpreterError> {
         // println!("in eval_call_builtin: {:?}", instr);
 
-        let Instruction::CALLBUILTIN { name, n } = instr else {
-            return Err(InterpreterError::InvalidObjectPointer);
+        let subopcode = self.current_opcode & 0x0f;
+        let name = Builtin::try_from(subopcode)
+            .map_err(|_| InterpreterError::InvalidOpcode(self.current_opcode))?;
+        let n = if subopcode == 1 || subopcode >= 4 {
+            self.decoder.next::<i32>()?
+        } else {
+            0
         };
 
         match name {
@@ -580,20 +607,12 @@ impl Interpreter {
             }
         }
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_call(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        let Instruction::CALL {
-            dest: Label { name, offset },
-            ..
-        } = instr
-        else {
-            return Err(InterpreterError::InvalidObjectPointer);
-        };
+    fn eval_call(&mut self) -> Result<(), InterpreterError> {
+        let offset = self.decoder.next::<i32>()?;
+        let _n = self.decoder.next::<i32>()?;
 
         // Push old instruction pointer
         // `BEGIN` instruction will collect it
@@ -602,59 +621,47 @@ impl Interpreter {
         // // Push empty closure object
         // self.push(Object::new_empty())?;
 
-        self.decoder.ip = offset.unwrap() as usize;
+        self.decoder.ip = offset as usize;
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_swap(&mut self, _: Instruction) -> Result<(), InterpreterError> {
+    fn eval_swap(&mut self) -> Result<(), InterpreterError> {
         let value1 = self.pop()?;
         let value2 = self.pop()?;
         self.push(value1)?;
         self.push(value2)?;
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_dup(&mut self, _: Instruction) -> Result<(), InterpreterError> {
+    fn eval_dup(&mut self) -> Result<(), InterpreterError> {
         let value = self.pop()?;
         self.push(value)?;
         self.push(value)?;
 
         Self::inc_ref_if_ptr(value);
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_drop(&mut self, _: Instruction) -> Result<(), InterpreterError> {
+    fn eval_drop(&mut self) -> Result<(), InterpreterError> {
         let obj = self.pop()?;
         Self::dec_ref_if_ptr(obj);
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_load(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+    fn eval_load(&mut self) -> Result<(), InterpreterError> {
         // println!("LOAD called at {}", self.decoder.ip);
 
-        let Instruction::LOAD { rel, index } = instr else {
-            return Err(InterpreterError::InvalidObjectPointer);
-        };
+        let rel = ValueRel::try_from(self.current_opcode & 0x0f)
+            .map_err(|_| InterpreterError::InvalidOpcode(self.current_opcode))?;
+        let index = self.decoder.next::<i32>()? as usize;
 
         // FIXME: not unwrap
         let value = match rel {
-            ValueRel::Arg => self.load_arg(index as usize)?,
+            ValueRel::Arg => self.load_arg(index)?,
             ValueRel::Capture => unsafe {
                 todo!()
                 // let closure = frame
@@ -671,30 +678,27 @@ impl Interpreter {
 
                 // self.push(Object::new_boxed(element))?;
             },
-            ValueRel::Global => self.globals()[index as usize],
-            ValueRel::Local => self.load_local(index as usize)?,
+            ValueRel::Global => self.globals()[index],
+            ValueRel::Local => self.load_local(index)?,
         };
 
         // Because we create an alias, we must inc the refcount
         Self::inc_ref_if_ptr(value);
         self.push(value)?;
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_store(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+    fn eval_store(&mut self) -> Result<(), InterpreterError> {
         // println!("STORE called at {}", self.decoder.ip);
 
-        let Instruction::STORE { rel, index } = instr else {
-            return Err(InterpreterError::InvalidObjectPointer);
-        };
+        let rel = ValueRel::try_from(self.current_opcode & 0x0f)
+            .map_err(|_| InterpreterError::InvalidOpcode(self.current_opcode))?;
+        let index = self.decoder.next::<i32>()? as usize;
 
         let value = self.pop()?;
         let old = match rel {
-            ValueRel::Arg => self.store_arg(index as usize, value)?,
+            ValueRel::Arg => self.store_arg(index, value)?,
             ValueRel::Capture => unsafe {
                 todo!()
                 // let closure = frame
@@ -710,11 +714,11 @@ impl Interpreter {
                 // set_captured_variable(&mut *to_data, index as usize, value.raw());
             },
             ValueRel::Global => {
-                let old = self.globals()[index as usize];
-                self.globals_mut()[index as usize] = value;
+                let old = self.globals()[index];
+                self.globals_mut()[index] = value;
                 old
             }
-            ValueRel::Local => self.store_local(index as usize, value)?,
+            ValueRel::Local => self.store_local(index, value)?,
         };
 
         // STORE is a transfer: the values one reference moves from the temp
@@ -724,20 +728,17 @@ impl Interpreter {
             Self::dec_ref_if_ptr(old);
         }
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_end(&mut self, _: Instruction) -> Result<(), InterpreterError> {
+    fn eval_end(&mut self) -> Result<(), InterpreterError> {
         // Get procedures return value
         let return_value = self
             .pop()
             .map_err(|_| InterpreterError::NotEnoughArguments("END"))?;
 
-        let n_locals = self.frame_local_count()?;
-        let n_args = self.frame_arg_count()?;
+        let n_locals = self.frame_local_count;
+        let n_args = self.frame_arg_count;
         let ret_frame_pointer = self.frame_return_pointer()?;
         let ret_ip = self.frame_return_ip()?;
 
@@ -784,23 +785,29 @@ impl Interpreter {
             return Ok(());
         }
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
+        // The caller's frame is still present on the operand stack. Restore
+        // its cached metadata after removing the callee frame.
+        self.frame_arg_count = self
+            .operand_stack
+            .get(ret_frame_pointer + 1)
+            .copied()
+            .ok_or(InterpreterError::NotEnoughArguments("caller frame arg count"))?
+            .unbox() as usize;
+        self.frame_local_count = self
+            .operand_stack
+            .get(ret_frame_pointer + 2)
+            .copied()
+            .ok_or(InterpreterError::NotEnoughArguments("caller frame local count"))?
+            .unbox() as usize;
 
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_begin(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+    fn eval_begin(&mut self) -> Result<(), InterpreterError> {
         // println!("eval_begin: {:?}", instr);
 
-        let Instruction::BEGIN {
-            args: payload,
-            locals,
-            ..
-        } = instr
-        else {
-            return Err(InterpreterError::InvalidObjectPointer);
-        };
+        let payload = self.decoder.next::<i32>()?;
+        let locals = self.decoder.next::<i32>()?;
 
         let stack_size_for_function = payload >> 16;
         let args = (payload & 0xFFFF) as usize;
@@ -826,6 +833,8 @@ impl Interpreter {
             return Err(InterpreterError::NotEnoughArguments("BEGIN"));
         }
         self.frame_pointer = self.operand_stack.len();
+        self.frame_arg_count = args;
+        self.frame_local_count = locals as usize;
 
         // the closure slot must still exist for the frame layout expected
         self.push(Object::new_empty())?;
@@ -853,15 +862,10 @@ impl Interpreter {
         //     ))?;
         // frame.save_closure(&mut self.operand_stack.0, self.frame_pointer, closure_obj);
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        // println!("eval_begin: {:?} {}", instr, instr.discriminant());
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_cbegin(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+    fn eval_cbegin(&mut self) -> Result<(), InterpreterError> {
         // let Instruction::CBEGIN {
         //     args: payload,
         //     locals,
@@ -928,11 +932,7 @@ impl Interpreter {
         todo!();
     }
 
-    fn eval_sta(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        let Instruction::STA = instr else {
-            return Err(InterpreterError::NotEnoughArguments("STI"));
-        };
-
+    fn eval_sta(&mut self) -> Result<(), InterpreterError> {
         let aggregate = self.pop()?;
         let index = self.pop()?;
         let value = self.pop()?;
@@ -945,22 +945,13 @@ impl Interpreter {
         Self::dec_ref_if_ptr(index);
         Self::dec_ref_if_ptr(value);
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_jmp(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        let Instruction::JMP { dest } = instr else {
-            return Err(InterpreterError::NotEnoughArguments("JMP"));
-        };
+    fn eval_jmp(&mut self) -> Result<(), InterpreterError> {
+        let offset_at = self.decoder.next::<i32>()?;
 
         // NOTE: Frame shifting is delegated to `BEGIN` instruction
-
-        let Some(offset_at) = dest.offset else {
-            return Err(InterpreterError::UnknownLabel(dest.name.clone()));
-        };
 
         // println!(
         //     "jmp called to {} | {:x}",
@@ -969,16 +960,11 @@ impl Interpreter {
 
         self.decoder.ip = offset_at as usize;
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_string(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        let Instruction::STRING { index } = instr else {
-            return Err(InterpreterError::NotEnoughArguments("STRING"));
-        };
+    fn eval_string(&mut self) -> Result<(), InterpreterError> {
+        let index = self.decoder.next::<i32>()?;
 
         let string_bytes = self
             .decoder
@@ -990,33 +976,22 @@ impl Interpreter {
 
         self.push(Object::new_string(string))?;
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_const(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        let Instruction::CONST { value: index } = instr else {
-            return Err(InterpreterError::NotEnoughArguments("CONST"));
-        };
+    fn eval_const(&mut self) -> Result<(), InterpreterError> {
+        let index = self.decoder.next::<i32>()?;
 
         self.push(Object::new_boxed(index as i64))?;
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        // println!("eval_const next: {:?} {}", instr, instr.discriminant());
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_binop(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+    fn eval_binop(&mut self) -> Result<(), InterpreterError> {
         // println!("binop called at {}", self.decoder.ip);
 
-        let Instruction::BINOP { op } = instr else {
-            return Err(InterpreterError::NotEnoughArguments("BINOP"));
-        };
+        let op = Op::try_from(self.current_opcode & 0x0f)
+            .map_err(|_| InterpreterError::InvalidOpcode(self.current_opcode))?;
 
         let right = self.pop()?;
         let left = self.pop()?;
@@ -1069,16 +1044,12 @@ impl Interpreter {
 
         self.push(Object::new(result))?;
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_unary(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        let Instruction::UNARY { op } = instr else {
-            return Err(InterpreterError::NotEnoughArguments("UNARY"));
-        };
+    fn eval_unary(&mut self) -> Result<(), InterpreterError> {
+        let op = UnaryOp::try_from(self.current_opcode & 0x0f)
+            .map_err(|_| InterpreterError::InvalidOpcode(self.current_opcode))?;
 
         let value = self.pop()?;
 
@@ -1094,37 +1065,24 @@ impl Interpreter {
         // Decref old value
         Self::dec_ref_if_ptr(value);
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_constf(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        let Instruction::CONSTF { value } = instr else {
-            return Err(InterpreterError::NotEnoughArguments("CONSTF"));
-        };
+    fn eval_constf(&mut self) -> Result<(), InterpreterError> {
+        let value = self.decoder.next::<f64>()?;
 
         self.push(Object::new_float(value))?;
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_tuple(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        let Instruction::TUPLE { n } = instr else {
-            return Err(InterpreterError::NotEnoughArguments("TUPLE"));
-        };
+    fn eval_tuple(&mut self) -> Result<(), InterpreterError> {
+        let n = self.decoder.next::<i32>()?;
 
         if n == 0 {
             self.push(Object::new_tuple(0, &mut []))?;
 
-            let encoding = self.decoder.next::<u8>()?;
-            let instr = self.decoder.decode(encoding)?;
-
-            become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+            become self.dispatch()
         }
 
         // Take n elements from stack
@@ -1140,40 +1098,29 @@ impl Interpreter {
 
         self.push(obj)?;
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
     /// Push null value on the operand stack
-    fn eval_null(&mut self, _: Instruction) -> Result<(), InterpreterError> {
+    fn eval_null(&mut self) -> Result<(), InterpreterError> {
         self.push(Object::new_null())?;
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
     /// Resolves a label to an offset
     ///
     /// FIXME: Can it appear here?
-    fn eval_label(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
+    fn eval_label(&mut self) -> Result<(), InterpreterError> {
         // let Instruction::LABEL { name } = instr else {
         //     return Err(InterpreterError::InvalidOpcode(instr.discriminant()));
         // };
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
-    fn eval_slice(&mut self, instr: Instruction) -> Result<(), InterpreterError> {
-        let Instruction::SLICE { bounds } = instr else {
-            return Err(InterpreterError::InvalidOpcode(instr.discriminant()));
-        };
+    fn eval_slice(&mut self) -> Result<(), InterpreterError> {
+        let bounds = self.decoder.next::<u8>()?;
 
         // Unlike other builtins, n is not an argument count here:
         // bit 0 says `from` was pushed, and bit 1 says `to` was pushed.
@@ -1201,10 +1148,7 @@ impl Interpreter {
 
         self.push(Object::new(result))?;
 
-        let encoding = self.decoder.next::<u8>()?;
-        let instr = self.decoder.decode(encoding)?;
-
-        become DISPATCH_TABLE[instr.discriminant() as usize](self, instr)
+        become self.dispatch()
     }
 
     /// Push to the operand stack
@@ -1249,21 +1193,15 @@ impl Interpreter {
     }
 
     #[inline(always)]
-    fn frame_stack_value(&self, offset: usize, opname: &'static str) -> Result<Object, InterpreterError> {
+    fn frame_stack_value(
+        &self,
+        offset: usize,
+        opname: &'static str,
+    ) -> Result<Object, InterpreterError> {
         self.operand_stack
             .get(self.frame_pointer + offset)
             .copied()
             .ok_or(InterpreterError::NotEnoughArguments(opname))
-    }
-
-    #[inline(always)]
-    fn frame_arg_count(&self) -> Result<usize, InterpreterError> {
-        Ok(self.frame_stack_value(1, "frame arg count")?.unbox() as usize)
-    }
-
-    #[inline(always)]
-    fn frame_local_count(&self) -> Result<usize, InterpreterError> {
-        Ok(self.frame_stack_value(2, "frame local count")?.unbox() as usize)
     }
 
     #[inline(always)]
@@ -1278,7 +1216,7 @@ impl Interpreter {
 
     #[inline(always)]
     fn arg_slot_index(&self, index: usize) -> Result<usize, InterpreterError> {
-        let n_args = self.frame_arg_count()?;
+        let n_args = self.frame_arg_count;
         if index >= n_args {
             return Err(InterpreterError::NotEnoughArguments("LOAD/STORE arg"));
         }
@@ -1288,7 +1226,7 @@ impl Interpreter {
 
     #[inline(always)]
     fn local_slot_index(&self, index: usize) -> Result<usize, InterpreterError> {
-        let n_locals = self.frame_local_count()?;
+        let n_locals = self.frame_local_count;
         if index >= n_locals {
             return Err(InterpreterError::NotEnoughArguments("LOAD/STORE local"));
         }
