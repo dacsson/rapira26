@@ -14,26 +14,6 @@ pub struct TypeDefinition {
     pub variants: HashMap<String, Vec<String>>,
 }
 
-/// Определение новой процедуры
-///
-/// Процедуры могут принимать "выходные" параметры и не возвращают значения
-///
-/// Пример:
-/// ```text
-/// проц моя_процедура(параметр1, вых параметр2)
-///     параметр2 := параметр1 + 1
-///     возврат параметр2
-/// ```
-#[derive(Debug, Clone)]
-pub struct ProcedureDefinition {
-    pub name: Option<String>, // spec allows anonymous procedures as values
-    pub parameters: Vec<ProcParameter>,
-    pub name_declarations: NameDeclarations,
-    pub body: Vec<Spannable<Statement>>,
-    // variables that need to be saved in the frame, so other procedures can access them via `чужие`
-    pub variables_need_saving: HashSet<String>,
-}
-
 /// Определение новой функции
 ///
 /// Функции обязаны возвращать значение
@@ -51,15 +31,6 @@ pub struct FunctionDefinition {
     pub body: Vec<Spannable<Statement>>,
     // variables that need to be saved in the frame, so other procedures can access them via `чужие`
     pub variables_need_saving: HashSet<String>,
-}
-
-/// Параметр процедуры
-///
-/// Выходные параметры передаются по ссылке
-#[derive(Debug, Clone)]
-pub enum ProcParameter {
-    Input(String),
-    InOut(String),
 }
 
 /// В теле функции или процедуры можно объявить чужие и свои имена,
@@ -101,14 +72,13 @@ pub enum Statement {
         value: Box<Spannable<Expr>>,
     },
 
-    /// Вызов процедуры, в двух формах:
+    /// Вызов процедуры:
     /// ```text
-    /// вызов моя_процедура(аргументы) \ с ключевым словом `вызов`
     /// моя_процедура(аргументы)
     /// ```
     ProcedureCall {
         procedure: Box<Spannable<Expr>>,
-        arguments: Vec<CallArgument>,
+        arguments: Vec<Box<Spannable<Expr>>>,
     },
 
     /// Пример:
@@ -153,7 +123,7 @@ pub enum Statement {
     /// возврат из функции со значением
     ReturnFromFunction(Box<Spannable<Expr>>),
 
-    /// Импортирование функций, типов или процедур из модуля
+    /// Импортирование функций, типов из модуля
     /// подкл "<name>" (<definition_name>,...)
     Import {
         name: String,
@@ -182,15 +152,6 @@ pub enum LValue {
         left: Box<Spannable<Expr>>,
         field: String,
     },
-}
-
-/// Тип аргумента в вызове процедуры
-#[derive(Debug, Clone, PartialEq)]
-pub enum CallArgument {
-    /// Стандартный входной аргумент, передаётся по значению
-    Input(Box<Spannable<Expr>>),
-    /// Выходной аргумент, передаётся по ссылке
-    InOut(Spannable<LValue>),
 }
 
 /// Сравнение с образцом/pattern matching

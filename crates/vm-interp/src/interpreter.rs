@@ -791,13 +791,17 @@ impl Interpreter {
             .operand_stack
             .get(ret_frame_pointer + 1)
             .copied()
-            .ok_or(InterpreterError::NotEnoughArguments("caller frame arg count"))?
+            .ok_or(InterpreterError::NotEnoughArguments(
+                "caller frame arg count",
+            ))?
             .unbox() as usize;
         self.frame_local_count = self
             .operand_stack
             .get(ret_frame_pointer + 2)
             .copied()
-            .ok_or(InterpreterError::NotEnoughArguments("caller frame local count"))?
+            .ok_or(InterpreterError::NotEnoughArguments(
+                "caller frame local count",
+            ))?
             .unbox() as usize;
 
         become self.dispatch()

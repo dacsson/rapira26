@@ -10,7 +10,7 @@ use petgraph::{
 use std::rc::Rc;
 use std::{collections::HashMap, path::PathBuf};
 
-use crate::ast::{FunctionDefinition, ProcedureDefinition, Spannable, Statement, TypeDefinition};
+use crate::ast::{FunctionDefinition, Spannable, Statement, TypeDefinition};
 
 /// A map of imported module names to the names of their exported definitions
 type ImportInfo = HashMap<String, Vec<String>>;
@@ -44,14 +44,12 @@ pub struct Module {
     pub name: ModuleName,
     pub path: AbsolutModulePath,
     pub functions: Vec<Spannable<FunctionDefinition>>,
-    pub procedures: Vec<Spannable<ProcedureDefinition>>,
     pub types: Vec<Spannable<TypeDefinition>>,
     pub toplevel: Vec<Spannable<Statement>>,
 
     // Dependencies
     pub imports_info: ImportInfo,
     pub imported_functions: Vec<Rc<Spannable<FunctionDefinition>>>,
-    pub imported_procedures: Vec<Rc<Spannable<ProcedureDefinition>>>,
     pub imported_types: Vec<Rc<Spannable<TypeDefinition>>>,
 }
 
@@ -61,12 +59,10 @@ impl Module {
             name: Module::mangle_module_name(&path),
             path,
             functions: Vec::new(),
-            procedures: Vec::new(),
             types: Vec::new(),
             toplevel: Vec::new(),
             imports_info: HashMap::new(),
             imported_functions: Vec::new(),
-            imported_procedures: Vec::new(),
             imported_types: Vec::new(),
         }
     }
@@ -94,29 +90,6 @@ impl Module {
         self.imported_functions
             .iter()
             .find(|f| f.node.name.as_ref().map(|n| n == name).is_some())
-    }
-
-    pub fn add_procedure(&mut self, procedure: Spannable<ProcedureDefinition>) {
-        self.procedures.push(procedure);
-    }
-
-    pub fn find_procedure(&self, name: &str) -> Option<&Spannable<ProcedureDefinition>> {
-        self.procedures
-            .iter()
-            .find(|p| p.node.name.as_ref().map(|n| n == name).is_some())
-    }
-
-    pub fn add_imported_procedure(&mut self, procedure: Rc<Spannable<ProcedureDefinition>>) {
-        self.imported_procedures.push(procedure);
-    }
-
-    pub fn find_imported_procedure(
-        &self,
-        name: &str,
-    ) -> Option<&Rc<Spannable<ProcedureDefinition>>> {
-        self.imported_procedures
-            .iter()
-            .find(|p| p.node.name.as_ref().map(|n| n == name).is_some())
     }
 
     pub fn add_type(&mut self, type_def: Spannable<TypeDefinition>) {
@@ -184,8 +157,6 @@ pub fn build_dependency_graph(
 
     let mut imported_functions =
         HashMap::<NodeIndex, Vec<Rc<Spannable<FunctionDefinition>>>>::new();
-    let mut imported_procedures =
-        HashMap::<NodeIndex, Vec<Rc<Spannable<ProcedureDefinition>>>>::new();
     let mut imported_types = HashMap::<NodeIndex, Vec<Rc<Spannable<TypeDefinition>>>>::new();
 
     for node_idx in graph.node_indices() {

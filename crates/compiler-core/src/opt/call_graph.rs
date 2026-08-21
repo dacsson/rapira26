@@ -21,8 +21,6 @@ impl CallGraph {
         let mut top_level_node = CallNode {
             name: "top_level".to_string(),
             local_args: Vec::new(),
-            foreign_args: Vec::new(),
-            sent_as_inout_params: Vec::new(),
         };
         let mut top_level_call_exprs = Vec::new();
 
@@ -37,8 +35,6 @@ impl CallGraph {
                     return;
                 };
                 let mut local_args = name_declarations.own_names.clone();
-                let foreign_args = name_declarations.foreign_names.clone();
-                let mut sent_as_inout_params = Vec::new();
 
                 // Also add local vars which are not set via `свои`
                 local_args.extend(body.iter().filter_map(|stmt| {
@@ -52,26 +48,6 @@ impl CallGraph {
                         None
                     }
                 }));
-
-                sent_as_inout_params.extend(
-                    body.iter()
-                        .map(|stmt| match &stmt.node {
-                            Statement::ProcedureCall { arguments, .. } => arguments
-                                .iter()
-                                .map(|arg| match arg {
-                                    CallArgument::InOut(Spannable {
-                                        node: LValue::Name(name),
-                                        ..
-                                    }) => Some(name.clone()),
-                                    _ => None,
-                                })
-                                .collect::<Vec<_>>(),
-                            _ => vec![],
-                        })
-                        .flatten()
-                        .filter(|s| s.is_some())
-                        .map(|s| s.unwrap()),
-                );
 
                 func_to_call.insert(
                     func_name.clone(),
@@ -104,8 +80,6 @@ impl CallGraph {
                 graph.add_node(CallNode {
                     name: func_name,
                     local_args,
-                    foreign_args,
-                    sent_as_inout_params,
                 });
             };
 
@@ -125,22 +99,8 @@ impl CallGraph {
                 }
                 Statement::ProcedureCall {
                     procedure,
-                    arguments,
+                    arguments: _,
                 } => {
-                    top_level_node
-                        .sent_as_inout_params
-                        .extend(arguments.iter().filter_map(|arg| {
-                            if let CallArgument::InOut(lval) = arg {
-                                if let LValue::Name(name) = &lval.node {
-                                    Some(name.clone())
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        }));
-
                     if let Expr::Name(name) = &procedure.node {
                         top_level_call_exprs.push(name.clone());
                     }
@@ -153,13 +113,6 @@ impl CallGraph {
             let name = &funcs.node.name;
             let name_declarations = &funcs.node.name_declarations;
             let body = &funcs.node.body;
-            handle_callable(name, name_declarations, body);
-        }
-
-        for procedure in &module.procedures {
-            let name = &procedure.node.name;
-            let name_declarations = &procedure.node.name_declarations;
-            let body = &procedure.node.body;
             handle_callable(name, name_declarations, body);
         }
 
@@ -323,8 +276,6 @@ impl CallGraph {
 pub struct CallNode {
     pub name: String,
     pub local_args: Vec<String>,
-    pub foreign_args: Vec<String>,
-    pub sent_as_inout_params: Vec<String>,
 }
 
 // #[cfg(test)]
