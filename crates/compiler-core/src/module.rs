@@ -8,12 +8,15 @@ use petgraph::{
     graph::{DiGraph, NodeIndex},
 };
 use std::rc::Rc;
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::PathBuf,
+};
 
 use crate::ast::{FunctionDefinition, Spannable, Statement, TypeDefinition};
 
 /// A map of imported module names to the names of their exported definitions
-type ImportInfo = HashMap<String, Vec<String>>;
+type ImportInfo = BTreeMap<String, Vec<String>>;
 
 /// A directed graph representing the dependencies between modules
 type DependencyGraph = DiGraph<Module, Vec<String>>;
@@ -51,6 +54,10 @@ pub struct Module {
     pub imports_info: ImportInfo,
     pub imported_functions: Vec<Rc<Spannable<FunctionDefinition>>>,
     pub imported_types: Vec<Rc<Spannable<TypeDefinition>>>,
+    /// Imported name to the module that defines it
+    ///
+    /// RBC code generation uses this map to turn an unqualified source call into a qualified label.
+    pub resolved_imports: HashMap<String, ModuleName>,
 }
 
 impl Module {
@@ -61,15 +68,21 @@ impl Module {
             functions: Vec::new(),
             types: Vec::new(),
             toplevel: Vec::new(),
-            imports_info: HashMap::new(),
+            imports_info: BTreeMap::new(),
             imported_functions: Vec::new(),
             imported_types: Vec::new(),
+            resolved_imports: HashMap::new(),
         }
     }
 
     pub fn mangle_module_name(path: &AbsolutModulePath) -> ModuleName {
-        let path_str = path.get().with_extension("").to_string_lossy().to_string();
-        ModuleName(path_str.replace("/", "_").replace(".", "_"))
+        ModuleName(
+            path.get()
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+        )
     }
 
     pub fn add_function(&mut self, function: Spannable<FunctionDefinition>) {
@@ -79,7 +92,7 @@ impl Module {
     pub fn find_function(&self, name: &str) -> Option<&Spannable<FunctionDefinition>> {
         self.functions
             .iter()
-            .find(|f| f.node.name.as_ref().map(|n| n == name).is_some())
+            .find(|function| function.node.name.as_deref() == Some(name))
     }
 
     pub fn add_imported_function(&mut self, function: Rc<Spannable<FunctionDefinition>>) {
@@ -89,7 +102,7 @@ impl Module {
     pub fn find_imported_function(&self, name: &str) -> Option<&Rc<Spannable<FunctionDefinition>>> {
         self.imported_functions
             .iter()
-            .find(|f| f.node.name.as_ref().map(|n| n == name).is_some())
+            .find(|function| function.node.name.as_deref() == Some(name))
     }
 
     pub fn add_type(&mut self, type_def: Spannable<TypeDefinition>) {
@@ -122,6 +135,10 @@ impl Module {
             );
         }
     }
+
+    pub fn imported_module_names(&self) -> impl Iterator<Item = &str> {
+        self.imports_info.keys().map(String::as_str)
+    }
 }
 
 impl std::fmt::Display for Module {
@@ -131,8 +148,12 @@ impl std::fmt::Display for Module {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum DependencyError {
     ModuleNotFound(String),
+    DuplicateModule(String),
+    DefinitionNotFound { module: String, definition: String },
+    DuplicateDefinition(String),
     CyclicDependency,
 }
 
@@ -140,6 +161,15 @@ impl std::fmt::Display for DependencyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DependencyError::ModuleNotFound(name) => write!(f, "Не нашёл модуль: {}", name),
+            DependencyError::DuplicateModule(name) => {
+                write!(f, "Несколько модулей имеют имя: {}", name)
+            }
+            DependencyError::DefinitionNotFound { module, definition } => {
+                write!(f, "В модуле {} нет определения {}", module, definition)
+            }
+            DependencyError::DuplicateDefinition(name) => {
+                write!(f, "Импортированное имя конфликтует: {}", name)
+            }
             DependencyError::CyclicDependency => write!(f, "Циклическая зависимость"),
         }
     }
@@ -152,49 +182,78 @@ pub fn build_dependency_graph(
     let mut graph = DependencyGraph::new();
     modules.into_iter().for_each(|m| _ = graph.add_node(m));
 
+    let mut modules_by_name = HashMap::new();
+    for node_idx in graph.node_indices() {
+        let name = graph.node_weight(node_idx).unwrap().name.get().to_string();
+        if modules_by_name.insert(name.clone(), node_idx).is_some() {
+            return Err(DependencyError::DuplicateModule(name));
+        }
+    }
+
     // Gathers definitions relations (example: A --imports func "func_name"--> B)
     let mut edges = Vec::<(NodeIndex, NodeIndex, Vec<String>)>::new();
 
-    let mut imported_functions =
-        HashMap::<NodeIndex, Vec<Rc<Spannable<FunctionDefinition>>>>::new();
-    let mut imported_types = HashMap::<NodeIndex, Vec<Rc<Spannable<TypeDefinition>>>>::new();
-
     for node_idx in graph.node_indices() {
         // Use import metadata to find dependencies
-        let imports = &graph.node_weight(node_idx).unwrap().imports_info;
+        let imports = graph.node_weight(node_idx).unwrap().imports_info.clone();
         for (import_mod_name, import_module_deps) in imports {
-            let import_node_idx = graph
-                .node_indices()
-                .find(|n| {
-                    graph
-                        .node_weight(*n)
-                        .map_or(false, |n| n.name.get() == import_mod_name)
-                })
+            let import_node_idx = *modules_by_name
+                .get(&import_mod_name)
                 .ok_or(DependencyError::ModuleNotFound(import_mod_name.clone()))?;
 
             // Expand import info and fill concrete import definitions
             let imported_module = graph.node_weight(import_node_idx).unwrap();
-            for import_def_name in import_module_deps {
-                // It can be either a function, procedure, or type
+            let imported_module_name = imported_module.name.clone();
+            let mut resolved_functions = Vec::new();
+            let mut resolved_types = Vec::new();
+
+            for import_def_name in &import_module_deps {
                 if let Some(imported_func) = imported_module.find_function(import_def_name) {
-                    imported_functions
-                        .entry(node_idx)
-                        .or_default()
-                        // TODO: refactor Rc usage, rn its pointless
-                        .push(Rc::new(imported_func.clone()));
+                    resolved_functions.push(Rc::new(imported_func.clone()));
+                } else if let Some(imported_type) = imported_module.find_type(import_def_name) {
+                    resolved_types.push(Rc::new(imported_type.clone()));
+                } else {
+                    return Err(DependencyError::DefinitionNotFound {
+                        module: import_mod_name.clone(),
+                        definition: import_def_name.clone(),
+                    });
                 }
             }
 
             // Add to dependency graph
             edges.push((node_idx, import_node_idx, import_module_deps.clone()));
+
+            let importing_module = graph.node_weight_mut(node_idx).unwrap();
+            for imported_func in resolved_functions {
+                let name = imported_func.node.name.as_ref().unwrap().clone();
+                if importing_module.find_function(&name).is_some()
+                    || importing_module.resolved_imports.contains_key(&name)
+                {
+                    return Err(DependencyError::DuplicateDefinition(name));
+                }
+                importing_module
+                    .resolved_imports
+                    .insert(name, imported_module_name.clone());
+                importing_module.add_imported_function(imported_func);
+            }
+            for imported_type in resolved_types {
+                let name = imported_type.node.name.clone();
+                if importing_module.find_type(&name).is_some()
+                    || importing_module.resolved_imports.contains_key(&name)
+                {
+                    return Err(DependencyError::DuplicateDefinition(name));
+                }
+                importing_module
+                    .resolved_imports
+                    .insert(name, imported_module_name.clone());
+                importing_module.add_imported_type(imported_type);
+            }
         }
     }
 
     edges
         .into_iter()
         .for_each(|(src, dst, deps)| _ = graph.add_edge(src, dst, deps));
-
-    // TODO: detect cycles in DAG
 
     // Topological sort
     let sorted_idxs = match toposort(&graph, None) {
