@@ -206,6 +206,11 @@ impl Bytefile {
         self.code_section.len()
     }
 
+    /// Return the code-section offset assigned to resolved label
+    pub fn label_offset(&self, name: &str) -> Option<usize> {
+        self.labels.get(name).copied()
+    }
+
     /// Encodes the bytefile into a binary format
     ///
     /// The `*.rbc` files are exactly that (this output)

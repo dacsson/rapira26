@@ -205,6 +205,147 @@ fn e2e_11_user_types() {
     assert_rap_output("11_user_types.rap");
 }
 
+#[test]
+fn e2e_static_linked_modules() {
+    let temp_dir = std::env::temp_dir().join(format!("rapira26_modules_{}", std::process::id()));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let base_path = temp_dir.join("base.rap");
+    let math_path = temp_dir.join("math.rap");
+    let main_path = temp_dir.join("main.rap");
+    std::fs::write(
+        &base_path,
+        "вывод: \"base\"\nсмещение := 1\nфунк увеличить(х)\n  возврат х + смещение\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &math_path,
+        "подкл \"base\" (увеличить)\nвывод: \"math\"\nфунк вычислить(х)\n  возврат увеличить(х) * 2\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &main_path,
+        "подкл \"math\" (вычислить)\nвывод: \"main\"\nвывод: вычислить(41)\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_рапик"))
+        .arg(&main_path)
+        .output()
+        .unwrap();
+
+    let _ = std::fs::remove_file(main_path.with_extension("rbc"));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+
+    assert!(
+        output.status.success(),
+        "module program failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "base\nmath\nmain\n84\n"
+    );
+}
+
+#[test]
+fn e2e_module_from_std_path() {
+    let temp_dir =
+        std::env::temp_dir().join(format!("rapira26_std_modules_{}", std::process::id()));
+    let app_dir = temp_dir.join("app");
+    let std_dir = temp_dir.join("std");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    std::fs::create_dir_all(&std_dir).unwrap();
+
+    let main_path = app_dir.join("main.rap");
+    std::fs::write(std_dir.join("база.рап"), "функ индекс()\n  возврат 26\n").unwrap();
+    std::fs::write(&main_path, "подкл \"база\" (индекс)\nвывод: индекс()\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_рапик"))
+        .arg("--путь-стд")
+        .arg(&std_dir)
+        .arg(&main_path)
+        .output()
+        .unwrap();
+
+    let _ = std::fs::remove_file(main_path.with_extension("rbc"));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+
+    assert!(
+        output.status.success(),
+        "stdlib module program failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "26\n");
+}
+
+#[test]
+fn e2e_module_from_rapira_std() {
+    let temp_dir = std::env::temp_dir().join(format!("rapira26_std_env_{}", std::process::id()));
+    let app_dir = temp_dir.join("app");
+    let std_dir = temp_dir.join("std");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    std::fs::create_dir_all(&std_dir).unwrap();
+
+    let main_path = app_dir.join("main.rap");
+    std::fs::write(std_dir.join("база.рап"), "функ индекс()\n  возврат 2026\n").unwrap();
+    std::fs::write(&main_path, "подкл \"база\" (индекс)\nвывод: индекс()\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_рапик"))
+        .env("RAPIRA_STD", &std_dir)
+        .arg(&main_path)
+        .output()
+        .unwrap();
+
+    let _ = std::fs::remove_file(main_path.with_extension("rbc"));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+
+    assert!(
+        output.status.success(),
+        "RAPIRA_STD module program failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "2026\n");
+}
+
+#[test]
+fn e2e_local_module_shadows_rapira_std() {
+    let temp_dir = std::env::temp_dir().join(format!("rapira26_std_shadow_{}", std::process::id()));
+    let app_dir = temp_dir.join("app");
+    let std_dir = temp_dir.join("std");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    std::fs::create_dir_all(&std_dir).unwrap();
+
+    let main_path = app_dir.join("main.rap");
+    std::fs::write(
+        app_dir.join("база.рап"),
+        "функ источник()\n  возврат \"local\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        std_dir.join("база.рап"),
+        "функ источник()\n  возврат \"std\"\n",
+    )
+    .unwrap();
+    std::fs::write(&main_path, "подкл \"база\" (источник)\nвывод: источник()\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_рапик"))
+        .env("RAPIRA_STD", &std_dir)
+        .arg(&main_path)
+        .output()
+        .unwrap();
+
+    let _ = std::fs::remove_file(main_path.with_extension("rbc"));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+
+    assert!(
+        output.status.success(),
+        "stdlib shadowing program failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "local\n");
+}
+
 // ── Unit tests for the expected-output parser ──────────────────
 
 #[cfg(test)]

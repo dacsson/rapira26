@@ -3,10 +3,7 @@
 //! The bytecode itself is an adopted/reworked version of LaMa VM bytecode.
 //! To explore the bytecode format, see the `vm-core` crate.
 
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-};
+use std::{collections::HashMap, path::PathBuf};
 
 use vm_core::{
     bytecode::{
@@ -18,7 +15,7 @@ use vm_core::{
 use crate::{
     ast::{
         BinaryOperator, Expr, FunctionDefinition, LValue, Literal, LoopHeader, LoopStatement,
-        NameDeclarations, SelectionStatement, Spannable, Statement, TypeDefinition, UnaryOperator,
+        SelectionStatement, Spannable, Statement, TypeDefinition, UnaryOperator,
     },
     codegen::{AbsolutGeneratedCodePath, CodegenTarget, ModuleMap, RunError},
     module::Module,
@@ -137,12 +134,16 @@ impl Env {
 pub struct BcGen {
     bytefile: Bytefile,
     env: Env,
+    current_module: String,
+    call_targets: HashMap<String, String>,
 }
 
 impl BcGen {
     pub fn new() -> Self {
         Self {
             bytefile: Bytefile::new(),
+            current_module: String::new(),
+            call_targets: HashMap::new(),
             env: Env {
                 // TODO: maybe we can use `count_locals` to
                 //       pre-allocate enough indecies?
@@ -157,6 +158,47 @@ impl BcGen {
                 loop_end_labels: Vec::new(),
                 context: Context::Global,
             },
+        }
+    }
+
+    fn qualified_label(module: &str, definition: &str) -> String {
+        format!("{module}::{definition}")
+    }
+
+    fn resolve_call_target(&self, name: &str) -> String {
+        self.call_targets
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_string())
+    }
+
+    fn configure_module(&mut self, module: &Module) {
+        self.current_module = module.name.get().to_string();
+        self.call_targets.clear();
+        self.env.locals.clear();
+        self.env.args.clear();
+        self.env.globals.clear();
+        self.env.local_counter = 0;
+        self.env.arg_counter = 0;
+        self.env.context = Context::Global;
+
+        for function in &module.functions {
+            let name = function.node.name.as_ref().unwrap();
+            self.call_targets.insert(
+                name.clone(),
+                Self::qualified_label(&self.current_module, name),
+            );
+        }
+        for function in &module.imported_functions {
+            let name = function.node.name.as_ref().unwrap();
+            let defining_module = module
+                .resolved_imports
+                .get(name)
+                .expect("resolved imported function");
+            self.call_targets.insert(
+                name.clone(),
+                Self::qualified_label(defining_module.get(), name),
+            );
         }
     }
 
@@ -267,7 +309,7 @@ impl BcGen {
                 } else {
                     instrs.push(Instruction::CALL {
                         dest: Label {
-                            name: name.clone(),
+                            name: self.resolve_call_target(name),
                             offset: None,
                         },
                         n: arguments.len() as i32,
@@ -673,7 +715,7 @@ impl BcGen {
                 } else {
                     instrs.push(Instruction::CALL {
                         dest: Label {
-                            name: name.clone(),
+                            name: self.resolve_call_target(name),
                             offset: None,
                         },
                         n: arguments.len() as i32,
@@ -814,28 +856,71 @@ impl BcGen {
 
 impl CodegenTarget for BcGen {
     fn generate(&mut self, modules: Vec<Module>) -> ModuleMap {
-        // Forbid multi-module compilation for now
-        if modules.len() > 1 {
-            panic!("Multi-module compilation is not supported yet");
-        }
+        assert!(!modules.is_empty(), "no modules to compile");
 
-        let module = &modules[0];
+        self.bytefile = Bytefile::new();
+        self.env.global_counter = 0;
         let mut module_map = ModuleMap::new();
+        let output_path = modules.last().unwrap().path.clone();
+        let mut instrs = Vec::new();
+        let mut init_labels = Vec::new();
+        let mut exported_functions = Vec::new();
 
-        // First emit top-level, after this call
-        // the bytefile should have a main function offset
-        // in public symbols
-        let mut instrs = self.emit_top_level_def(&module.toplevel);
+        // NOTE: The code below implements the early-on compile-to-single-bytefile
+        // module system, to be changed later
 
-        // TODO: emit other constructs
-        for func in &module.functions {
-            instrs.extend(self.emit_function_def(func));
+        // Modules arrive in dependency order, so we emit each module with its own env
+        for module in &modules {
+            self.configure_module(module);
+            let init_label = Self::qualified_label(module.name.get(), "<init>");
+            init_labels.push(init_label);
+            instrs.extend(self.emit_top_level_def(&module.toplevel));
+
+            for function in &module.functions {
+                let name = function.node.name.as_ref().unwrap();
+                exported_functions.push(Self::qualified_label(module.name.get(), name));
+                instrs.extend(self.emit_function_def(function));
+            }
         }
+
+        self.bytefile.global_area_size = self.env.global_counter as u32;
+
+        // TODO: the public fields in the bytecode created specifically for linking multiple bytefiles
+        // while this is fine for now we def need to change it later
+        // The bytefile has one conventional entry point (for now) we initializes every
+        // module exactly once in dependency order
+        instrs.push(Instruction::LABEL {
+            name: "main".to_string(),
+        });
+        instrs.push(Instruction::BEGIN { args: 0, locals: 0 });
+        for init_label in init_labels {
+            instrs.push(Instruction::CALL {
+                dest: Label {
+                    name: init_label,
+                    offset: None,
+                },
+                n: 0,
+            });
+            instrs.push(Instruction::DROP);
+        }
+        instrs.push(Instruction::NULL);
+        instrs.push(Instruction::END);
 
         self.bytefile.add_instructions(&instrs).unwrap();
 
-        // Map this module path to the bytefile bits
-        module_map.insert(module.path.clone(), self.bytefile.encode());
+        self.bytefile.main_offset = self.bytefile.label_offset("main").unwrap() as u32;
+        self.bytefile.add_string("main".to_string());
+        self.bytefile
+            .add_public_symbol("main", self.bytefile.main_offset)
+            .unwrap();
+
+        for symbol in exported_functions {
+            let offset = self.bytefile.label_offset(&symbol).unwrap() as u32;
+            self.bytefile.add_string(symbol.clone());
+            self.bytefile.add_public_symbol(&symbol, offset).unwrap();
+        }
+
+        module_map.insert(output_path, self.bytefile.encode());
 
         module_map
     }
@@ -874,7 +959,7 @@ impl CodegenTarget for BcGen {
         let mut instructions = Vec::new();
 
         instructions.push(Instruction::LABEL {
-            name: func_def.name.as_ref().unwrap().clone(),
+            name: Self::qualified_label(&self.current_module, func_def.name.as_ref().unwrap()),
         });
 
         // Emit BEGIN of function
@@ -912,37 +997,23 @@ impl CodegenTarget for BcGen {
         // Top-level is just a main function, nothing special actually
         // The important thing is that top-level is evaluated on import (if used as module)
         // or immediately if its a main module
+        self.env.context = Context::Global;
+        self.env.locals.clear();
+        self.env.args.clear();
+        self.env.local_counter = 0;
+        self.env.arg_counter = 0;
 
-        let top_level_name = "main".to_string();
-        let top_level_offset = self.bytefile.get_current_offset();
-
-        let instrs = self.emit_function_def(&Spannable {
-            node: FunctionDefinition {
-                name: Some(top_level_name.clone()),
-                parameters: Vec::new(),
-                body: top_level.clone(),
-                name_declarations: NameDeclarations {
-                    foreign_names: Vec::new(),
-                    own_names: Vec::new(),
-                },
-                variables_need_saving: HashSet::new(),
+        let mut instructions = vec![
+            Instruction::LABEL {
+                name: Self::qualified_label(&self.current_module, "<init>"),
             },
-            position_start: top_level
-                .first()
-                .map(|stmt| stmt.position_start)
-                .unwrap_or(0),
-            position_end: top_level.last().map(|stmt| stmt.position_end).unwrap_or(0),
-        });
-
-        // Now we can mark the current offset as main_offset
-        self.bytefile.main_offset = top_level_offset as u32;
-
-        // Also make it public
-        self.bytefile.add_string(top_level_name.clone());
-        self.bytefile
-            .add_public_symbol(&top_level_name, self.bytefile.main_offset)
-            .unwrap();
-
-        instrs
+            Instruction::BEGIN { args: 0, locals: 0 },
+        ];
+        for statement in top_level {
+            instructions.extend(self.emit_statement(statement));
+        }
+        instructions.push(Instruction::NULL);
+        instructions.push(Instruction::END);
+        instructions
     }
 }

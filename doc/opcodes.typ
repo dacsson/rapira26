@@ -101,14 +101,14 @@ scope (*value relation*).
   columns: (auto, auto, auto, 1fr),
   table.header([*Opcode*], [*Mnemonic*], [*Operands*], [*Description*]),
 
-  [`0x20`], [`LOAD global`], [`i32le index`], [Push global variable at slot `index`.],
-  [`0x21`], [`LOAD local`], [`i32le index`], [Push local variable at slot `index`.],
-  [`0x22`], [`LOAD arg`], [`i32le index`], [Push function argument at position `index`.],
-  [`0x23`], [`LOAD capture`], [`i32le index`], [Push captured (closure) variable at slot `index`.],
+  [`0x21`], [`LOAD global`], [`i32le index`], [Push global variable at slot `index`.],
+  [`0x22`], [`LOAD local`], [`i32le index`], [Push local variable at slot `index`.],
+  [`0x23`], [`LOAD arg`], [`i32le index`], [Push function argument at position `index`.],
+  [`0x24`], [`LOAD capture`], [`i32le index`], [Push captured (closure) variable at slot `index`.],
 )
 
-Lower nibble: `0x0` = Global, `0x1` = Local, `0x2` = Arg, `0x3` = Capture.
-Opcodes `0x24`–`0x2f` are unused.
+Lower nibble: `0x1` = Global, `0x2` = Local, `0x3` = Arg, `0x4` = Capture.
+Opcodes `0x20`, `0x25`–`0x2f` are unused.
 
 == Group `0x3_` — Unary Operations
 
@@ -134,13 +134,13 @@ same as `LOAD`.
   columns: (auto, auto, auto, 1fr),
   table.header([*Opcode*], [*Mnemonic*], [*Operands*], [*Description*]),
 
-  [`0x40`], [`STORE global`], [`i32le index`], [Pop TOS and store into global variable at slot `index`.],
-  [`0x41`], [`STORE local`], [`i32le index`], [Pop TOS and store into local variable at slot `index`.],
-  [`0x42`], [`STORE arg`], [`i32le index`], [Pop TOS and store into function argument slot `index`.],
-  [`0x43`], [`STORE capture`], [`i32le index`], [Pop TOS and store into captured variable at slot `index`.],
+  [`0x41`], [`STORE global`], [`i32le index`], [Pop TOS and store into global variable at slot `index`.],
+  [`0x42`], [`STORE local`], [`i32le index`], [Pop TOS and store into local variable at slot `index`.],
+  [`0x43`], [`STORE arg`], [`i32le index`], [Pop TOS and store into function argument slot `index`.],
+  [`0x44`], [`STORE capture`], [`i32le index`], [Pop TOS and store into captured variable at slot `index`.],
 )
 
-Opcodes `0x44`–`0x4f` are unused.
+Opcodes `0x40`, `0x45`–`0x4f` are unused.
 
 == Group `0x5_` — Control Flow / Procedure Management
 
@@ -163,7 +163,7 @@ Opcodes `0x44`–`0x4f` are unused.
   [`0x54`],
   [`CLOSURE`],
   [`i32le offset`, `i32le arity`],
-  [Construct a closure whose bytecode starts at `offset`. `arity` is the number of captured variables. The captured variable descriptors follow in a variable-length encoding (not yet implemented).],
+  [Construct a closure whose bytecode starts at `offset` and has `arity`.],
 
   [`0x55`],
   [`CALLC`],
@@ -194,34 +194,37 @@ All opcodes `0x60`–`0x6f` are unused.
   columns: (auto, auto, auto, 1fr),
   table.header([*Opcode*], [*Mnemonic*], [*Operands*], [*Description*]),
 
-  [`0x70`], [`CALLBUILTIN Lread`], [—], [Call built-in `Lread`: read an integer from stdin, push the result.],
+  [`0x70`], [`CALLBUILTIN Lread`], [`i32le n`], [Call built-in `Lread`. `n` packs the typed/untyped flag and argument count.],
   [`0x71`],
   [`CALLBUILTIN Lwrite`],
   [`i32le n`],
-  [Call built-in `Lwrite`: pop TOS and write it to stdout. `n` encodes flags (e.g. newline bit at `1 << 30`). Always reads 4 operand bytes in the decoder even when `n == 0`.],
+  [Call built-in `Lwrite`. `n` packs the newline flag and argument count; the newline flag is bit `1 << 30`.],
 
-  [`0x72`], [`CALLBUILTIN Llength`], [—], [Call built-in `Llength`: pop string/array, push its length.],
   [`0x73`],
-  [`CALLBUILTIN Lstring`],
+  [`CALLBUILTIN Tbool`],
   [—],
-  [Call built-in `Lstring`: load string from string table (string index is on the stack).],
+  [Call built-in `Tbool`.],
 
   [`0x74`],
-  [`CALLBUILTIN Barray`],
-  [`i32le n`],
-  [Call built-in `Barray`: construct an array from the top `n` stack values.],
+  [`CALLBUILTIN Ttext`],
+  [—],
+  [Call built-in `Ttext`.],
 
   [`0x75`], [`BOOL`], [`u8`], [Push a boolean value onto the stack. Operand: non-zero = #true, zero = #false.],
   [`0x76`], [`NULL`], [—], [Push the null value.],
-  [`0x77`], [`CALLBUILTIN Abs`], [`i32le n`], [Pop one number and push its absolute value.],
-  [`0x78`], [`CALLBUILTIN Sign`], [`i32le n`], [Pop one number and push -1, 0, or 1 according to its sign.],
-  [`0x79`], [`CALLBUILTIN Sqrt`], [`i32le n`], [Pop one number and push its square root.],
-  [`0x7a`], [`CALLBUILTIN Floor`], [`i32le n`], [Pop one real number and push its floor as an integer.],
-  [`0x7b`], [`CALLBUILTIN Round`], [`i32le n`], [Pop one real number and push the nearest integer.],
-  [`0x7c`], [`CALLBUILTIN Index`], [`i32le n`], [Pop needle and haystack and push the index of the first match.],
+  [`0x77`], [`CALLBUILTIN Abs`], [—], [Call built-in `Abs`.],
+  [`0x78`], [`CALLBUILTIN Ttuple`], [—], [Call built-in `Ttuple`.],
+  [`0x79`], [`CALLBUILTIN Sqrt`], [—], [Call built-in `Sqrt`.],
+  [`0x7a`], [`CALLBUILTIN Floor`], [—], [Call built-in `Floor`.],
+  [`0x7b`], [`CALLBUILTIN Round`], [—], [Call built-in `Round`.],
+  [`0x7c`], [`CALLBUILTIN Tslice`], [—], [Call built-in `Tslice`.],
+  [`0x7d`], [`CALLBUILTIN Tint`], [—], [Call built-in `Tint`.],
+  [`0x7e`], [`CALLBUILTIN Tfloat`], [—], [Call built-in `Tfloat`.],
+  [`0x7f`], [`CALLBUILTIN Tnull`], [—], [Call built-in `Tnull`.],
 )
 
-Opcodes `0x7d`–`0x7f` are unused.
+Opcode `0x72` is unused. The decoder assigns zero to `n` for all built-ins
+other than `Lread` and `Lwrite`.
 
 = Summary Table
 
@@ -261,16 +264,16 @@ additional bytes the instruction consumes beyond the opcode byte itself.
   [`0x1a`], [`SWAP`], [`0`],
   [`0x1b`], [`ELEM`], [`0`],
   [`0x1c`], [`CONSTF`], [`8`],
-  [`0x20`], [`LOAD global`], [`4`],
-  [`0x21`], [`LOAD local`], [`4`],
-  [`0x22`], [`LOAD arg`], [`4`],
-  [`0x23`], [`LOAD capture`], [`4`],
+  [`0x21`], [`LOAD global`], [`4`],
+  [`0x22`], [`LOAD local`], [`4`],
+  [`0x23`], [`LOAD arg`], [`4`],
+  [`0x24`], [`LOAD capture`], [`4`],
   [`0x30`], [`UNARY Negate`], [`0`],
   [`0x31`], [`UNARY Not`], [`0`],
-  [`0x40`], [`STORE global`], [`4`],
-  [`0x41`], [`STORE local`], [`4`],
-  [`0x42`], [`STORE arg`], [`4`],
-  [`0x43`], [`STORE capture`], [`4`],
+  [`0x41`], [`STORE global`], [`4`],
+  [`0x42`], [`STORE local`], [`4`],
+  [`0x43`], [`STORE arg`], [`4`],
+  [`0x44`], [`STORE capture`], [`4`],
   [`0x50`], [`CJMP iszero`], [`4`],
   [`0x51`], [`CJMP isnonzero`], [`4`],
   [`0x52`], [`BEGIN`], [`8`],
@@ -280,17 +283,19 @@ additional bytes the instruction consumes beyond the opcode byte itself.
   [`0x56`], [`CALL`], [`8`],
   [`0x58`], [`ARRAY`], [`4`],
   [`0x5a`], [`LINE`], [`4`],
-  [`0x70`], [`CALLBUILTIN Lread`], [`0`],
+  [`0x70`], [`CALLBUILTIN Lread`], [`4`],
   [`0x71`], [`CALLBUILTIN Lwrite`], [`4`],
-  [`0x72`], [`CALLBUILTIN Llength`], [`0`],
-  [`0x73`], [`CALLBUILTIN Lstring`], [`0`],
-  [`0x74`], [`CALLBUILTIN Barray`], [`4`],
+  [`0x73`], [`CALLBUILTIN Tbool`], [`0`],
+  [`0x74`], [`CALLBUILTIN Ttext`], [`0`],
   [`0x75`], [`BOOL`], [`1`],
   [`0x76`], [`NULL`], [`0`],
-  [`0x77`], [`CALLBUILTIN Abs`], [`4`],
-  [`0x78`], [`CALLBUILTIN Sign`], [`4`],
-  [`0x79`], [`CALLBUILTIN Sqrt`], [`4`],
-  [`0x7a`], [`CALLBUILTIN Floor`], [`4`],
-  [`0x7b`], [`CALLBUILTIN Round`], [`4`],
-  [`0x7c`], [`CALLBUILTIN Index`], [`4`],
+  [`0x77`], [`CALLBUILTIN Abs`], [`0`],
+  [`0x78`], [`CALLBUILTIN Ttuple`], [`0`],
+  [`0x79`], [`CALLBUILTIN Sqrt`], [`0`],
+  [`0x7a`], [`CALLBUILTIN Floor`], [`0`],
+  [`0x7b`], [`CALLBUILTIN Round`], [`0`],
+  [`0x7c`], [`CALLBUILTIN Tslice`], [`0`],
+  [`0x7d`], [`CALLBUILTIN Tint`], [`0`],
+  [`0x7e`], [`CALLBUILTIN Tfloat`], [`0`],
+  [`0x7f`], [`CALLBUILTIN Tnull`], [`0`],
 )
