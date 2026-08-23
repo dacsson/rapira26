@@ -11,10 +11,9 @@ RAP_Value RAP_create_int_obj(int64_t value);
 RAP_Value RAP_create_float_obj(double value);
 RAP_Value RAP_create_text_obj(const char *value);
 RAP_Value RAP_create_tuple_obj(uint32_t count, RAP_Value *items);
-RAP_Value RAP_create_callable_obj(struct RAP_CallFrame *frame_parent,
-                                  RAP_FunctionDecl func, RAP_Parameter **params,
-                                  uint32_t params_count, bool is_function);
-RAP_Parameter *RAP_create_parameter(RAP_ParameterMode mode, const char *name);
+RAP_Value RAP_create_callable_obj(size_t offset_or_ptr, uint32_t arity,
+                                  const RAP_Value *captures,
+                                  uint32_t capture_count);
 RAP_Value RAP_create_logical_obj(bool value);
 RAP_Value RAP_create_custom_typed_obj(const char *name,
                                       const char **field_names,
@@ -22,8 +21,6 @@ RAP_Value RAP_create_custom_typed_obj(const char *name,
 
 // OBJECTS UTILITIES
 
-RAP_Value RAP_call_callable_obj(RAP_Value callable, RAP_Value *args,
-                                uint32_t arg_count);
 RAP_Value RAP_get_tuple_item(RAP_Value tuple, uint32_t index);
 RAP_Value RAP_set_tuple_item(RAP_Value tuple, uint32_t index, RAP_Value value);
 // Joins two tuples into a new tuple
@@ -88,19 +85,6 @@ RAP_Value RAP_and(RAP_Value a, RAP_Value b);
 RAP_Value RAP_or(RAP_Value a, RAP_Value b);
 RAP_Value RAP_not(RAP_Value a);
 
-// FRAME UTILITIES
-
-struct RAP_CallFrame *RAP_create_call_frame(struct RAP_CallFrame *parent);
-void RAP_free_call_frame(struct RAP_CallFrame *frame);
-// Get/set a variable in the current frame only (свои / implicit locals)
-RAP_Value RAP_frame_get(struct RAP_CallFrame *frame, const char *name);
-void RAP_frame_set(struct RAP_CallFrame *frame, const char *name,
-                   RAP_Value value);
-// Get/set by walking up the parent chain (чужие)
-RAP_Value RAP_frame_get_foreign(struct RAP_CallFrame *frame, const char *name);
-void RAP_frame_set_foreign(struct RAP_CallFrame *frame, const char *name,
-                           RAP_Value value);
-
 // EXTRACTORS
 
 // TODO: re-introduce after BigInt implementation
@@ -118,6 +102,10 @@ bool RAP_IS_TUPLE(RAP_Value v);
 bool RAP_IS_SLICE(RAP_Value v);
 bool RAP_IS_NULL(RAP_Value v);
 bool RAP_IS_VARIANT(RAP_Value v);
+bool RAP_IS_CALLABLE(RAP_Value v);
+
+size_t RAP_get_callable_offset_or_ptr(RAP_Value callable);
+uint32_t RAP_get_callable_arity(RAP_Value callable);
 
 char *RAP_stringify_object(RAP_Value obj);
 
@@ -150,7 +138,7 @@ uint16_t RAP_get_variant_tag(RAP_Value val);
 
 // REFERENCE COUNTING
 
-// RAP_inc_ref takes a RAP_Value, no-op for inline values (SMI, bool, double)
+// RAP_inc_ref takes a RAP_Value, no-op for inline values (SMI, bool)
 void RAP_inc_ref(RAP_Value obj);
 
 void RAP_dec_ref(RAP_Value obj);
@@ -164,8 +152,6 @@ void RAP_check_leaks(void);
 
 // Available for users actually
 RAP_Value RAP_get_objects_refcount(RAP_Value obj);
-
-void RAP_free_main_frame(struct RAP_CallFrame *frame);
 
 const char *RAP_get_type_name(RAP_Value val);
 

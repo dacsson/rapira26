@@ -168,6 +168,10 @@ bool RAP_IS_VARIANT(RAP_Value value) {
   return RAP_IS_PTR(value) && RAP_PTR_VALUE(value)->tag == RAP_OBJECT_TAG_VARIANT;
 }
 
+bool RAP_IS_CALLABLE(RAP_Value value) {
+  return RAP_IS_PTR(value) && RAP_PTR_VALUE(value)->tag == RAP_OBJECT_TAG_CALLABLE;
+}
+
 // CONSTRUCTORS
 
 // TODO: this should be a heap allocation
@@ -283,11 +287,10 @@ char *RAP_stringify_object(RAP_Value obj) {
     return RAP_stringify_object(materialized);
   }
   case RAP_OBJECT_TAG_CALLABLE: {
-    char *name = obj_ptr->callable_val->name;
-    return strdup(name ? name : "<callable>");
+    return strdup("<функция>");
   }
   default: {
-    return strdup("<unknown>");
+    return strdup("<неизвестно>");
   }
   }
 }
@@ -365,13 +368,10 @@ void RAP_free_object(RAP_Object *obj) {
   }
   case RAP_OBJECT_TAG_CALLABLE: {
     struct RAP_Callable *c = obj->callable_val;
-    free(c->name);
-    for (uint32_t i = 0; i < c->param_count; i++) {
-      free(c->params[i]->name);
-      free(c->params[i]);
+    for (uint32_t i = 0; i < c->capture_count; i++) {
+      RAP_dec_ref(c->captures[i]);
     }
-    free(c->params);
-    RAP_free_call_frame(c->frame);
+    free(c->captures);
     free(c);
     break;
   }
@@ -386,15 +386,6 @@ RAP_Value RAP_get_objects_refcount(RAP_Value obj) {
   if (!RAP_IS_PTR(obj))
     return 0;
   return RAP_CREATE_SMI(RAP_PTR_VALUE(obj)->refcount);
-}
-
-void RAP_free_main_frame(struct RAP_CallFrame *frame) {
-  if (frame == NULL)
-    return;
-  for (uint32_t i = 0; i < frame->slot_count; i++) {
-    RAP_dec_ref(frame->slots[i].value);
-  }
-  free(frame->slots);
 }
 
 const char* RAP_type_to_string(RAP_ObjectTag tag) {

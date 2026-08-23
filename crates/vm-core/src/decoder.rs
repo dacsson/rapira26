@@ -150,7 +150,14 @@ impl Decoder {
                 let offset = self.next::<i32>()?;
                 let arity = self.next::<i32>()?;
 
-                Ok(Instruction::CLOSURE { offset, arity })
+                Ok(Instruction::CLOSURE {
+                    dest: Label {
+                        // TODO: get rid of empty str
+                        name: String::new(),
+                        offset: Some(offset),
+                    },
+                    arity,
+                })
             }
             (0x50, 0x5) => Ok(Instruction::CALLC {
                 arity: self.next::<i32>()?,
@@ -307,8 +314,14 @@ impl Decoder {
                 buf.extend(&args.to_le_bytes());
                 buf.extend(&locals.to_le_bytes());
             }
-            Instruction::CLOSURE { offset, arity } => {
+            Instruction::CLOSURE {
+                dest: Label { name, offset },
+                arity,
+            } => {
                 buf.push(0x54);
+                let Some(offset) = offset else {
+                    return Err(DecoderError::UnknownLabel(name.clone()));
+                };
                 buf.extend(&offset.to_le_bytes());
                 buf.extend(&arity.to_le_bytes());
             }
