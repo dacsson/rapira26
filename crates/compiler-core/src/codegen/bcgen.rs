@@ -9,7 +9,7 @@ use vm_core::{
     bytecode::{
         Builtin, CompareJumpKind, Instruction, LWRITE_NEWLINE_FLAG, Label, Op, UnaryOp, ValueRel,
     },
-    bytefile::Bytefile,
+    bytefile::{Bytefile, VariantSchema},
 };
 
 use crate::{
@@ -136,6 +136,14 @@ pub struct BcGen {
     env: Env,
     current_module: String,
     call_targets: HashMap<String, String>,
+    variant_constructors: HashMap<String, VariantInfo>,
+    field_indices: HashMap<String, i32>,
+}
+
+#[derive(Clone)]
+struct VariantInfo {
+    schema: i32,
+    fields: Vec<String>,
 }
 
 impl BcGen {
@@ -144,6 +152,8 @@ impl BcGen {
             bytefile: Bytefile::new(),
             current_module: String::new(),
             call_targets: HashMap::new(),
+            variant_constructors: HashMap::new(),
+            field_indices: HashMap::new(),
             env: Env {
                 // TODO: maybe we can use `count_locals` to
                 //       pre-allocate enough indecies?
@@ -243,12 +253,20 @@ impl BcGen {
                 left,
                 right,
             } => {
-                instrs.extend(self.emit_expr(left));
-                instrs.extend(self.emit_expr(right));
-
-                instrs.push(Instruction::BINOP {
-                    op: self.ast_binop_to_vm_op(operator),
-                });
+                if let BinaryOperator::Dot = operator {
+                    let Expr::Name(field) = &right.node else {
+                        panic!("field name must be an identifier");
+                    };
+                    let index = *self.field_indices.get(field).expect("unknown type field");
+                    instrs.extend(self.emit_expr(left));
+                    instrs.push(Instruction::FIELD { index });
+                } else {
+                    instrs.extend(self.emit_expr(left));
+                    instrs.extend(self.emit_expr(right));
+                    instrs.push(Instruction::BINOP {
+                        op: self.ast_binop_to_vm_op(operator),
+                    });
+                }
             }
             Expr::UnaryOp { operator, operand } => {
                 // TODO: maybe add unary opcodes to bytecode
@@ -293,11 +311,23 @@ impl BcGen {
                     panic!("Anonymous functions not implemented");
                 };
 
-                for argument in arguments {
-                    instrs.extend(self.emit_expr(argument));
-                }
-
-                if let Some(&(_, builtin)) = BUILTIN_FUNCS.iter().find(|(n, _)| name == n) {
+                if let Some(info) = self.variant_constructors.get(name).cloned() {
+                    // TODO: remove after SEMA
+                    assert_eq!(
+                        arguments.len(),
+                        info.fields.len(),
+                        "wrong constructor arity"
+                    );
+                    for argument in arguments {
+                        instrs.extend(self.emit_expr(argument));
+                    }
+                    instrs.push(Instruction::VARIANT {
+                        schema: info.schema,
+                    });
+                } else if let Some(&(_, builtin)) = BUILTIN_FUNCS.iter().find(|(n, _)| name == n) {
+                    for argument in arguments {
+                        instrs.extend(self.emit_expr(argument));
+                    }
                     // A builtin call. Only `Lread`/`Lwrite` pack their argument
                     // count (and flags) into `n`; they are emitted separately in
                     // `emit_statement`. Every other builtin emits no payload, so
@@ -307,6 +337,9 @@ impl BcGen {
                         n: 0,
                     });
                 } else {
+                    for argument in arguments {
+                        instrs.extend(self.emit_expr(argument));
+                    }
                     instrs.push(Instruction::CALL {
                         dest: Label {
                             name: self.resolve_call_target(name),
@@ -317,11 +350,17 @@ impl BcGen {
                 }
             }
             Expr::Name(name) => {
-                let Some((index, rel)) = self.env.find_variable(name) else {
-                    panic!("Unknown local variable: {}", name);
-                };
-
-                instrs.push(Instruction::LOAD { rel, index });
+                if let Some(info) = self.variant_constructors.get(name) {
+                    assert!(info.fields.is_empty(), "constructor requires arguments");
+                    instrs.push(Instruction::VARIANT {
+                        schema: info.schema,
+                    });
+                } else {
+                    let Some((index, rel)) = self.env.find_variable(name) else {
+                        panic!("Unknown local variable: {}", name);
+                    };
+                    instrs.push(Instruction::LOAD { rel, index });
+                }
             }
             Expr::Subscript { collection, index } => {
                 instrs.extend(self.emit_expr(collection));
@@ -426,7 +465,11 @@ impl BcGen {
                         instrs.push(Instruction::SLICE { bounds });
                         instrs.push(Instruction::STS);
                     }
-                    LValue::Field { .. } => todo!(),
+                    LValue::Field { left, field } => {
+                        let index = *self.field_indices.get(field).expect("unknown type field");
+                        instrs.extend(self.emit_expr(left));
+                        instrs.push(Instruction::SETFIELD { index });
+                    }
                 };
 
                 instrs
@@ -692,6 +735,107 @@ impl BcGen {
 
                 instrs
             }
+            Statement::Selection(SelectionStatement::ValueMatch {
+                expression,
+                cases,
+                else_body,
+            }) => {
+                // A name can be loaded directly for each match operation.  Do
+                // not materialize it in another frame slot: that would create
+                // an alias of an argument/local whose ownership cannot be
+                // distinguished during frame teardown.
+                let selector = if matches!(&expression.node, Expr::Name(_)) {
+                    None
+                } else {
+                    let selector_name = format!(
+                        "match_{}_{}",
+                        stmt_span.position_start, stmt_span.position_end
+                    );
+                    let (selector_index, selector_rel) =
+                        self.env.allocate_variable(selector_name.clone());
+                    let mut instructions = self.emit_expr(expression);
+                    instructions.push(Instruction::STORE {
+                        rel: selector_rel,
+                        index: selector_index,
+                    });
+                    Some((selector_name, selector_index, selector_rel, instructions))
+                };
+
+                let mut instrs = selector
+                    .as_ref()
+                    .map(|(_, _, _, instructions)| instructions.clone())
+                    .unwrap_or_default();
+                let end = self.env.fresh_label("match_end");
+                for case in cases {
+                    let next = self.env.fresh_label("match_next");
+                    let pattern = case.node.values.first().expect("empty match case");
+                    if let Some((info, bindings)) = self.constructor_pattern(pattern) {
+                        if let Some((_, selector_index, selector_rel, _)) = &selector {
+                            instrs.push(Instruction::LOAD {
+                                rel: *selector_rel,
+                                index: *selector_index,
+                            });
+                        } else {
+                            instrs.extend(self.emit_expr(expression));
+                        }
+                        instrs.push(Instruction::ISVARIANT {
+                            schema: info.schema,
+                        });
+                        instrs.push(Instruction::CJMP {
+                            dest: next.clone(),
+                            kind: CompareJumpKind::ISZERO,
+                        });
+                        for (field_index, binding) in bindings.iter().enumerate() {
+                            let Expr::Name(name) = &binding.node else {
+                                panic!("pattern bindings must be names")
+                            };
+                            if let Some((_, selector_index, selector_rel, _)) = &selector {
+                                instrs.push(Instruction::LOAD {
+                                    rel: *selector_rel,
+                                    index: *selector_index,
+                                });
+                            } else {
+                                instrs.extend(self.emit_expr(expression));
+                            }
+                            instrs.push(Instruction::FIELD {
+                                index: field_index as i32,
+                            });
+                            let (index, rel) = self.env.allocate_variable(name.clone());
+                            instrs.push(Instruction::STORE { rel, index });
+                        }
+                    } else {
+                        if let Some((_, selector_index, selector_rel, _)) = &selector {
+                            instrs.push(Instruction::LOAD {
+                                rel: *selector_rel,
+                                index: *selector_index,
+                            });
+                        } else {
+                            instrs.extend(self.emit_expr(expression));
+                        }
+                        instrs.extend(self.emit_expr(pattern));
+                        instrs.push(Instruction::BINOP { op: Op::EQ });
+                        instrs.push(Instruction::CJMP {
+                            dest: next.clone(),
+                            kind: CompareJumpKind::ISZERO,
+                        });
+                    }
+                    for statement in &case.node.body {
+                        instrs.extend(self.emit_statement(statement));
+                    }
+                    instrs.push(Instruction::JMP { dest: end.clone() });
+                    instrs.push(Instruction::LABEL { name: next.name });
+                }
+                if let Some(body) = else_body {
+                    for statement in body {
+                        instrs.extend(self.emit_statement(statement));
+                    }
+                }
+                instrs.push(Instruction::LABEL { name: end.name });
+                if let Some((selector_name, _, _, _)) = selector {
+                    self.env.deallocate_variable(&selector_name);
+                }
+                instrs
+            }
             Statement::ProcedureCall {
                 procedure,
                 arguments,
@@ -804,8 +948,14 @@ impl BcGen {
                 Statement::Selection(SelectionStatement::ValueMatch {
                     cases, else_body, ..
                 }) => {
+                    count += 1; // selector temporary
                     for case in cases {
                         count += self.count_locals(&case.node.body);
+                        for value in &case.node.values {
+                            if let Some((_, bindings)) = self.constructor_pattern(value) {
+                                count += bindings.len();
+                            }
+                        }
                     }
                     if let Some(else_body) = else_body {
                         count += self.count_locals(else_body);
@@ -852,6 +1002,32 @@ impl BcGen {
             BinaryOperator::Dot => panic!("DOT binop not implemented!"),
         }
     }
+
+    fn constructor_pattern<'a>(
+        &self,
+        value: &'a Spannable<Expr>,
+    ) -> Option<(VariantInfo, &'a [Box<Spannable<Expr>>])> {
+        match &value.node {
+            Expr::Name(name) => self
+                .variant_constructors
+                .get(name)
+                .filter(|info| info.fields.is_empty())
+                .cloned()
+                .map(|info| (info, &[] as &[Box<Spannable<Expr>>])),
+            Expr::FunctionCall {
+                function,
+                arguments,
+            } => match &function.node {
+                Expr::Name(name) => self
+                    .variant_constructors
+                    .get(name)
+                    .cloned()
+                    .map(|info| (info, arguments.as_slice())),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 impl CodegenTarget for BcGen {
@@ -860,6 +1036,8 @@ impl CodegenTarget for BcGen {
 
         self.bytefile = Bytefile::new();
         self.env.global_counter = 0;
+        self.variant_constructors.clear();
+        self.field_indices.clear();
         let mut module_map = ModuleMap::new();
         let output_path = modules.last().unwrap().path.clone();
         let mut instrs = Vec::new();
@@ -872,6 +1050,9 @@ impl CodegenTarget for BcGen {
         // Modules arrive in dependency order, so we emit each module with its own env
         for module in &modules {
             self.configure_module(module);
+            for type_def in &module.types {
+                self.emit_type_def(type_def);
+            }
             let init_label = Self::qualified_label(module.name.get(), "<init>");
             init_labels.push(init_label);
             instrs.extend(self.emit_top_level_def(&module.toplevel));
@@ -990,7 +1171,34 @@ impl CodegenTarget for BcGen {
     }
 
     fn emit_type_def(&mut self, type_def_span: &Spannable<TypeDefinition>) -> Vec<Instruction> {
-        todo!()
+        let type_def = &type_def_span.node;
+        let mut variants: Vec<_> = type_def.variants.iter().collect();
+        variants.sort_by(|(left, _), (right, _)| left.cmp(right));
+        for (tag, (name, fields)) in variants.into_iter().enumerate() {
+            let name_offset = self.bytefile.add_string(type_def.name.clone());
+            let field_offsets = fields
+                .iter()
+                .map(|field| self.bytefile.add_string(field.clone()))
+                .collect();
+            let schema = self.bytefile.add_variant_schema(VariantSchema {
+                name_offset,
+                tag: tag as u16,
+                field_offsets,
+            });
+            self.variant_constructors.insert(
+                name.clone(),
+                VariantInfo {
+                    schema: schema as i32,
+                    fields: fields.clone(),
+                },
+            );
+            for (index, field) in fields.iter().enumerate() {
+                self.field_indices
+                    .entry(field.clone())
+                    .or_insert(index as i32);
+            }
+        }
+        vec![]
     }
 
     fn emit_top_level_def(&mut self, top_level: &Vec<Spannable<Statement>>) -> Vec<Instruction> {

@@ -142,7 +142,7 @@ same as `LOAD`.
 
 Opcodes `0x40`, `0x45`–`0x4f` are unused.
 
-== Group `0x5_` — Control Flow / Procedure Management
+== Group `0x5_` — Control Flow / Procedure Management / User Types
 
 #table(
   columns: (auto, auto, auto, 1fr),
@@ -176,13 +176,26 @@ Opcodes `0x40`, `0x45`–`0x4f` are unused.
   [Call the function whose bytecode starts at `offset` with `n` arguments; push the return value.],
 
   [`0x58`], [`ARRAY`], [`i32le n`], [Test whether TOS is an array of exactly `n` elements.],
+  [`0x59`],
+  [`VARIANT`],
+  [`i32le schema`],
+  [Construct a user-defined variant using schema `schema`. Pop the number of field values declared by the schema, then push the constructed variant.],
   [`0x5a`],
   [`LINE`],
   [`i32le n`],
   [Annotation: following bytecode corresponds to source line `n`. Used for diagnostics only.],
+  [`0x5b`], [`VARIANTTAG`], [—], [Pop a user-defined variant and push its numeric tag.],
+  [`0x5c`], [`FIELD`], [`i32le index`], [Pop a user-defined variant and push its zero-based field `index`.],
+  [`0x5d`], [`SETFIELD`], [`i32le index`], [Pop a variant, then a replacement value; assign the value to the variant's zero-based field `index`.],
+  [`0x5e`], [`ISVARIANT`], [`i32le schema`], [Pop a value and push whether it is an instance of variant schema `schema`.],
 )
 
-Opcodes `0x57`, `0x59`, `0x5b`–`0x5f` are unused.
+`schema` is a zero-based index into the bytefile's variant-schema table. A
+schema records the variant tag and its field names; it is emitted from a Rapira
+`тип` definition. `FIELD` and `SETFIELD` use the schema's zero-based field
+ordering.
+
+Opcodes `0x57` and `0x5f` are unused.
 
 == Group `0x6_` — (unused)
 
@@ -282,7 +295,12 @@ additional bytes the instruction consumes beyond the opcode byte itself.
   [`0x55`], [`CALLC`], [`4`],
   [`0x56`], [`CALL`], [`8`],
   [`0x58`], [`ARRAY`], [`4`],
+  [`0x59`], [`VARIANT`], [`4`],
   [`0x5a`], [`LINE`], [`4`],
+  [`0x5b`], [`VARIANTTAG`], [`0`],
+  [`0x5c`], [`FIELD`], [`4`],
+  [`0x5d`], [`SETFIELD`], [`4`],
+  [`0x5e`], [`ISVARIANT`], [`4`],
   [`0x70`], [`CALLBUILTIN Lread`], [`4`],
   [`0x71`], [`CALLBUILTIN Lwrite`], [`4`],
   [`0x73`], [`CALLBUILTIN Tbool`], [`0`],

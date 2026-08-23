@@ -3,14 +3,15 @@
 use crate::object::{Object, ObjectError};
 use crate::{
     RAP_IS_BOOL, RAP_IS_FLOAT, RAP_IS_NULL, RAP_IS_SLICE, RAP_IS_SMI, RAP_IS_TEXT, RAP_IS_TUPLE,
-    RAP_abs, RAP_add, RAP_and, RAP_create_slice, RAP_dec_ref, RAP_divide, RAP_equal, RAP_floor,
-    RAP_floor_divide, RAP_get_tuple_item, RAP_greater_or_equal, RAP_greater_than, RAP_inc_ref,
-    RAP_index_of, RAP_input_text, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than,
+    RAP_IS_VARIANT, RAP_abs, RAP_add, RAP_and, RAP_create_custom_typed_obj, RAP_create_slice,
+    RAP_dec_ref, RAP_divide, RAP_equal, RAP_floor, RAP_floor_divide, RAP_get_tuple_item,
+    RAP_get_variant_field_at, RAP_get_variant_tag, RAP_greater_or_equal, RAP_greater_than,
+    RAP_inc_ref, RAP_input_text, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than,
     RAP_modulo, RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_power, RAP_round,
-    RAP_set_tuple_item, RAP_sign, RAP_slice_assign, RAP_sqrt, RAP_stringify_object, RAP_subtract,
-    isPtr, isSMI,
+    RAP_set_tuple_item, RAP_set_variant_field_at, RAP_slice_assign, RAP_sqrt, RAP_stringify_object,
+    RAP_subtract, isPtr, isSMI,
 };
-use core::ffi::CStr;
+use core::ffi::{CStr, c_char};
 use std::ffi::CString;
 use vm_core::bytecode::{
     Builtin, CompareJumpKind, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, UnaryOp,
@@ -27,7 +28,7 @@ const MAX_OPERAND_STACK_SIZE: usize = 1024 * 64; // 0x7fffffff;
 
 const INVALID_HANDLER: u8 = u8::MAX;
 
-const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 36] = [
+const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 41] = [
     Interpreter::eval_nop,
     Interpreter::eval_end,
     Interpreter::eval_binop,
@@ -66,6 +67,11 @@ const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 36]
     Interpreter::eval_store_local,
     Interpreter::eval_store_arg,
     Interpreter::eval_store_capture,
+    Interpreter::eval_variant,
+    Interpreter::eval_variant_tag,
+    Interpreter::eval_field,
+    Interpreter::eval_set_field,
+    Interpreter::eval_is_variant,
 ];
 
 const fn build_dispatch_indices() -> [u8; 256] {
@@ -111,7 +117,12 @@ const fn build_dispatch_indices() -> [u8; 256] {
     table[0x55] = 12;
     table[0x56] = 10;
     table[0x58] = 22;
+    table[0x59] = 36;
     table[0x5a] = 13;
+    table[0x5b] = 37;
+    table[0x5c] = 38;
+    table[0x5d] = 39;
+    table[0x5e] = 40;
 
     table[0x70] = 11;
     table[0x71] = 11;
@@ -141,6 +152,13 @@ pub struct Interpreter {
     current_opcode: u8,
     /// Globals length
     global_areas_size: usize,
+    variant_schemas: Vec<RuntimeVariantSchema>,
+}
+
+struct RuntimeVariantSchema {
+    name: *const c_char,
+    tag: u16,
+    field_names: Vec<*const c_char>,
 }
 
 impl Interpreter {
@@ -168,6 +186,23 @@ impl Interpreter {
 
         let global_areas_size = decoder.bf.global_area_size as usize;
 
+        let variant_schemas = decoder
+            .bf
+            .variant_schemas
+            .iter()
+            .map(|schema| RuntimeVariantSchema {
+                name: decoder.bf.string_table[schema.name_offset as usize..]
+                    .as_ptr()
+                    .cast(),
+                tag: schema.tag,
+                field_names: schema
+                    .field_offsets
+                    .iter()
+                    .map(|offset| decoder.bf.string_table[*offset as usize..].as_ptr().cast())
+                    .collect(),
+            })
+            .collect();
+
         Interpreter {
             operand_stack,
             frame_pointer: global_areas_size,
@@ -176,6 +211,7 @@ impl Interpreter {
             decoder,
             current_opcode: 0,
             global_areas_size,
+            variant_schemas,
         }
     }
 
@@ -438,6 +474,105 @@ impl Interpreter {
         todo!();
 
         unreachable!()
+    }
+
+    fn get_variant_schema(&self, id: i32) -> Result<&RuntimeVariantSchema, InterpreterError> {
+        usize::try_from(id)
+            .ok()
+            .and_then(|id| self.variant_schemas.get(id))
+            .ok_or(InterpreterError::InvalidVariantSchema(id))
+    }
+
+    fn eval_variant(&mut self) -> Result<(), InterpreterError> {
+        let id = self.decoder.next::<i32>()?;
+        let count = self.get_variant_schema(id)?.field_names.len();
+        if self.operand_stack.len() < count {
+            return Err(InterpreterError::StackUnderflow);
+        }
+
+        let start = self.operand_stack.len() - count;
+        let values: Vec<Object> = self.operand_stack[start..].to_vec();
+        let mut payload = vec![0u8; 2 + count * core::mem::size_of::<usize>()];
+        let tag = self.get_variant_schema(id)?.tag;
+        payload[..2].copy_from_slice(&tag.to_le_bytes());
+        for (index, value) in values.iter().enumerate() {
+            unsafe {
+                payload
+                    .as_mut_ptr()
+                    .add(2 + index * core::mem::size_of::<usize>())
+                    .cast::<usize>()
+                    .write_unaligned(value.raw());
+            }
+        }
+
+        // Removing the arguments transfers their owning stack references to
+        // the newly created variant so dont decrement them here
+        for _ in 0..count {
+            self.pop()?;
+        }
+        let schema = self.get_variant_schema(id)?;
+        let value = unsafe {
+            RAP_create_custom_typed_obj(
+                schema.name,
+                schema.field_names.as_ptr().cast_mut(),
+                count,
+                payload.as_ptr().cast_mut().cast(),
+            )
+        };
+        self.push(Object::new(value))?;
+        become self.dispatch()
+    }
+
+    fn eval_variant_tag(&mut self) -> Result<(), InterpreterError> {
+        let value = self.pop()?;
+        if !unsafe { RAP_IS_VARIANT(value.raw()) } {
+            return Err(InterpreterError::InvalidType("expected variant"));
+        }
+        let tag = unsafe { RAP_get_variant_tag(value.raw()) };
+        Self::dec_ref_if_ptr(value);
+        self.push(Object::new_boxed(tag as i64))?;
+        become self.dispatch()
+    }
+
+    fn eval_is_variant(&mut self) -> Result<(), InterpreterError> {
+        let id = self.decoder.next::<i32>()?;
+        let tag = self.get_variant_schema(id)?.tag;
+        let value = self.pop()?;
+        let matches = unsafe { RAP_IS_VARIANT(value.raw()) }
+            && unsafe { RAP_get_variant_tag(value.raw()) } == tag;
+        Self::dec_ref_if_ptr(value);
+        self.push(Object::new_bool(matches))?;
+        become self.dispatch()
+    }
+
+    fn eval_field(&mut self) -> Result<(), InterpreterError> {
+        let index = self.decoder.next::<i32>()?;
+        let index = usize::try_from(index).map_err(|_| InterpreterError::InvalidFieldIndex)?;
+        let value = self.pop()?;
+        if !unsafe { RAP_IS_VARIANT(value.raw()) } {
+            return Err(InterpreterError::InvalidType("expected variant"));
+        }
+        let field = unsafe { RAP_get_variant_field_at(value.raw(), index) };
+        Self::inc_ref_if_ptr(Object::new(field));
+        Self::dec_ref_if_ptr(value);
+        self.push(Object::new(field))?;
+        become self.dispatch()
+    }
+
+    fn eval_set_field(&mut self) -> Result<(), InterpreterError> {
+        let index = self.decoder.next::<i32>()?;
+        let index = usize::try_from(index).map_err(|_| InterpreterError::InvalidFieldIndex)?;
+        // Code generation evaluates: replacement then target
+        // object so the variant is at the top
+        let variant_value = self.pop()?;
+        let value = self.pop()?;
+        if !unsafe { RAP_IS_VARIANT(variant_value.raw()) } {
+            return Err(InterpreterError::InvalidType("expected variant"));
+        }
+        unsafe { RAP_set_variant_field_at(variant_value.raw(), index, value.raw()) };
+        Self::dec_ref_if_ptr(value);
+        Self::dec_ref_if_ptr(variant_value);
+        become self.dispatch()
     }
 
     fn eval_elem(&mut self) -> Result<(), InterpreterError> {
@@ -775,9 +910,35 @@ impl Interpreter {
         let ret_frame_pointer = self.frame_return_pointer()?;
         let ret_ip = self.frame_return_ip()?;
 
+        // `return_value` is removed from the operand stack above, but may
+        // alias an argument/local slot that is about to be released -> so we retain
+        // it before tearing down the frame (caller becomes owner)
+        if isPtr(return_value.raw()) {
+            let args_start = self.frame_pointer - n_args;
+            let locals_start = self.frame_pointer + 5;
+            if self.operand_stack[args_start..self.frame_pointer]
+                .iter()
+                .chain(self.operand_stack[locals_start..locals_start + n_locals].iter())
+                .any(|value| value.raw() == return_value.raw())
+            {
+                Self::inc_ref_if_ptr(return_value);
+            }
+        }
+
+        // A value may be aliased by more than one frame slot, e.g. stores currently
+        // transfer stack ownership, so releasing every slot would free the
+        // same native object repeatedly.
+        //
+        // The bytecode generator avoids materializing a selector local for a
+        // name expression, which prevents value-match statements from adding a
+        // second frame slot for their subject.
+        let mut released = Vec::new();
         for _ in 0..n_locals {
             let obj = self.pop()?;
-            Self::dec_ref_if_ptr(obj);
+            if !released.contains(&obj.raw()) {
+                Self::dec_ref_if_ptr(obj);
+                released.push(obj.raw());
+            }
         }
 
         // Pop return ip
@@ -797,7 +958,10 @@ impl Interpreter {
 
         for _ in 0..n_args {
             let obj = self.pop()?;
-            Self::dec_ref_if_ptr(obj);
+            if !released.contains(&obj.raw()) {
+                Self::dec_ref_if_ptr(obj);
+                released.push(obj.raw());
+            }
         }
 
         // Return to callee's frame pointer
@@ -1431,6 +1595,8 @@ pub enum InterpreterError {
     DecoderError(DecoderError),
     StackOverflow,
     UnknownLabel(String),
+    InvalidVariantSchema(i32),
+    InvalidFieldIndex,
 }
 
 /// Convert a byte, that couldnt be incoded into an interpreter error.
@@ -1515,6 +1681,10 @@ impl core::fmt::Display for InterpreterError {
             InterpreterError::UnknownLabel(name) => {
                 write!(f, "Unknown label: {}", name)
             }
+            InterpreterError::InvalidVariantSchema(id) => {
+                write!(f, "Invalid variant schema: {}", id)
+            }
+            InterpreterError::InvalidFieldIndex => write!(f, "Invalid variant field index"),
         }
     }
 }

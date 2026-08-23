@@ -64,6 +64,16 @@ fn run_rap_file(rap_path: &Path) -> Result<String, String> {
     let temp_source = temp_dir.join(filename);
     std::fs::copy(rap_path, &temp_source).map_err(|e| format!("copy: {e}"))?;
 
+    // set std path explicitely
+    unsafe {
+        std::env::set_var(
+            "RAPIRA_STD",
+            format!("{}/../../std/", env!("CARGO_MANIFEST_DIR")),
+        );
+
+        println!("std path: {}", std::env::var("RAPIRA_STD").unwrap())
+    };
+
     let binary = env!("CARGO_BIN_EXE_рапик");
     let stdin_input = parse_stdin_input(&source);
 

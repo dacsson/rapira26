@@ -234,6 +234,26 @@ pub enum Instruction {
     SLICE {
         bounds: u8,
     },
+    /// Construct a user defined variant described by a bytefile schema
+    ///
+    /// Each type definition is a sum-type, hence we operate on "variants"
+    VARIANT {
+        schema: i32,
+    },
+    /// Push the tag of a user-defined variant
+    VARIANTTAG,
+    /// Push a field from a user-defined variant by 0based field index
+    FIELD {
+        index: i32,
+    },
+    /// Replace a field in a user-defined variant by 0based field index
+    SETFIELD {
+        index: i32,
+    },
+    /// Test whether a value is an instance of some variant schema
+    ISVARIANT {
+        schema: i32,
+    },
 }
 
 /// Usefull feature to convert subopcode of
@@ -451,6 +471,11 @@ impl fmt::Display for Instruction {
             Instruction::NULL => write!(f, "NULL"),
             Instruction::LABEL { name } => write!(f, "LABEL {}", name),
             Instruction::SLICE { bounds } => write!(f, "SLICE {}", bounds),
+            Instruction::VARIANT { schema } => write!(f, "VARIANT {}", schema),
+            Instruction::VARIANTTAG => write!(f, "VARIANTTAG"),
+            Instruction::FIELD { index } => write!(f, "FIELD {}", index),
+            Instruction::SETFIELD { index } => write!(f, "SETFIELD {}", index),
+            Instruction::ISVARIANT { schema } => write!(f, "ISVARIANT {}", schema),
         }
     }
 }
