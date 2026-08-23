@@ -8,6 +8,9 @@ mod frame;
 pub mod interpreter;
 pub mod object;
 
+#[cfg(test)]
+mod interp_tests;
+
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 // #define RAP_IS_SMI(value) (((value) & RAP_TAG_MASK) == 0x0)

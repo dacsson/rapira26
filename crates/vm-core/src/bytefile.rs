@@ -129,6 +129,9 @@ impl Bytefile {
                 Instruction::CALL { .. } => {
                     offset += 9; // opcode + target i32 + argument count i32
                 }
+                Instruction::CLOSURE { .. } => {
+                    offset += 9; // opcode + target i32 + argument count i32
+                }
                 instruction => {
                     offset += Decoder::encode(instruction)?.len();
                 }
@@ -139,7 +142,8 @@ impl Bytefile {
         for instruction in &mut instructions {
             if let Instruction::JMP { dest }
             | Instruction::CJMP { dest, .. }
-            | Instruction::CALL { dest, .. } = instruction
+            | Instruction::CALL { dest, .. }
+            | Instruction::CLOSURE { dest, .. } = instruction
             {
                 let name = &dest.name;
                 if let Some(offset) = self.labels.get(name) {

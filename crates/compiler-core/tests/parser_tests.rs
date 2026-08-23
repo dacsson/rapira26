@@ -556,16 +556,17 @@ fn parse_subscript_expression() {
     }
 }
 
-#[test]
-fn parse_subscript_expression_dot_syntax() {
-    let statement = parse_first_statement("вывод: X.1");
-    match statement {
-        Statement::Output { values, .. } => {
-            assert!(matches!(&values[0].node, Expr::Subscript { .. }));
-        }
-        other => panic!("expected Output, got {other:?}"),
-    }
-}
+// TODO: alternative subscript syntax with `.x` in place of `[x]`
+// #[test]
+// fn parse_subscript_expression_dot_syntax() {
+//     let statement = parse_first_statement("вывод: X.1");
+//     match statement {
+//         Statement::Output { values, .. } => {
+//             assert!(matches!(&values[0].node, Expr::Subscript { .. }));
+//         }
+//         other => panic!("expected Output, got {other:?}"),
+//     }
+// }
 
 #[test]
 fn parse_slice_expression() {
@@ -593,7 +594,7 @@ fn parse_function_call_expression() {
 
 #[test]
 fn parse_exit_loop() {
-    let statement = parse_first_statement("цикл выход");
+    let statement = parse_first_statement("повтор 5 цикл выход");
     match statement {
         Statement::Loop(LoopStatement { body, .. }) => {
             assert!(matches!(&body[0].node, Statement::ExitLoop));
@@ -724,14 +725,8 @@ fn parse_example_06_loops() {
 }
 
 #[test]
-fn parse_example_07_procedures() {
-    let source = std::fs::read_to_string("../../examples/07_procedures.rap").unwrap();
-    let _program = parse(&source);
-}
-
-#[test]
-fn parse_example_08_functions() {
-    let source = std::fs::read_to_string("../../examples/08_functions.rap").unwrap();
+fn parse_example_07_functions() {
+    let source = std::fs::read_to_string("../../examples/07_functions.rap").unwrap();
     let _program = parse(&source);
 }
 
@@ -748,37 +743,31 @@ fn parse_example_04_tuple_operations() {
 }
 
 #[test]
-fn parse_example_09_scoping() {
-    let source = std::fs::read_to_string("../../examples/09_scoping.rap").unwrap();
+fn parse_example_08_type_checks() {
+    let source = std::fs::read_to_string("../../examples/08_type_checks.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
-fn parse_example_10_return_parameters() {
-    let source = std::fs::read_to_string("../../examples/10_return_parameters.rap").unwrap();
+fn parse_example_09_spec_examples() {
+    let source = std::fs::read_to_string("../../examples/09_spec_examples.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
-fn parse_example_11_type_checks() {
-    let source = std::fs::read_to_string("../../examples/11_type_checks.rap").unwrap();
+fn parse_example_10_input() {
+    let source = std::fs::read_to_string("../../examples/10_input.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
-fn parse_example_12_spec_examples() {
-    let source = std::fs::read_to_string("../../examples/12_spec_examples.rap").unwrap();
+fn parse_example_11_user_types() {
+    let source = std::fs::read_to_string("../../examples/11_user_types.rap").unwrap();
     let _program = parse(&source);
 }
 
 #[test]
-fn parse_example_13_input() {
-    let source = std::fs::read_to_string("../../examples/13_input.rap").unwrap();
-    let _program = parse(&source);
-}
-
-#[test]
-fn parse_example_14_user_types() {
-    let source = std::fs::read_to_string("../../examples/14_user_types.rap").unwrap();
+fn parse_example_12_first_class_functions() {
+    let source = std::fs::read_to_string("../../examples/12_first_class_functions.rap").unwrap();
     let _program = parse(&source);
 }

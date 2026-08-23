@@ -2,9 +2,10 @@
 
 use crate::object::{Object, ObjectError};
 use crate::{
-    RAP_IS_BOOL, RAP_IS_FLOAT, RAP_IS_NULL, RAP_IS_SLICE, RAP_IS_SMI, RAP_IS_TEXT, RAP_IS_TUPLE,
-    RAP_IS_VARIANT, RAP_abs, RAP_add, RAP_and, RAP_create_custom_typed_obj, RAP_create_slice,
-    RAP_dec_ref, RAP_divide, RAP_equal, RAP_floor, RAP_floor_divide, RAP_get_tuple_item,
+    RAP_IS_BOOL, RAP_IS_CALLABLE, RAP_IS_FLOAT, RAP_IS_NULL, RAP_IS_SLICE, RAP_IS_SMI, RAP_IS_TEXT,
+    RAP_IS_TUPLE, RAP_IS_VARIANT, RAP_abs, RAP_add, RAP_and, RAP_create_callable_obj,
+    RAP_create_custom_typed_obj, RAP_create_slice, RAP_dec_ref, RAP_divide, RAP_equal, RAP_floor,
+    RAP_floor_divide, RAP_get_callable_arity, RAP_get_callable_offset_or_ptr, RAP_get_tuple_item,
     RAP_get_variant_field_at, RAP_get_variant_tag, RAP_greater_or_equal, RAP_greater_than,
     RAP_inc_ref, RAP_input_text, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than,
     RAP_modulo, RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_power, RAP_round,
@@ -17,8 +18,6 @@ use vm_core::bytecode::{
     Builtin, CompareJumpKind, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, UnaryOp,
 };
 use vm_core::decoder::{Decoder, DecoderError};
-
-const MAX_SEXP_TAGLEN: usize = 10;
 
 #[cfg(test)]
 const MAX_OPERAND_STACK_SIZE: usize = 64;
@@ -241,6 +240,37 @@ impl Interpreter {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub(crate) fn run_with_result(&mut self) -> Result<usize, RunError> {
+        self.decoder.ip = self.decoder.bf.main_offset as usize;
+
+        self.dispatch().map_err(|e| -> RunError {
+            let global_offset = core::mem::size_of::<i32>()
+                + core::mem::size_of::<i32>()
+                + core::mem::size_of::<i32>()
+                + (core::mem::size_of::<i32>()
+                    * 2
+                    * self.decoder.bf.public_symbols_number as usize)
+                + self.decoder.bf.stringtab_size as usize
+                + self.decoder.ip;
+
+            RunError::ErrorAtOffset(global_offset, e, Instruction::END)
+        })?;
+
+        let result = self
+            .operand_stack
+            .last()
+            .copied()
+            .expect("completed program must leave a return value on the stack")
+            .raw();
+
+        for obj in self.operand_stack.drain(..) {
+            Self::dec_ref_if_ptr(obj);
+        }
+
+        Ok(result)
+    }
+
     #[inline(always)]
     fn dispatch(&mut self) -> Result<(), InterpreterError> {
         let opcode = self.decoder.next::<u8>()?;
@@ -270,162 +300,53 @@ impl Interpreter {
     }
 
     fn eval_closure(&mut self) -> Result<(), InterpreterError> {
-        // let Instruction::CLOSURE { offset, arity } = instr else {
-        //     return Err(InterpreterError::InvalidObjectPointer);
-        // };
+        let offset = self.decoder.next::<i32>()?;
+        let arity = self.decoder.next::<i32>()?;
 
-        // let offset_at = offset as usize;
+        if offset < 0 || arity < 0 {
+            return Err(InterpreterError::InvalidObjectPointer);
+        }
 
-        // let length = arity as usize + 1; // + 1 for offset
+        let callable =
+            unsafe { RAP_create_callable_obj(offset as usize, arity as u32, std::ptr::null(), 0) };
+        self.push(Object::new(callable))?;
 
-        // // Push offset - which is a first element to args of Bsexp
-        // self.push(Object::new_boxed(offset as i64))?;
-
-        // // Read captured variables description from code section
-        // for i in 0..arity as usize {
-        //     let desc = CapturedVar {
-        //         rel: ValueRel::try_from(self.decoder.next::<u8>()?)
-        //             .map_err(|_| InterpreterError::InvalidValueRel)?,
-        //         index: self.decoder.next::<i32>()?,
-        //     };
-
-        //     // Push captures
-        //     match desc.rel {
-        //         ValueRel::Arg => {
-        //             let frame =
-        //                 FrameMetadata::get_from_stack(&self.operand_stack.0, self.frame_pointer)
-        //                     .ok_or(InterpreterError::NotEnoughArguments(
-        //                         "trying to create closure frame",
-        //                     ))?;
-        //             let obj = frame
-        //                 .get_arg_at(
-        //                     &self.operand_stack.0,
-        //                     self.frame_pointer,
-        //                     desc.index as usize,
-        //                 )
-        //                 .ok_or(InterpreterError::NotEnoughArguments(
-        //                     "trying to create closure frame, no function argument found",
-        //                 ))?;
-        //             self.push(obj.clone())?;
-        //         }
-        //         ValueRel::Capture => unsafe {
-        //             let mut frame =
-        //                 FrameMetadata::get_from_stack(&self.operand_stack.0, self.frame_pointer)
-        //                     .ok_or(InterpreterError::NotEnoughArguments(
-        //                         "trying to create closure frame",
-        //                     ))?;
-
-        //             let closure = frame
-        //                 .get_closure(&mut self.operand_stack.0, self.frame_pointer)
-        //                 .unwrap();
-
-        //             let to_data = rtToData(
-        //                 closure
-        //                     .as_ptr_mut()
-        //                     .ok_or(InterpreterError::InvalidObjectPointer)?,
-        //             );
-
-        //             let element = get_captured_variable(&*to_data, desc.index as usize);
-
-        //             self.push(Object::new_boxed(element))?;
-        //         },
-        //         ValueRel::Global => {
-        //             let value = self.globals()[desc.index as usize].clone();
-        //             self.push(value.clone())?;
-        //         }
-        //         ValueRel::Local => {
-        //             let frame =
-        //                 FrameMetadata::get_from_stack(&self.operand_stack.0, self.frame_pointer)
-        //                     .ok_or(InterpreterError::NotEnoughArguments(
-        //                         "trying to create closure frame",
-        //                     ))?;
-
-        //             let obj = frame
-        //                 .get_local_at(
-        //                     &self.operand_stack.0,
-        //                     self.frame_pointer,
-        //                     desc.index as usize,
-        //                 )
-        //                 .ok_or(InterpreterError::NotEnoughArguments(
-        //                     "trying to create closure frame",
-        //                 ))?;
-        //             self.push(obj.clone())?;
-        //         }
-        //     }
-        // }
-
-        // // Create a new closure object
-        // let borrow_operand_stack_elements =
-        //     &mut self.operand_stack.0[self.operand_stack_len - length + 1..=self.operand_stack_len];
-
-        // let closure = new_closure(borrow_operand_stack_elements);
-
-        // // Pop arguments from the stack
-        // for _ in 0..length {
-        //     self.pop()?;
-        // }
-
-        // let mut closure_obj =
-        //     Object::try_from(closure).map_err(|_| InterpreterError::InvalidObjectPointer)?;
-
-        // self.push(closure_obj)?;
-        // let encoding = self.decoder.next::<u8>()?;
-        // let instr = self.decoder.decode(encoding)?;
-
-        todo!();
-
-        unreachable!()
+        become self.dispatch()
     }
 
     fn eval_callc(&mut self) -> Result<(), InterpreterError> {
-        // let Instruction::CALLC { arity } = instr else {
-        //     return Err(InterpreterError::InvalidObjectPointer);
-        // };
+        let argument_count = self.decoder.next::<i32>()?;
+        let argument_count = usize::try_from(argument_count)
+            .map_err(|_| InterpreterError::NotEnoughArguments("CALLC"))?;
+        let callable_index = self
+            .operand_stack
+            .len()
+            .checked_sub(argument_count + 1)
+            .ok_or(InterpreterError::NotEnoughArguments("CALLC"))?;
+        let callable = self.operand_stack[callable_index];
 
-        // let arity = arity as usize;
+        if !unsafe { RAP_IS_CALLABLE(callable.raw()) } {
+            return Err(InterpreterError::InvalidType("expected callable"));
+        }
 
-        // let mut obj = self.take(arity)?;
+        let expected_arity = unsafe { RAP_get_callable_arity(callable.raw()) } as usize;
+        if expected_arity != argument_count {
+            return Err(InterpreterError::CallableArityMismatch {
+                expected: expected_arity,
+                actual: argument_count,
+            });
+        }
+        let entry = unsafe { RAP_get_callable_offset_or_ptr(callable.raw()) };
 
-        // // check for closure
-        // #[cfg(feature = "runtime_checks")]
-        // let Some(lama_type) = obj.lama_type() else {
-        //     return Err(InterpreterError::InvalidObjectPointer);
-        // };
+        // The callable sits directly below its args so we remove only that
+        // owning reference the arguments stay in their original order for
+        // BEGIN to frame them
+        let callable = self.operand_stack.remove(callable_index);
+        Self::dec_ref_if_ptr(callable);
+        self.push(Object::new_boxed(self.decoder.ip as i64))?;
+        self.decoder.ip = entry;
 
-        // // check for closure type
-        // #[cfg(feature = "runtime_checks")]
-        // if lama_type != lama_type_CLOSURE {
-        //     return Err(InterpreterError::InvalidType(
-        //         "expected closure object at top of the stack to call a closure",
-        //     ));
-        // }
-
-        // // Push old instruction pointer
-        // // `CBEGIN` instruction will collect it
-        // self.push(Object::new_boxed(self.decoder.ip as i64))?;
-
-        // // Re-push closure object
-        // // `CBEGIN` instruction will collect it
-        // // self.push(obj.clone())?;
-
-        // unsafe {
-        //     let to_data = rtToData(
-        //         obj.as_ptr_mut()
-        //             .ok_or(InterpreterError::InvalidObjectPointer)?,
-        //     );
-        //     // First element in closure object is the offset
-        //     self.decoder.ip = get_array_el(&*to_data, 0) as usize;
-        // }
-
-        // // Push closure object onto operand stack
-        // self.push(obj)?;
-
-        // let encoding = self.decoder.next::<u8>()?;
-        // let instr = self.decoder.decode(encoding)?;
-
-        todo!();
-
-        unreachable!()
+        become self.dispatch()
     }
 
     fn eval_load_ref(&mut self) -> Result<(), InterpreterError> {
@@ -1591,12 +1512,12 @@ pub enum InterpreterError {
     ObjectError(ObjectError),
     InvalidValueRel,
     DivisionByZero,
-    SexpTagTooLong(usize),
     DecoderError(DecoderError),
     StackOverflow,
     UnknownLabel(String),
     InvalidVariantSchema(i32),
     InvalidFieldIndex,
+    CallableArityMismatch { expected: usize, actual: usize },
 }
 
 /// Convert a byte, that couldnt be incoded into an interpreter error.
@@ -1669,9 +1590,6 @@ impl core::fmt::Display for InterpreterError {
             InterpreterError::DivisionByZero => {
                 write!(f, "Division by zero")
             }
-            InterpreterError::SexpTagTooLong(len) => {
-                write!(f, "Sexp tag too long: {}, max is {}", len, MAX_SEXP_TAGLEN)
-            }
             InterpreterError::DecoderError(err) => {
                 write!(f, "Decoder error: {}", err)
             }
@@ -1685,6 +1603,11 @@ impl core::fmt::Display for InterpreterError {
                 write!(f, "Invalid variant schema: {}", id)
             }
             InterpreterError::InvalidFieldIndex => write!(f, "Invalid variant field index"),
+            InterpreterError::CallableArityMismatch { expected, actual } => write!(
+                f,
+                "Callable expects {} argument(s), received {}",
+                expected, actual
+            ),
         }
     }
 }

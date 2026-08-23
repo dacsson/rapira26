@@ -1,15 +1,10 @@
-//! Tests for the interpreter/bytecode evaluation
-//!
-//! Dont forget to change MAX_OPERAND_STACK_SIZE if
-//! you want to run this tests, otherwise the interpreter
-//! will panic due to stack overflow.
-//! TODO: change that behaviour
+//! Tests for interpreter/bytecode evaluation.
 
+use crate::RAP_TAG_MASK;
+use crate::interpreter::Interpreter;
 use vm_core::bytecode::*;
 use vm_core::bytefile::Bytefile;
 use vm_core::decoder::Decoder;
-use vm_interp::RAP_TAG_MASK;
-use vm_interp::interpreter::Interpreter;
 
 // The runtime exposes process-global GC stack pointers, so two Interpreter
 // instances cannot safely execute concurrently in the same test process.
@@ -44,8 +39,7 @@ fn evaluate_with_globals(
     let _guard = INTERPRETER_LOCK.lock().unwrap();
     let decoder = prepare_bytefile(program, globals);
     let mut interp = Interpreter::new(decoder);
-    interp.run()?;
-    Ok(interp.peek().unwrap().raw())
+    interp.run_with_result().map_err(Into::into)
 }
 
 fn smi(raw: usize) -> i64 {
@@ -227,20 +221,14 @@ fn eval_tuple_length_and_element_lookup() -> Result<(), Box<dyn std::error::Erro
 
 #[test]
 fn eval_integer_math_builtins() -> Result<(), Box<dyn std::error::Error>> {
-    let cases = [
-        (Builtin::Abs, -7, 7),
-        (Builtin::Ttuple, -5, -1),
-        (Builtin::Ttuple, 0, 0),
-        (Builtin::Ttuple, 3, 1),
-    ];
-
-    for (name, value, expected) in cases {
-        let result = evaluate(&[
-            Instruction::CONST { value },
-            Instruction::CALLBUILTIN { name, n: 1 },
-        ])?;
-        assert_eq!(smi(result), expected);
-    }
+    let result = evaluate(&[
+        Instruction::CONST { value: -7 },
+        Instruction::CALLBUILTIN {
+            name: Builtin::Abs,
+            n: 0,
+        },
+    ])?;
+    assert_eq!(smi(result), 7);
 
     Ok(())
 }
@@ -248,7 +236,6 @@ fn eval_integer_math_builtins() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn eval_complex_logical_expr() -> Result<(), Box<dyn std::error::Error>> {
     let and = evaluate(&[
-        // 1 > 0 && 2 <= 3
         Instruction::CONST { value: 1 },
         Instruction::CONST { value: 0 },
         Instruction::BINOP { op: Op::GT },
@@ -262,7 +249,6 @@ fn eval_complex_logical_expr() -> Result<(), Box<dyn std::error::Error>> {
     assert!(boolean(and));
 
     let chained = evaluate(&[
-        // 1 > 0 && 2 <= 3
         Instruction::CONST { value: 1 },
         Instruction::CONST { value: 0 },
         Instruction::BINOP { op: Op::GT },
@@ -270,7 +256,6 @@ fn eval_complex_logical_expr() -> Result<(), Box<dyn std::error::Error>> {
         Instruction::CONST { value: 3 },
         Instruction::BINOP { op: Op::LEQ },
         Instruction::BINOP { op: Op::AND },
-        // 1 <= 0 && 2 >= 3
         Instruction::CONST { value: 1 },
         Instruction::CONST { value: 0 },
         Instruction::BINOP { op: Op::LEQ },

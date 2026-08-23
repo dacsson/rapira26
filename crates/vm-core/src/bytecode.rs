@@ -123,14 +123,11 @@ pub enum Instruction {
         args: i32,
         locals: i32,
     },
-    /// Pushes a new closure with 𝑛 captured variables onto the
-    /// stack. The bytecode for the closure begins at 𝑙 (given as an offset
-    /// from the start of the bytecode).
-    ///
-    /// The instruction has a variable-length encoding; the description of
-    /// each captured variable is specified as a 5-byte immediate.
+    /// Pushes a callable for the bytecode at `dest` onto the stack. `arity` is
+    /// its required argument count. The current VM supports only
+    /// non-capturing callables; capture descriptors are reserved for lambdas.
     CLOSURE {
-        offset: i32,
+        dest: Label,
         arity: i32,
     },
     /// Store a value somewhere, depending on ValueRel
@@ -440,7 +437,10 @@ impl fmt::Display for Instruction {
             Instruction::STRING { index } => write!(f, "STRING {}", index),
             Instruction::BEGIN { args, locals } => write!(f, "BEGIN {} {}", args, locals),
             Instruction::CBEGIN { args, locals } => write!(f, "CBEGIN {} {}", args, locals),
-            Instruction::CLOSURE { offset, arity } => write!(f, "CLOSURE {} {}", offset, arity),
+            Instruction::CLOSURE {
+                dest: offset,
+                arity,
+            } => write!(f, "CLOSURE {:#?} {}", offset, arity),
             Instruction::STORE { rel, index } => write!(f, "STORE {} {}", rel, index),
             Instruction::LOAD { rel, index } => write!(f, "LOAD {} {}", rel, index),
             Instruction::CALL { dest: offset, n } => write!(f, "CALL {:?} {}", offset, n),

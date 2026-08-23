@@ -40,44 +40,17 @@ typedef struct {
   };
 } RAP_Object;
 
-// Parameter mode specification
-// From spec 2.2.2:
-// Параметры:
-// Входные - ['=>']
-// Возвратные - ['<=']
-typedef enum {
-  RAP_PARAMETER_MODE_IN,
-  RAP_PARAMETER_MODE_OUT,
-} RAP_ParameterMode;
-
-typedef struct {
-  RAP_ParameterMode mode;
-  char *name;
-} RAP_Parameter;
-
-/// Named variable slot in a call frame.
-struct RAP_FrameSlot {
-  const char *name;
-  RAP_Value value;
-};
-
-/// Each function keeps some context about 'чужие' and 'свои' scoped variables.
-/// Variables have dynamic scope and are looked up in the call frame chain.
-struct RAP_CallFrame {
-  struct RAP_CallFrame *parent;
-  struct RAP_FrameSlot *slots;
-  uint32_t slot_count;
-};
-
 /// Funcs and procs are treated as objects.
 struct RAP_Callable {
-  char *name;
-  RAP_Value (*func)(struct RAP_CallFrame *frame, RAP_Value *args,
-                    unsigned int arg_count);
-  struct RAP_CallFrame *frame;
-  RAP_Parameter **params;
-  uint32_t param_count;
-  bool is_function; // true for функ, false for проц
+  // Opaque implementation entry. The runtime does not interpret this value;
+  // the VM currently uses it as a bytecode entry offset.
+  size_t offset_or_ptr;
+  uint32_t arity;
+
+  // Reserved for lexical captures when lambdas are implemented. Each capture
+  // is retained by the callable for its whole lifetime.
+  RAP_Value *captures;
+  uint32_t capture_count;
 };
 
 /// Tuple is a untyped list of objects.
@@ -85,10 +58,6 @@ struct RAP_Tuple {
   uint32_t count;
   RAP_Value *items;
 };
-
-/// Unified function type
-typedef RAP_Value (*RAP_FunctionDecl)(struct RAP_CallFrame *frame,
-                                      RAP_Value *args, uint32_t arg_count);
 
 /// Slice: a view into a tuple (or text).
 /// Holds a pointer to the parent and 0-based [from, to) bounds.

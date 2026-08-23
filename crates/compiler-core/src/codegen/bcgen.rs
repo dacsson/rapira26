@@ -135,7 +135,8 @@ pub struct BcGen {
     bytefile: Bytefile,
     env: Env,
     current_module: String,
-    call_targets: HashMap<String, String>,
+    // Func name -> (Label, arity)
+    call_targets: HashMap<String, (String, usize)>,
     variant_constructors: HashMap<String, VariantInfo>,
     field_indices: HashMap<String, i32>,
 }
@@ -178,7 +179,7 @@ impl BcGen {
     fn resolve_call_target(&self, name: &str) -> String {
         self.call_targets
             .get(name)
-            .cloned()
+            .map(|e| e.0.clone())
             .unwrap_or_else(|| name.to_string())
     }
 
@@ -196,7 +197,10 @@ impl BcGen {
             let name = function.node.name.as_ref().unwrap();
             self.call_targets.insert(
                 name.clone(),
-                Self::qualified_label(&self.current_module, name),
+                (
+                    Self::qualified_label(&self.current_module, name),
+                    function.node.parameters.len(),
+                ),
             );
         }
         for function in &module.imported_functions {
@@ -207,7 +211,10 @@ impl BcGen {
                 .expect("resolved imported function");
             self.call_targets.insert(
                 name.clone(),
-                Self::qualified_label(defining_module.get(), name),
+                (
+                    Self::qualified_label(defining_module.get(), name),
+                    function.node.parameters.len(),
+                ),
             );
         }
     }
@@ -307,53 +314,73 @@ impl BcGen {
                 function,
                 arguments,
             } => {
-                let Expr::Name(name) = &function.node else {
-                    panic!("Anonymous functions not implemented");
-                };
-
-                if let Some(info) = self.variant_constructors.get(name).cloned() {
-                    // TODO: remove after SEMA
-                    assert_eq!(
-                        arguments.len(),
-                        info.fields.len(),
-                        "wrong constructor arity"
-                    );
-                    for argument in arguments {
-                        instrs.extend(self.emit_expr(argument));
+                if let Expr::Name(name) = &function.node {
+                    if let Some(info) = self.variant_constructors.get(name).cloned() {
+                        // TODO: remove after SEMA
+                        assert_eq!(
+                            arguments.len(),
+                            info.fields.len(),
+                            "wrong constructor arity"
+                        );
+                        for argument in arguments {
+                            instrs.extend(self.emit_expr(argument));
+                        }
+                        instrs.push(Instruction::VARIANT {
+                            schema: info.schema,
+                        });
+                        return instrs;
                     }
-                    instrs.push(Instruction::VARIANT {
-                        schema: info.schema,
-                    });
-                } else if let Some(&(_, builtin)) = BUILTIN_FUNCS.iter().find(|(n, _)| name == n) {
-                    for argument in arguments {
-                        instrs.extend(self.emit_expr(argument));
+                    if let Some(&(_, builtin)) = BUILTIN_FUNCS.iter().find(|(n, _)| name == n) {
+                        for argument in arguments {
+                            instrs.extend(self.emit_expr(argument));
+                        }
+                        // Only `Lread`/`Lwrite` pack their argument
+                        // count (and flags) into `n` they emitted separately in
+                        // `emit_statement`. Every other builtin emits no payload
+                        // `n` must stay 0.
+                        instrs.push(Instruction::CALLBUILTIN {
+                            name: builtin,
+                            n: 0,
+                        });
+                        return instrs;
                     }
-                    // A builtin call. Only `Lread`/`Lwrite` pack their argument
-                    // count (and flags) into `n`; they are emitted separately in
-                    // `emit_statement`. Every other builtin emits no payload, so
-                    // `n` must stay 0.
-                    instrs.push(Instruction::CALLBUILTIN {
-                        name: builtin,
-                        n: 0,
-                    });
-                } else {
-                    for argument in arguments {
-                        instrs.extend(self.emit_expr(argument));
+                    if self.call_targets.contains_key(name) {
+                        for argument in arguments {
+                            instrs.extend(self.emit_expr(argument));
+                        }
+                        instrs.push(Instruction::CALL {
+                            dest: Label {
+                                name: self.resolve_call_target(name),
+                                offset: None,
+                            },
+                            n: arguments.len() as i32,
+                        });
+                        return instrs;
                     }
-                    instrs.push(Instruction::CALL {
-                        dest: Label {
-                            name: self.resolve_call_target(name),
-                            offset: None,
-                        },
-                        n: arguments.len() as i32,
-                    });
                 }
+
+                instrs.extend(self.emit_expr(function));
+                for argument in arguments {
+                    instrs.extend(self.emit_expr(argument));
+                }
+                instrs.push(Instruction::CALLC {
+                    arity: arguments.len() as i32,
+                });
             }
             Expr::Name(name) => {
                 if let Some(info) = self.variant_constructors.get(name) {
                     assert!(info.fields.is_empty(), "constructor requires arguments");
                     instrs.push(Instruction::VARIANT {
                         schema: info.schema,
+                    });
+                } else if let Some((label, arity)) = self.call_targets.get(name) {
+                    // Function as value supplied as arg
+                    instrs.push(Instruction::CLOSURE {
+                        dest: Label {
+                            name: label.clone(),
+                            offset: None,
+                        },
+                        arity: *arity as i32,
                     });
                 } else {
                     let Some((index, rel)) = self.env.find_variable(name) else {
@@ -842,27 +869,45 @@ impl BcGen {
             } => {
                 let mut instrs = vec![];
 
-                let Expr::Name(name) = &procedure.node else {
-                    panic!("Anonymous functions not implemented");
-                };
-
-                for arg in arguments {
-                    instrs.extend(self.emit_expr(arg));
-                }
-
-                if let Some(&(_, builtin)) = BUILTIN_FUNCS.iter().find(|(n, _)| name == n) {
-                    // A builtin procedure call; no payload for non-I/O builtins.
-                    instrs.push(Instruction::CALLBUILTIN {
-                        name: builtin,
-                        n: 0,
-                    });
+                if let Expr::Name(name) = &procedure.node {
+                    if let Some(&(_, builtin)) = BUILTIN_FUNCS.iter().find(|(n, _)| name == n) {
+                        for arg in arguments {
+                            instrs.extend(self.emit_expr(arg));
+                        }
+                        // A builtin procedure call: no payload for non IO builtins.
+                        instrs.push(Instruction::CALLBUILTIN {
+                            name: builtin,
+                            n: 0,
+                        });
+                    } else if self.call_targets.contains_key(name) {
+                        for arg in arguments {
+                            instrs.extend(self.emit_expr(arg));
+                        }
+                        instrs.push(Instruction::CALL {
+                            dest: Label {
+                                name: self.resolve_call_target(name),
+                                offset: None,
+                            },
+                            n: arguments.len() as i32,
+                        });
+                    } else {
+                        instrs.extend(self.emit_expr(procedure));
+                        for arg in arguments {
+                            instrs.extend(self.emit_expr(arg));
+                        }
+                        instrs.push(Instruction::CALLC {
+                            arity: arguments.len() as i32,
+                        });
+                    }
                 } else {
-                    instrs.push(Instruction::CALL {
-                        dest: Label {
-                            name: self.resolve_call_target(name),
-                            offset: None,
-                        },
-                        n: arguments.len() as i32,
+                    // This is the case where the lhs is a callable
+                    // e.g.: `(f(x))(y)` where `f(x)` returns some function `g`
+                    instrs.extend(self.emit_expr(procedure));
+                    for arg in arguments {
+                        instrs.extend(self.emit_expr(arg));
+                    }
+                    instrs.push(Instruction::CALLC {
+                        arity: arguments.len() as i32,
                     });
                 }
 
