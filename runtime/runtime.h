@@ -30,8 +30,10 @@ RAP_Value RAP_set_tuple_item(RAP_Value tuple, uint32_t index, RAP_Value value);
 RAP_Value RAP_append_tuple(RAP_Object *a, RAP_Object *b);
 RAP_Value RAP_index_of(RAP_Value needle, RAP_Value haystack);
 RAP_Value RAP_get_variant_field(RAP_Value val, const char *field_name);
+RAP_Value RAP_get_variant_field_at(RAP_Value val, size_t index);
 void RAP_set_variant_field(RAP_Value val, const char *field_name,
                            RAP_Value field_val);
+void RAP_set_variant_field_at(RAP_Value val, size_t index, RAP_Value field_val);
 
 // SLICE OPERATIONS
 

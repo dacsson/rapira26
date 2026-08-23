@@ -7,6 +7,19 @@ use std::ffi::CString;
 use std::fmt::Display;
 use std::io::{BufRead, BufReader, Cursor, Read};
 
+/// Static description of one user defined variant.
+///
+/// String offsets refer to the bytefile string table. The index in
+/// [`Bytefile::variant_schemas`] is the schema ID used by bytecode.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VariantSchema {
+    pub name_offset: u32,
+    pub tag: u16,
+    pub field_offsets: Vec<u32>,
+}
+
+const VARIANT_SCHEMA_MARKER: u32 = u32::MAX;
+
 // Memory layout of the bytecode file
 // +------------------------------------+
 // |           File Header              |
@@ -32,6 +45,7 @@ pub struct Bytefile {
     pub global_area_size: u32,
     pub public_symbols_number: u32,
     pub public_symbols: Vec<(u32, u32)>,
+    pub variant_schemas: Vec<VariantSchema>,
     pub string_table: Vec<u8>,
     pub code_section: Vec<u8>,      // Kept raw for later interpretation
     pub main_offset: u32,           // "main" function offset, a.k.a entry point
@@ -60,6 +74,7 @@ impl Bytefile {
             global_area_size: 0,
             public_symbols_number: 0,
             public_symbols: Vec::new(),
+            variant_schemas: Vec::new(),
             string_table: Vec::new(),
             code_section: Vec::new(),
             main_offset: 0,
@@ -75,6 +90,12 @@ impl Bytefile {
         self.string_table.push(0);
         self.stringtab_size += string.as_bytes().len() as u32 + 1;
         offset
+    }
+
+    pub fn add_variant_schema(&mut self, schema: VariantSchema) -> u32 {
+        let id = self.variant_schemas.len() as u32;
+        self.variant_schemas.push(schema);
+        id
     }
 
     /// Add raw code to the code section of bytefile
@@ -184,6 +205,11 @@ impl Bytefile {
         let global_area_size_size = std::mem::size_of::<u32>();
         let public_symbols_number_size = std::mem::size_of::<u32>();
         let public_symbols_size = self.public_symbols.len() * std::mem::size_of::<(u32, u32)>();
+        let variant_schemas_size: usize = self
+            .variant_schemas
+            .iter()
+            .map(|schema| 8 + schema.field_offsets.len() * 4)
+            .sum();
 
         // String table size
         let string_table_size = self.string_table.len();
@@ -194,8 +220,10 @@ impl Bytefile {
         return stringtab_size_size
             + global_area_size_size
             + public_symbols_number_size
+            + 2 * std::mem::size_of::<u32>()
             + public_symbols_size
             + string_table_size
+            + variant_schemas_size
             + code_section_size;
     }
 
@@ -226,6 +254,11 @@ impl Bytefile {
         // Push public symbols number
         output.extend(self.public_symbols_number.to_le_bytes());
 
+        // Extension marker and variant schema count. The marker keeps readers
+        // able to distinguish this layout from legacy bytefiles.
+        output.extend(VARIANT_SCHEMA_MARKER.to_le_bytes());
+        output.extend((self.variant_schemas.len() as u32).to_le_bytes());
+
         // Push public symbols
         // P × (int32, int32) | 8 bytes each
         for (offset, name_offset) in &self.public_symbols {
@@ -235,6 +268,16 @@ impl Bytefile {
 
         // Push string table
         output.extend(&self.string_table);
+
+        // Push variant schemas: name string offset, tag, field count, fields.
+        for schema in &self.variant_schemas {
+            output.extend(schema.name_offset.to_le_bytes());
+            output.extend(schema.tag.to_le_bytes());
+            output.extend((schema.field_offsets.len() as u16).to_le_bytes());
+            for field in &schema.field_offsets {
+                output.extend(field.to_le_bytes());
+            }
+        }
 
         // Push code section
         output.extend(&self.code_section);
@@ -267,15 +310,34 @@ impl Bytefile {
             .map_err(|_| BytefileError::UnexpectedEOF)?;
         let public_symbols_number = u32::from_le_bytes(buf);
 
+        buf.fill(0);
+        reader
+            .read_exact(&mut buf)
+            .map_err(|_| BytefileError::UnexpectedEOF)?;
+        let extension_or_first_symbol = u32::from_le_bytes(buf);
+        let (variant_schema_count, first_symbol) =
+            if extension_or_first_symbol == VARIANT_SCHEMA_MARKER {
+                reader
+                    .read_exact(&mut buf)
+                    .map_err(|_| BytefileError::UnexpectedEOF)?;
+                (u32::from_le_bytes(buf), None)
+            } else {
+                (0, Some(extension_or_first_symbol))
+            };
+
         // Read public symbol table
         // P × (int32, int32) | 8 bytes each
         let mut public_symbols = Vec::with_capacity(public_symbols_number as usize);
-        for _ in 0..public_symbols_number {
-            buf.fill(0);
-            reader
-                .read_exact(&mut buf)
-                .map_err(|_| BytefileError::UnexpectedEOF)?;
-            let symbol = u32::from_le_bytes(buf);
+        for index in 0..public_symbols_number {
+            let symbol = if index == 0 && first_symbol.is_some() {
+                first_symbol.unwrap()
+            } else {
+                buf.fill(0);
+                reader
+                    .read_exact(&mut buf)
+                    .map_err(|_| BytefileError::UnexpectedEOF)?;
+                u32::from_le_bytes(buf)
+            };
             reader
                 .read_exact(&mut buf)
                 .map_err(|_| BytefileError::UnexpectedEOF)?;
@@ -289,6 +351,42 @@ impl Bytefile {
         reader
             .read_exact(&mut string_table)
             .map_err(|_| BytefileError::UnexpectedEOF)?;
+
+        let mut variant_schemas = Vec::with_capacity(variant_schema_count as usize);
+        for _ in 0..variant_schema_count {
+            reader
+                .read_exact(&mut buf)
+                .map_err(|_| BytefileError::UnexpectedEOF)?;
+            let name_offset = u32::from_le_bytes(buf);
+            let mut tag_buf = [0u8; 2];
+            reader
+                .read_exact(&mut tag_buf)
+                .map_err(|_| BytefileError::UnexpectedEOF)?;
+            let tag = u16::from_le_bytes(tag_buf);
+            reader
+                .read_exact(&mut tag_buf)
+                .map_err(|_| BytefileError::UnexpectedEOF)?;
+            let field_count = u16::from_le_bytes(tag_buf);
+            let mut field_offsets = Vec::with_capacity(field_count as usize);
+            for _ in 0..field_count {
+                reader
+                    .read_exact(&mut buf)
+                    .map_err(|_| BytefileError::UnexpectedEOF)?;
+                field_offsets.push(u32::from_le_bytes(buf));
+            }
+            if name_offset as usize >= string_table.len()
+                || field_offsets
+                    .iter()
+                    .any(|offset| *offset as usize >= string_table.len())
+            {
+                return Err(BytefileError::InvalidStringIndexInStringTable);
+            }
+            variant_schemas.push(VariantSchema {
+                name_offset,
+                tag,
+                field_offsets,
+            });
+        }
 
         // Find "main" entry point in public symbols
         let main_offset = public_symbols
@@ -340,6 +438,7 @@ impl Bytefile {
             global_area_size,
             public_symbols_number,
             public_symbols,
+            variant_schemas,
             string_table,
             code_section,
             main_offset,
@@ -396,6 +495,7 @@ impl Bytefile {
             code_section: vec![0; 100],
             string_table: vec![],
             public_symbols: vec![],
+            variant_schemas: vec![],
             main_offset: 0,
             labels: HashMap::new(),
         }

@@ -77,6 +77,19 @@ RAP_Value RAP_get_tuple_item(RAP_Value container, uint32_t index) {
     }
 
     RAP_Object *parent = RAP_PTR_VALUE(container)->slice_val->parent;
+    if (parent->tag == RAP_OBJECT_TAG_TEXT) {
+      // Text indexing always produces a 1character TEXT, including when
+      // the source is a slice
+      RAP_TRACK_ALLOC();
+      RAP_Object *result = malloc(sizeof(RAP_Object));
+      result->tag = RAP_OBJECT_TAG_TEXT;
+      result->text_val = malloc(sizeof(struct RAP_Tuple));
+      result->text_val->count = 1;
+      result->text_val->items = malloc(sizeof(RAP_Value));
+      result->text_val->items[0] = parent->text_val->items[rel_from];
+      result->refcount = 1;
+      return RAP_CREATE_PTR(result);
+    }
     RAP_inc_ref(parent->tuple_val->items[rel_from]);
     return parent->tuple_val->items[rel_from];
   }

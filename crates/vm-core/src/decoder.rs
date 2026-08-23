@@ -166,8 +166,21 @@ impl Decoder {
             (0x50, 0x8) => Ok(Instruction::ARRAY {
                 n: self.next::<i32>()?,
             }),
+            (0x50, 0x9) => Ok(Instruction::VARIANT {
+                schema: self.next::<i32>()?,
+            }),
             (0x50, 0xa) => Ok(Instruction::LINE {
                 n: self.next::<i32>()?,
+            }),
+            (0x50, 0xb) => Ok(Instruction::VARIANTTAG),
+            (0x50, 0xc) => Ok(Instruction::FIELD {
+                index: self.next::<i32>()?,
+            }),
+            (0x50, 0xd) => Ok(Instruction::SETFIELD {
+                index: self.next::<i32>()?,
+            }),
+            (0x50, 0xe) => Ok(Instruction::ISVARIANT {
+                schema: self.next::<i32>()?,
             }),
             (0x70, 0x0) => Ok(Instruction::CALLBUILTIN {
                 // `n` packs the [un]typed flag and arg count
@@ -320,9 +333,26 @@ impl Decoder {
                 buf.push(0x58);
                 buf.extend(&n.to_le_bytes());
             }
+            Instruction::VARIANT { schema } => {
+                buf.push(0x59);
+                buf.extend(&schema.to_le_bytes());
+            }
             Instruction::LINE { n } => {
                 buf.push(0x5a);
                 buf.extend(&n.to_le_bytes());
+            }
+            Instruction::VARIANTTAG => buf.push(0x5b),
+            Instruction::FIELD { index } => {
+                buf.push(0x5c);
+                buf.extend(&index.to_le_bytes());
+            }
+            Instruction::SETFIELD { index } => {
+                buf.push(0x5d);
+                buf.extend(&index.to_le_bytes());
+            }
+            Instruction::ISVARIANT { schema } => {
+                buf.push(0x5e);
+                buf.extend(&schema.to_le_bytes());
             }
             Instruction::CALLBUILTIN { n, name } => {
                 let name_: &i32 = name.into();

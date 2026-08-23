@@ -48,6 +48,15 @@ RAP_Value RAP_get_variant_field(RAP_Value val, const char *field_name) {
   RAP_fatal_error("Не существует такого поля у объекта");
 }
 
+RAP_Value RAP_get_variant_field_at(RAP_Value val, size_t index) {
+  if (!RAP_IS_VARIANT(val) || index >= RAP_PTR_VALUE(val)->variant_val->field_count)
+    RAP_fatal_error("Не существует такого поля у объекта");
+  void *payload = RAP_PTR_VALUE(val)->variant_val->payload;
+  RAP_Value *field = (RAP_Value *)((char *)payload + sizeof(uint16_t) +
+                                    index * sizeof(RAP_Value));
+  return *field;
+}
+
 void RAP_set_variant_field(RAP_Value val, const char *field_name,
                            RAP_Value field_val) {
   if (!RAP_IS_VARIANT(val))
@@ -59,6 +68,8 @@ void RAP_set_variant_field(RAP_Value val, const char *field_name,
   for (size_t i = 0; i < variant->field_count; i++) {
     if (strcmp(variant->field_names[i], field_name) == 0) {
       RAP_Value *field = (RAP_Value *)(payload + field_offset);
+      RAP_inc_ref(field_val);
+      RAP_dec_ref(*field);
       *field = field_val;
       return;
     }
@@ -66,4 +77,15 @@ void RAP_set_variant_field(RAP_Value val, const char *field_name,
   }
 
   RAP_fatal_error("Не существует такого поля у объекта");
+}
+
+void RAP_set_variant_field_at(RAP_Value val, size_t index, RAP_Value field_val) {
+  if (!RAP_IS_VARIANT(val) || index >= RAP_PTR_VALUE(val)->variant_val->field_count)
+    RAP_fatal_error("Не существует такого поля у объекта");
+  void *payload = RAP_PTR_VALUE(val)->variant_val->payload;
+  RAP_Value *field = (RAP_Value *)((char *)payload + sizeof(uint16_t) +
+                                    index * sizeof(RAP_Value));
+  RAP_inc_ref(field_val);
+  RAP_dec_ref(*field);
+  *field = field_val;
 }
