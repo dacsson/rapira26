@@ -16,6 +16,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Build C runtime
+      run: make -C runtime
     - name: Build
       run: cargo +nightly build --verbose
     - name: Run tests
