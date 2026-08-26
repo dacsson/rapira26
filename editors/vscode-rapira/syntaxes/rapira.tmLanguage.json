@@ -1,0 +1,104 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Rapira",
+  "scopeName": "source.rapira",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#function-declaration" },
+    { "include": "#type-declaration" },
+    { "include": "#constants" },
+    { "include": "#keywords" },
+    { "include": "#numbers" },
+    { "include": "#operators" },
+    { "include": "#type-like-identifiers" }
+  ],
+  "repository": {
+    "comment": {
+      "patterns": [
+        {
+          "name": "comment.line.backslash.rapira",
+          "match": "\\\\.*$"
+        }
+      ]
+    },
+    "string": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.rapira",
+          "match": "\\\"(?:[^\\\"\\r\\n]|\\\"\\\"\\\"\\\")*\\\""
+        }
+      ]
+    },
+    "function-declaration": {
+      "patterns": [
+        {
+          "match": "(?<![\\p{L}\\p{N}_])(функ)\\s+([\\p{L}_][\\p{L}\\p{N}_]*)",
+          "captures": {
+            "1": { "name": "storage.type.function.rapira" },
+            "2": { "name": "entity.name.function.rapira" }
+          }
+        }
+      ]
+    },
+    "type-declaration": {
+      "patterns": [
+        {
+          "match": "(?<![\\p{L}\\p{N}_])(тип)\\s+([\\p{L}_][\\p{L}\\p{N}_]*)",
+          "captures": {
+            "1": { "name": "storage.type.rapira" },
+            "2": { "name": "entity.name.type.rapira" }
+          }
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.rapira",
+          "match": "(?<![\\p{L}\\p{N}_])(?:пусто|да|нет|пс|пи|pi)(?![\\p{L}\\p{N}_])"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.rapira",
+          "match": "(?<![\\p{L}\\p{N}_])(?:если|то|иначе|выбор|при|для|от|до|шаг|пока|повтор|цикл|по|выход|возврат)(?![\\p{L}\\p{N}_])"
+        },
+        {
+          "name": "keyword.other.rapira",
+          "match": "(?<![\\p{L}\\p{N}_])(?:чужие|свои|вывод|ввод|бпс|текста|и|или|не|вых|подкл|тип|функ)(?![\\p{L}\\p{N}_])"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.rapira",
+          "match": "(?<![\\p{L}\\p{N}_])\\d+(?:\\.\\d*)?(?:[eе][+-]?\\d+)?(?![\\p{L}\\p{N}_])"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.rapira",
+          "match": ":=|==|/=|<=|>=|\\*\\*|//|/%|[+\\-*/=#<>.]"
+        },
+        {
+          "name": "punctuation.separator.rapira",
+          "match": "[:,]"
+        }
+      ]
+    },
+    "type-like-identifiers": {
+      "patterns": [
+        {
+          "name": "entity.name.type.rapira",
+          "match": "(?<![\\p{L}\\p{N}_])[A-ZА-ЯЁ][\\p{L}\\p{N}_]*(?![\\p{L}\\p{N}_])"
+        }
+      ]
+    }
+  }
+}

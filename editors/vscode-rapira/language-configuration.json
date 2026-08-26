@@ -1,0 +1,23 @@
+{
+  "comments": {
+    "lineComment": "\\"
+  },
+  "brackets": [
+    ["(", ")"],
+    ["[", "]"]
+  ],
+  "autoClosingPairs": [
+    ["(", ")"],
+    ["[", "]"],
+    ["\"", "\""]
+  ],
+  "surroundingPairs": [
+    ["(", ")"],
+    ["[", "]"],
+    ["\"", "\""]
+  ],
+  "indentationRules": {
+    "increaseIndentPattern": "^\\s*(?:если\\b.*\\bто|иначе\\b.*|(?:для|пока|повтор)\\b.*\\bцикл|функ\\b.*|тип\\b.*|выбор\\b.*|при\\b.*:)\\s*(?:\\\\.*)?$",
+    "decreaseIndentPattern": "^\\s*(?:иначе|при)\\b.*$"
+  }
+}

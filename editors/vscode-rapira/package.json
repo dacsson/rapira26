@@ -1,0 +1,37 @@
+{
+  "name": "rapira-language-support",
+  "displayName": "Rapira Language Support",
+  "description": "Syntax highlighting and editor configuration for Rapira.",
+  "version": "0.1.0",
+  "publisher": "rapira",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "rapira",
+        "aliases": [
+          "Rapira",
+          "рапира"
+        ],
+        "extensions": [
+          ".rap",
+          ".рап"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "rapira",
+        "scopeName": "source.rapira",
+        "path": "./syntaxes/rapira.tmLanguage.json"
+      }
+    ]
+  }
+}
