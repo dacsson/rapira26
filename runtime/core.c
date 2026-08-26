@@ -184,19 +184,12 @@ RAP_Value RAP_create_null_obj(void) {
 }
 
 RAP_Value RAP_create_int_obj(int64_t value) {
-  // TODO: BigInts check
-  // if (value > INT32_MAX) {
-  //   // Heap allocate 64 bit ints
-  //   RAP_TRACK_ALLOC();
-  //   RAP_Object *obj = malloc(sizeof(RAP_Object));
-  //   obj->tag = RAP_OBJECT_TAG_INT;
-  //   obj->int_val = value;
-  //   obj->refcount = 1;
-  //   return RAP_CREATE_PTR(obj);
-  // }
-  // SMI tagged
-  RAP_Value obj = RAP_CREATE_SMI(value);
-  return obj;
+  // FIXME: remove when tagger ptr compression is implemented
+  // TODO: BigInts heap alloc
+  if (!RAP_SMI_FITS(value)) {
+    RAP_fatal_error("Целое число вне допустимого диапазона");
+  }
+  return RAP_CREATE_SMI(value);
 }
 
 RAP_Value RAP_create_float_obj(double value) {
@@ -385,7 +378,7 @@ void RAP_free_object(RAP_Object *obj) {
 RAP_Value RAP_get_objects_refcount(RAP_Value obj) {
   if (!RAP_IS_PTR(obj))
     return 0;
-  return RAP_CREATE_SMI(RAP_PTR_VALUE(obj)->refcount);
+  return RAP_create_int_obj(RAP_PTR_VALUE(obj)->refcount);
 }
 
 const char* RAP_type_to_string(RAP_ObjectTag tag) {

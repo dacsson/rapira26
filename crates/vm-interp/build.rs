@@ -3,12 +3,13 @@ use std::path::PathBuf;
 
 fn main() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    // let wrapper_header = format!("{manifest_dir}/../runtime-c/rt.h");
     let wrapper_header = format!("{manifest_dir}/../../runtime/runtime.h");
+    let target = env::var("TARGET").expect("Cargo did not provide TARGET");
+    let host = env::var("HOST").expect("Cargo did not provide HOST");
+    let is_wasi = target == "wasm32-wasip1";
+    let runtime_library_dir = if is_wasi { "lib-wasm" } else { "lib" };
 
-    // Tell cargo to look for shared libraries in the specified directory
-    // println!("cargo:rustc-link-search={manifest_dir}/../runtime-c/");
-    println!("cargo:rustc-link-search={manifest_dir}/../../runtime/lib");
+    println!("cargo:rustc-link-search={manifest_dir}/../../runtime/{runtime_library_dir}");
 
     // Tell cargo to tell rustc to link the system bzip2
     // shared library.
@@ -17,21 +18,29 @@ fn main() {
     // `raperr` diagnostic crate's objects into it, so no separate link needed.
     println!("cargo:rustc-link-lib=rapruntime");
 
-    // GC-specific linker flags
-    println!("cargo:rustc-link-arg=-znostart-stop-gc");
-    println!("cargo:rustc-link-arg=-Wl,--defsym=__start_custom_data=0");
-    println!("cargo:rustc-link-arg=-Wl,--defsym=__stop_custom_data=0");
-
     // The bindgen::Builder is the main entry point
     // to bindgen, and lets you build up options for
     // the resulting bindings.
-    let bindings = bindgen::Builder::default()
+    let bindings_builder = bindgen::Builder::default()
         .use_core()
         // The input header we would like to generate
         // bindings for.
         .header(wrapper_header)
-        // Tell cargo to invalidate the built crate whenever any of the
-        // included header files changed.
+        .clang_arg(format!("--target={host}"))
+        .allowlist_type("RAP_Value")
+        .allowlist_type("RAP_Object")
+        .allowlist_var("RAP_TAG_MASK")
+        .allowlist_function("RAP_.*")
+        // FIXME: for some reason when i directly use WASI as a target
+        // the bindings for functions are not generated, so we use this workaround
+        // untill i wrap my head why its happening
+        .opaque_type("RAP_Object")
+        .opaque_type("RAP_Callable")
+        .opaque_type("RAP_Tuple")
+        .opaque_type("RAP_Slice")
+        .opaque_type("RAP_Variant");
+
+    let bindings = bindings_builder
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         // Finish the builder and generate the bindings.
         .generate()

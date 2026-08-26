@@ -27,6 +27,7 @@ const MAX_OPERAND_STACK_SIZE: usize = 1024 * 64; // 0x7fffffff;
 
 const INVALID_HANDLER: u8 = u8::MAX;
 
+// TODO: look into `extern "rust-preserve-none"`
 const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 41] = [
     Interpreter::eval_nop,
     Interpreter::eval_end,

@@ -3,6 +3,8 @@
 #![allow(non_snake_case)]
 #![feature(explicit_tail_calls)]
 #![feature(array_repeat)]
+// TODO: explore this feat
+// #![feature(rust_preserve_none_cc)]
 
 mod frame;
 pub mod interpreter;

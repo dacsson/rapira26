@@ -42,7 +42,21 @@ impl Object {
     ///
     /// Mirrors `RAP_CREATE_SMI` from `runtime/rapvalue.h`.
     pub fn new_boxed(value: i64) -> Self {
-        Object((value << 32) as usize)
+        #[cfg(target_pointer_width = "64")]
+        {
+            Object((value as usize) << 32)
+        }
+
+        // FIXME: unlock when tagged ptr compression is implemented
+        #[cfg(target_pointer_width = "32")]
+        {
+            assert!(
+                value <= (i32::MAX as i64) && value >= (i32::MIN as i64),
+                "integer {} is outside the 30-bit SMI range",
+                value
+            );
+            Object((value as i32 as u32 as usize) << 2)
+        }
     }
 
     /// Create a new boolean object.
@@ -72,7 +86,15 @@ impl Object {
 
     /// Extract the integer from a SMI. Mirrors `RAP_SMI_VALUE`.
     pub fn unbox(&self) -> i64 {
-        (self.0 as i64) >> 32
+        #[cfg(target_pointer_width = "64")]
+        {
+            (self.0 as i64) >> 32
+        }
+
+        #[cfg(target_pointer_width = "32")]
+        {
+            (self.0 as i32 / 4) as i64
+        }
     }
 
     /// Unbox as boolean

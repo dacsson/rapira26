@@ -3,7 +3,7 @@
 //! The bytecode itself is an adopted/reworked version of LaMa VM bytecode.
 //! To explore the bytecode format, see the `vm-core` crate.
 
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashMap;
 
 use vm_core::{
     bytecode::{
@@ -17,7 +17,7 @@ use crate::{
         BinaryOperator, Expr, FunctionDefinition, LValue, Literal, LoopHeader, LoopStatement,
         SelectionStatement, Spannable, Statement, TypeDefinition, UnaryOperator,
     },
-    codegen::{AbsolutGeneratedCodePath, CodegenTarget, ModuleMap, RunError},
+    codegen::{CodegenTarget, ModuleMap},
     module::Module,
 };
 
@@ -1149,20 +1149,6 @@ impl CodegenTarget for BcGen {
         module_map.insert(output_path, self.bytefile.encode());
 
         module_map
-    }
-
-    fn compile(
-        &mut self,
-        modules_codes: ModuleMap,
-        current_dir: &PathBuf,
-        dump: bool,
-    ) -> Result<Vec<AbsolutGeneratedCodePath>, RunError> {
-        let (module_path, bytefile) = modules_codes.iter().next().unwrap();
-        let module_path = module_path.clone().0;
-        let bytefile_path = module_path.with_extension("rbc");
-        std::fs::write(&bytefile_path, bytefile).unwrap();
-
-        Ok(vec![AbsolutGeneratedCodePath(bytefile_path)])
     }
 
     fn emit_function_def(
