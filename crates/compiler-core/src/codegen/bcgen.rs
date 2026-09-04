@@ -460,6 +460,10 @@ impl BcGen {
                         instrs.extend(self.emit_expr(index));
                         instrs.push(Instruction::LOAD { rel, index: vindex });
                         instrs.push(Instruction::STA);
+                        // Assignment is a statement. STA returns the mutated
+                        // aggregate for expression-style use, so discard it
+                        // here to keep the operand stack balanced.
+                        instrs.push(Instruction::DROP);
                     }
                     LValue::Slice {
                         collection,

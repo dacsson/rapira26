@@ -35,6 +35,10 @@ struct Cli {
     #[arg(long)]
     дамп_код: bool,
 
+    /// Сохранить сгенерированный байткод в файл и выйти
+    #[arg(long, value_name = "ФАЙЛ")]
+    сохранить_байткод: Option<PathBuf>,
+
     /// Скомпилировать и запустить программу
     #[arg(long)]
     запуск: bool,
@@ -157,6 +161,34 @@ fn main() {
     let cli = Cli::parse();
     env_logger::init();
 
+    if cli.дамп_код && cli.сохранить_байткод.is_some() {
+        eprintln!("Нельзя одновременно дампить и сохранять байткод");
+        std::process::exit(2);
+    }
+
+    // Running a pre-compiled bytecode file
+    if cli.файлы.first().is_some_and(|file| {
+        file.extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("rbc"))
+    }) {
+        if cli.сохранить_байткод.is_some() {
+            eprintln!("Нельзя сохранять уже скомпилированный байткод");
+            std::process::exit(2);
+        }
+        if cli.файлы.len() > 1 {
+            eprintln!("Только один байтфайл можно запустить")
+        }
+
+        let file = cli.файлы.first().unwrap();
+        let bytes = std::fs::read(file).expect("чего-то с файлом");
+
+        run_interpreter_bytes(bytes, cli.дамп_код).unwrap_or_else(|error| {
+            eprintln!("Интерпретатор не справился: {error}");
+            std::process::exit(1);
+        });
+        return;
+    }
+
     let module_resolver = ModuleResolver::from_cli(&cli);
 
     let mut modules = Vec::new();
@@ -251,6 +283,15 @@ fn main() {
                     eprintln!("Кодоген не создал байткод");
                     std::process::exit(1);
                 });
+
+            if let Some(output_path) = cli.сохранить_байткод {
+                std::fs::write(&output_path, bytefile).unwrap_or_else(|error| {
+                    eprintln!("Не удалось сохранить байткод в {:?}: {error}", output_path);
+                    std::process::exit(1);
+                });
+                return;
+            }
+
             run_interpreter_bytes(bytefile, cli.дамп_код).unwrap_or_else(|error| {
                 eprintln!("Интерпретатор не справился: {error}");
                 std::process::exit(1);

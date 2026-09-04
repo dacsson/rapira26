@@ -8,14 +8,13 @@ fn main() {
     let host = env::var("HOST").expect("Cargo did not provide HOST");
     let is_wasi = target == "wasm32-wasip1";
     let runtime_library_dir = if is_wasi { "lib-wasm" } else { "lib" };
+    let runtime_library =
+        format!("{manifest_dir}/../../runtime/{runtime_library_dir}/librapruntime.a");
 
     println!("cargo:rustc-link-search={manifest_dir}/../../runtime/{runtime_library_dir}");
+    // Rebuild on runtime library changes
+    println!("cargo:rerun-if-changed={runtime_library}");
 
-    // Tell cargo to tell rustc to link the system bzip2
-    // shared library.
-    // println!("cargo:rustc-link-lib=lamart");
-    // librapruntime.a is self-contained: the runtime's Makefile merges the
-    // `raperr` diagnostic crate's objects into it, so no separate link needed.
     println!("cargo:rustc-link-lib=rapruntime");
 
     // The bindgen::Builder is the main entry point

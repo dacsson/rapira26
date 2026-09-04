@@ -11,6 +11,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use compiler_core::codegen::bcgen::BcGen;
+use compiler_core::codegen::run_codegen;
+use compiler_core::lexer::Lexer;
+use compiler_core::parser::Parser;
+
 /// Parse expected output from `\ => ...` comments in a Rapira source file.
 fn parse_expected_output(source: &str) -> String {
     let mut lines = Vec::new();
@@ -159,6 +164,85 @@ fn assert_rap_output(filename: &str) {
 }
 
 // ── Tests ──────────────────────────────────────────────────────
+
+#[test]
+fn e2e_runs_precompiled_rbc_file() {
+    let temp_dir = std::env::temp_dir().join(format!("rapira26_rbc_{}", std::process::id()));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let source_path = temp_dir.join("precompiled.rap");
+    let bytefile_path = source_path.with_extension("rbc");
+    let source = "вывод: 6 * 7\n";
+    let module = Parser::new(Lexer::new(source), source_path.clone())
+        .parse_program()
+        .unwrap();
+    let bytefile = run_codegen(&mut BcGen::new(), vec![module])
+        .remove(&compiler_core::module::AbsolutModulePath(source_path))
+        .unwrap();
+    std::fs::write(&bytefile_path, bytefile).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_рапик"))
+        .arg(&bytefile_path)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "рапик failed:\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
+
+    std::fs::remove_file(bytefile_path).unwrap();
+    std::fs::remove_dir(temp_dir).unwrap();
+}
+
+#[test]
+fn e2e_saves_precompiled_rbc_file() {
+    let temp_dir = std::env::temp_dir().join(format!("rapira26_rbc_output_{}", std::process::id()));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let source_path = temp_dir.join("precompiled.rap");
+    let bytefile_path = source_path.with_extension("rbc");
+    std::fs::write(&source_path, "вывод: 6 * 7\n").unwrap();
+
+    let compile_output = Command::new(env!("CARGO_BIN_EXE_рапик"))
+        .arg(&source_path)
+        .arg("--сохранить-байткод")
+        .arg(&bytefile_path)
+        .output()
+        .unwrap();
+    assert!(
+        compile_output.status.success(),
+        "рапик failed:\nstderr: {}",
+        String::from_utf8_lossy(&compile_output.stderr)
+    );
+    assert!(compile_output.stdout.is_empty());
+
+    let run_output = Command::new(env!("CARGO_BIN_EXE_рапик"))
+        .arg(&bytefile_path)
+        .output()
+        .unwrap();
+    assert!(
+        run_output.status.success(),
+        "рапик failed:\nstderr: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run_output.stdout), "42\n");
+
+    let invalid_output = Command::new(env!("CARGO_BIN_EXE_рапик"))
+        .arg(&bytefile_path)
+        .arg("--сохранить-байткод")
+        .arg(temp_dir.join("copy.rbc"))
+        .output()
+        .unwrap();
+    assert!(!invalid_output.status.success());
+    assert!(String::from_utf8_lossy(&invalid_output.stderr).contains("Нельзя сохранять"));
+
+    std::fs::remove_file(source_path).unwrap();
+    std::fs::remove_file(bytefile_path).unwrap();
+    std::fs::remove_dir(temp_dir).unwrap();
+}
 
 #[test]
 fn e2e_01_output_and_literals() {

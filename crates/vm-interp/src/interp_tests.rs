@@ -220,6 +220,24 @@ fn eval_tuple_length_and_element_lookup() -> Result<(), Box<dyn std::error::Erro
 }
 
 #[test]
+fn eval_tuple_assignment_keeps_returned_aggregate_alive() -> Result<(), Box<dyn std::error::Error>>
+{
+    let element = evaluate(&[
+        Instruction::CONST { value: 9 },
+        Instruction::CONST { value: 0 },
+        Instruction::CONST { value: 1 },
+        Instruction::CONST { value: 2 },
+        Instruction::TUPLE { n: 2 },
+        Instruction::STA,
+        Instruction::CONST { value: 0 },
+        Instruction::ELEM,
+    ])?;
+    assert_eq!(smi(element), 9);
+
+    Ok(())
+}
+
+#[test]
 fn eval_integer_math_builtins() -> Result<(), Box<dyn std::error::Error>> {
     let result = evaluate(&[
         Instruction::CONST { value: -7 },

@@ -6,4 +6,6 @@
 /example
 /runtime/build
 /runtime/lib
+/benchmarks/.build
+/benchmarks/.results
 Cargo.lock

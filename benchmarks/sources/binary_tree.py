@@ -23,8 +23,8 @@ min_depth = 4
 max_depth = max(min_depth + 2, int(sys.argv[1]))
 stretch_depth = max_depth + 1
 
-print("stretch tree of depth %d\t check:" %
-    stretch_depth, check_tree(make_tree(stretch_depth)))
+print("стретч дерево глубиной", stretch_depth, end="")
+print(" проверил:", check_tree(make_tree(stretch_depth)))
 
 long_lived_tree = make_tree(max_depth)
 
@@ -36,8 +36,7 @@ for depth in range(min_depth, stretch_depth, 2):
     for i in range(1, iterations + 1):
         check += check_tree(make_tree(depth))
 
-    print("%d\t trees of depth %d\t check:" % (iterations, depth), check)
+    print(iterations, "деревьев глубиной", depth, "поверили", check)
     iterations //= 4
 
-print("long lived tree of depth %d\t check:" %
-    max_depth, check_tree(long_lived_tree))
+print("старое дерево глубиной", max_depth, "поверили", check_tree(long_lived_tree))

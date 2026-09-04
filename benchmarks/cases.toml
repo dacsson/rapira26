@@ -1,0 +1,52 @@
+[[case]]
+name = "mandelbrot"
+rapira_source = "benchmarks/sources/мандельброт.рап"
+python_source = "benchmarks/sources/мандельброт.py"
+rapira_stdin = "100\n"
+python_stdin = "100\n"
+output_sha256 = "a7a2bfe7cb927b7488232b7f56041ac3c72190f75ccf39765db95e078a1c29d3"
+tags = ["float", "loops"]
+
+[[case]]
+name = "fibonacci"
+rapira_source = "benchmarks/sources/int_fib_mod.рап"
+python_source = "benchmarks/sources/int_fib_mod.py"
+output_sha256 = "1486500224d2ca7494b4bde60fff5743334ad63e0a5e2b83653d1a75b009070c"
+tags = ["integer", "loops"]
+
+[[case]]
+name = "binary-tree"
+rapira_source = "benchmarks/sources/binary_tree.rap"
+python_source = "benchmarks/sources/binary_tree.py"
+rapira_stdin = "18\n"
+python_args = ["18"]
+output_sha256 = "35c1e2a47f64aedfc4f1bf009ed5df059ac9332dfb6372e87723313e5747a719"
+tags = ["allocation", "recursion"]
+
+[[case]]
+name = "nbody"
+rapira_source = "benchmarks/sources/nbody.рап"
+python_source = "benchmarks/sources/nbody.py"
+rapira_stdin = "100000\n"
+python_stdin = "100000\n"
+output_sha256 = "4d83956b26b5c655170449296289f9d120eee2268cf229be4142edf40433bb87"
+tags = ["float", "loops", "tuple"]
+
+[[case]]
+name = "fannkuch-redux"
+rapira_source = "benchmarks/sources/fannkuch_redux.рап"
+python_source = "benchmarks/sources/fannkuch_redux.py"
+rapira_stdin = "9\n"
+python_stdin = "9\n"
+output_sha256 = "8240a83dc671a1906b1f4ce51a46866362bec862c62128f4429ec1f3e7bf1bb8"
+tags = ["integer", "loops", "tuple", "branches"]
+
+[[case]]
+name = "reverse-complement"
+rapira_source = "benchmarks/sources/reverse_complement.рап"
+python_source = "benchmarks/sources/reverse_complement.py"
+# Generated with: python3 benchmarks/sources/fasta.py 250000
+# TODO: bump this number when we are not so...slow...
+stdin_file = "benchmarks/inputs/reverse_complement.fasta"
+output_sha256 = "8722f28c80fa027f2ca82557e4cb56d854f3d7e908be8d6aaa303423de2efc15"
+tags = ["text", "allocation", "loops", "branches", "io"]

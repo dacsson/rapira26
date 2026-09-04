@@ -1,0 +1,71 @@
+\ The Computer Language Benchmarks Game Fannkuch-redux benchmark.
+\ Naive transliteration from Rex Kerr's Scala program, contributed by
+\ Isaac Gouy and ported to Rapira26.
+
+функ fannkuch(n)
+    perm1 := (0,) * n
+    для i от 0 до n - 1 цикл
+        perm1[i] = i
+
+    perm := (0,) * n
+    count := (0,) * n
+    flips := 0
+    nperm := 0
+    checksum := 0
+    r := n
+
+    пока r > 0 цикл
+        i := 0
+        пока r /= 1 цикл
+            count[r - 1] = r
+            r = r - 1
+
+        пока i < n цикл
+            perm[i] = perm1[i]
+            i = i + 1
+
+        f := 0
+        k := perm[0]
+        пока k /= 0 цикл
+            i = 0
+            пока 2 * i < k цикл
+                t := perm[i]
+                perm[i] = perm[k - i]
+                perm[k - i] = t
+                i = i + 1
+            k = perm[0]
+            f = f + 1
+
+        если f > flips то
+            flips = f
+        если nperm /% 2 == 0 то
+            checksum = checksum + f
+        иначе
+            checksum = checksum - f
+
+        продолжать := да
+        пока продолжать цикл
+            если r == n то
+                вывод: checksum
+                возврат flips
+
+            p0 := perm1[0]
+            i = 0
+            пока i < r цикл
+                j := i + 1
+                perm1[i] = perm1[j]
+                i = j
+
+            perm1[r] = p0
+            count[r] = count[r] - 1
+            если count[r] > 0 то
+                продолжать = нет
+            иначе
+                r = r + 1
+
+        nperm = nperm + 1
+
+    возврат flips
+
+ввод: n
+вывод: "Pfannkuchen(", n, ") = ", fannkuch(n)

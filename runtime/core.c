@@ -277,7 +277,9 @@ char *RAP_stringify_object(RAP_Value obj) {
   }
   case RAP_OBJECT_TAG_SLICE: {
     RAP_Value materialized = RAP_materialize_slice(obj_ptr);
-    return RAP_stringify_object(materialized);
+    char *result = RAP_stringify_object(materialized);
+    RAP_dec_ref(materialized);
+    return result;
   }
   case RAP_OBJECT_TAG_CALLABLE: {
     return strdup("<функция>");

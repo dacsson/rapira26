@@ -253,6 +253,7 @@ RAP_Value RAP_materialize_slice(RAP_Object *obj) {
     RAP_TRACK_ALLOC();
     RAP_Object *result = malloc(sizeof(RAP_Object));
     result->tag = RAP_OBJECT_TAG_TEXT;
+    result->refcount = 1;
     result->text_val = malloc(sizeof(struct RAP_Tuple));
     result->text_val->count = new_count;
     result->text_val->items = items;

@@ -1062,9 +1062,9 @@ impl Interpreter {
 
         let obj = unsafe { RAP_set_tuple_item(aggregate.raw(), index.unbox() as u32, value.raw()) };
 
+        // RAP_set_tuple_item returns the same aggregate.
         self.push(Object::new(obj))?;
 
-        Self::dec_ref_if_ptr(aggregate);
         Self::dec_ref_if_ptr(index);
         Self::dec_ref_if_ptr(value);
 
