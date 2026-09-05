@@ -13,6 +13,7 @@ use crate::{
     RAP_subtract, isPtr, isSMI,
 };
 use core::ffi::{CStr, c_char};
+use core::hint::unlikely;
 use std::ffi::CString;
 use vm_core::bytecode::{
     Builtin, CompareJumpKind, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, UnaryOp,
@@ -1335,11 +1336,11 @@ impl Interpreter {
     /// Push to the operand stack
     #[inline(always)]
     fn push(&mut self, obj: Object) -> Result<(), InterpreterError> {
-        if self.operand_stack.len() >= MAX_OPERAND_STACK_SIZE {
+        if unlikely(self.operand_stack.len() >= MAX_OPERAND_STACK_SIZE) {
             return Err(InterpreterError::StackOverflow);
         }
 
-        if (self.operand_stack.len() - 1) <= self.global_areas_size {
+        if unlikely((self.operand_stack.len() - 1) <= self.global_areas_size) {
             return Err(InterpreterError::StackUnderflow);
         }
 
@@ -1351,7 +1352,7 @@ impl Interpreter {
     /// Pop from the operand stack
     #[inline(always)]
     fn pop(&mut self) -> Result<Object, InterpreterError> {
-        if (self.operand_stack.len() - 1) <= self.global_areas_size {
+        if unlikely((self.operand_stack.len() - 1) <= self.global_areas_size) {
             return Err(InterpreterError::StackUnderflow);
         }
 

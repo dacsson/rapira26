@@ -231,6 +231,7 @@ RAP_Value RAP_multiply(RAP_Value a, RAP_Value b) {
     RAP_Object *result = malloc(sizeof(RAP_Object));
     result->tag = RAP_OBJECT_TAG_TEXT;
     result->text_val = malloc(sizeof(struct RAP_Tuple));
+    result->refcount = 1;
     result->text_val->count = new_count;
     result->text_val->items = items;
     return RAP_CREATE_PTR(result);

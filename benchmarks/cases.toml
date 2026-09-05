@@ -2,16 +2,16 @@
 name = "mandelbrot"
 rapira_source = "benchmarks/sources/мандельброт.рап"
 python_source = "benchmarks/sources/мандельброт.py"
-rapira_stdin = "100\n"
-python_stdin = "100\n"
-output_sha256 = "a7a2bfe7cb927b7488232b7f56041ac3c72190f75ccf39765db95e078a1c29d3"
+rapira_stdin = "190\n"
+python_stdin = "190\n"
+output_sha256 = "93fb065e7e472121f01e73881a946acaef3b1205121f71f7ac8c6410fd7f3e6b"
 tags = ["float", "loops"]
 
 [[case]]
 name = "fibonacci"
 rapira_source = "benchmarks/sources/int_fib_mod.рап"
 python_source = "benchmarks/sources/int_fib_mod.py"
-output_sha256 = "1486500224d2ca7494b4bde60fff5743334ad63e0a5e2b83653d1a75b009070c"
+output_sha256 = "443e206d0d30eae3c8bd5c472cd501978a74ddb9d674827d43aa51322aa930ee"
 tags = ["integer", "loops"]
 
 [[case]]
@@ -27,18 +27,18 @@ tags = ["allocation", "recursion"]
 name = "nbody"
 rapira_source = "benchmarks/sources/nbody.рап"
 python_source = "benchmarks/sources/nbody.py"
-rapira_stdin = "100000\n"
-python_stdin = "100000\n"
-output_sha256 = "4d83956b26b5c655170449296289f9d120eee2268cf229be4142edf40433bb87"
+rapira_stdin = "400000\n"
+python_stdin = "400000\n"
+output_sha256 = "bb95e5b4a695aecad180818ca9cc67aa2ac84ed7d24e1e7d329c5369125f8e8c"
 tags = ["float", "loops", "tuple"]
 
 [[case]]
 name = "fannkuch-redux"
 rapira_source = "benchmarks/sources/fannkuch_redux.рап"
 python_source = "benchmarks/sources/fannkuch_redux.py"
-rapira_stdin = "9\n"
-python_stdin = "9\n"
-output_sha256 = "8240a83dc671a1906b1f4ce51a46866362bec862c62128f4429ec1f3e7bf1bb8"
+rapira_stdin = "10\n"
+python_stdin = "10\n"
+output_sha256 = "26f4debed9b9f8db7609e17f35756a3f72c1d85d40977a4377a1ef34ffc4d4c8"
 tags = ["integer", "loops", "tuple", "branches"]
 
 [[case]]

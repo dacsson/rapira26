@@ -2,23 +2,24 @@
 
 ## Results
 
-3-warmup, 15-sample method:
+3-warmup, 5-sample method:
 
-| Benchmark | Python | End-to-end | VM-only | E2E/Python | VM/Python |
+| Benchmark | Python | Rapira26 E2E | Rapira26 VM-only | E2E/Python | VM/Python |
 |---|---:|---:|---:|---:|---:|
-| mandelbrot | 0.3061 s | 1.5720 s | 1.5746 s | 5.14 | 5.14 |
-| fibonacci | 0.4418 s | 0.3947 s | 0.3922 s | 0.89 | 0.89 |
-| binary-tree | 4.1143 s | 14.1997 s | 14.7033 s | 3.45 | 3.57 |
-| nbody | 0.4165 s | 1.4237 s | 1.4669 s | 3.42 | 3.52 |
-| fannkuch-redux | 0.4201 s | 1.0048 s | 1.0112 s | 2.39 | 2.41 |
-| reverse-complement | 0.0244 s | 2.4052 s | 2.4070 s | 98.63 | 98.70 |
+| mandelbrot | 1.0844 s | 5.3999 s | 5.4126 s | 4.98 | 4.99 |
+| fibonacci | 5.9731 s | 5.2093 s | 5.2340 s | 0.87 | 0.88 |
+| binary-tree | 4.0844 s | 12.7725 s | 12.7674 s | 3.13 | 3.13 |
+| nbody | 1.4607 s | 5.4698 s | 5.4725 s | 3.74 | 3.75 |
+| fannkuch-redux | 4.6351 s | 11.5986 s | 11.5811 s | 2.50 | 2.50 |
+| reverse-complement | 0.0266 s | 1.9473 s | 2.0369 s | 73.29 | 76.67 |
 
 ## Version
 
-- Run timestamp: `2026-09-04T20:13:04.603086+00:00`
-- Git commit: `a833cf0c9d184a3424fbecb50b97d4a80727673d`
-- Commit message: `[org] Mention demos from playground`
-- Commit date: `2026-08-27T16:42:55+03:00`
+- Run timestamp: `2026-09-05T15:46:02.151105+00:00`
+- Reverse-complement run timestamp: `2026-09-05T16:14:25.455483+00:00`
+- Git commit: `2a6e7a79ab3b89eae049b39d2b4337386a392eeb`
+- Commit message: `[doc] Separate modules description, mention (dare i say to our decrement) current performance numbers`
+- Commit date: `2026-09-04T23:43:56+03:00`
 
 ## Environment
 
@@ -32,10 +33,16 @@
 Command:
 
 ```bash
-python3 -B benchmarks/bench.py run
+python3 -B benchmarks/bench.py run --samples 5
 ```
 
-Each result is the median of 15 measured executions after 3 warmups. Before
+The refreshed reverse-complement row used:
+
+```bash
+python3 -B benchmarks/bench.py --no-build --case reverse-complement run --samples 5
+```
+
+Each result is the median of 5 measured executions after 3 warmups. Before
 timing, the runner validated Python, Rapira source execution, and precompiled
 RBC output against the SHA-256 values in `benchmarks/cases.toml`.
 

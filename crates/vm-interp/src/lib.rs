@@ -3,6 +3,7 @@
 #![allow(non_snake_case)]
 #![feature(explicit_tail_calls)]
 #![feature(array_repeat)]
+#![feature(likely_unlikely)]
 // TODO: explore this feat
 // #![feature(rust_preserve_none_cc)]
 
