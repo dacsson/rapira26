@@ -211,6 +211,40 @@ impl Decoder {
                 value: self.next::<u8>()? != 0,
             }),
             (0x70, 0x6) => Ok(Instruction::NULL),
+            (0x80, 0x1) => Ok(Instruction::BINOP_LOCAL_LOCAL {
+                rhs_index: self.next::<i32>()?,
+                lhs_index: self.next::<i32>()?,
+                op: self
+                    .next::<u8>()?
+                    .try_into()
+                    .map_err(|_| DecoderError::from(byte))?,
+            }),
+            (0x80, 0x2) => Ok(Instruction::BINOP_LOCAL_CONST {
+                index: self.next::<i32>()?,
+                op: self
+                    .next::<u8>()?
+                    .try_into()
+                    .map_err(|_| DecoderError::from(byte))?,
+                value: self.next::<i32>()?,
+            }),
+            (0x80, 0x3) => Ok(Instruction::BINOP_LOCAL_LOCAL_STORE {
+                rhs_index: self.next::<i32>()?,
+                lhs_index: self.next::<i32>()?,
+                dst_index: self.next::<i32>()?,
+                op: self
+                    .next::<u8>()?
+                    .try_into()
+                    .map_err(|_| DecoderError::from(byte))?,
+            }),
+            (0x80, 0x4) => Ok(Instruction::BINOP_LOCAL_CONST_STORE {
+                index: self.next::<i32>()?,
+                dst_index: self.next::<i32>()?,
+                op: self
+                    .next::<u8>()?
+                    .try_into()
+                    .map_err(|_| DecoderError::from(byte))?,
+                value: self.next::<i32>()?,
+            }),
             _ => Err(DecoderError::InvalidOpcode(byte)),
         }
     }
@@ -371,8 +405,6 @@ impl Decoder {
                 let name_: &i32 = name.into();
                 buf.push(0x70 | (*name_ as u8));
 
-                // println!("{:?} to u8: {:x}", name, *name_ as u8);
-
                 // NOTE: not all builtins need to push n,
                 // however some use this as arg count as well as
                 // pack their flags into the lower bits of the opcode
@@ -389,7 +421,50 @@ impl Decoder {
                 buf.push(0x76);
             }
             Instruction::LABEL { .. } => {}
-            _ => return Err(DecoderError::InvalidInstruction(instruction.clone())),
+            Instruction::BINOP_LOCAL_LOCAL {
+                rhs_index,
+                lhs_index,
+                op,
+            } => {
+                buf.push(0x81);
+                buf.extend(&rhs_index.to_le_bytes());
+                buf.extend(&lhs_index.to_le_bytes());
+                let op: &i32 = op.into();
+                buf.push((*op as u8) + 1);
+            }
+            Instruction::BINOP_LOCAL_CONST { index, op, value } => {
+                buf.push(0x82);
+                buf.extend(&index.to_le_bytes());
+                let op: &i32 = op.into();
+                buf.push((*op as u8) + 1);
+                buf.extend(&value.to_le_bytes());
+            }
+            Instruction::BINOP_LOCAL_LOCAL_STORE {
+                rhs_index,
+                lhs_index,
+                dst_index,
+                op,
+            } => {
+                buf.push(0x83);
+                buf.extend(&rhs_index.to_le_bytes());
+                buf.extend(&lhs_index.to_le_bytes());
+                buf.extend(&dst_index.to_le_bytes());
+                let op: &i32 = op.into();
+                buf.push((*op as u8) + 1);
+            }
+            Instruction::BINOP_LOCAL_CONST_STORE {
+                index,
+                dst_index,
+                op,
+                value,
+            } => {
+                buf.push(0x84);
+                buf.extend(&index.to_le_bytes());
+                buf.extend(&dst_index.to_le_bytes());
+                let op: &i32 = op.into();
+                buf.push((*op as u8) + 1);
+                buf.extend(&value.to_le_bytes());
+            } // _ => return Err(DecoderError::InvalidInstruction(instruction.clone())),
         }
 
         Ok(buf)

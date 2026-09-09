@@ -251,6 +251,32 @@ pub enum Instruction {
     ISVARIANT {
         schema: i32,
     },
+    /// Super instruction for binary operations on `local op local`
+    BINOP_LOCAL_LOCAL {
+        rhs_index: i32,
+        lhs_index: i32,
+        op: Op,
+    },
+    /// Super instruction for binary operations on `local op constant`
+    BINOP_LOCAL_CONST {
+        index: i32,
+        op: Op,
+        value: i32,
+    },
+    /// Super instruction for binary operations on `local op local` and store result
+    BINOP_LOCAL_LOCAL_STORE {
+        rhs_index: i32,
+        lhs_index: i32,
+        dst_index: i32,
+        op: Op,
+    },
+    /// Super instruction for binary operations on `local op constant` and store result
+    BINOP_LOCAL_CONST_STORE {
+        index: i32,
+        dst_index: i32,
+        op: Op,
+        value: i32,
+    },
 }
 
 /// Usefull feature to convert subopcode of
@@ -476,6 +502,46 @@ impl fmt::Display for Instruction {
             Instruction::FIELD { index } => write!(f, "FIELD {}", index),
             Instruction::SETFIELD { index } => write!(f, "SETFIELD {}", index),
             Instruction::ISVARIANT { schema } => write!(f, "ISVARIANT {}", schema),
+            Instruction::BINOP_LOCAL_LOCAL {
+                rhs_index,
+                lhs_index,
+                op,
+            } => write!(
+                f,
+                "BINOP_LOCAL_LOCAL rhs={} lhs={} op={:#?}",
+                rhs_index, lhs_index, op
+            ),
+            Instruction::BINOP_LOCAL_CONST { index, op, value } => {
+                write!(
+                    f,
+                    "BINOP_LOCAL_CONST index={} op={:#?} {}",
+                    index, op, value
+                )
+            }
+            Instruction::BINOP_LOCAL_LOCAL_STORE {
+                rhs_index,
+                lhs_index,
+                dst_index,
+                op,
+            } => {
+                write!(
+                    f,
+                    "BINOP_LOCAL_LOCAL_STORE rhs={} lhs={} dst={} op={:#?}",
+                    rhs_index, lhs_index, dst_index, op
+                )
+            }
+            Instruction::BINOP_LOCAL_CONST_STORE {
+                index,
+                dst_index,
+                op,
+                value,
+            } => {
+                write!(
+                    f,
+                    "BINOP_LOCAL_CONST_STORE index={} dst={} op={:#?} {}",
+                    index, dst_index, op, value
+                )
+            }
         }
     }
 }

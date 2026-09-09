@@ -16,7 +16,7 @@ use core::ffi::{CStr, c_char};
 use core::hint::unlikely;
 use std::ffi::CString;
 use vm_core::bytecode::{
-    Builtin, CompareJumpKind, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, UnaryOp,
+    Builtin, CompareJumpKind, Instruction, LWRITE_NEWLINE_FLAG, LWRITE_NEWLINE_MASK, Op, UnaryOp,
 };
 use vm_core::decoder::{Decoder, DecoderError};
 
@@ -29,7 +29,7 @@ const MAX_OPERAND_STACK_SIZE: usize = 1024 * 64; // 0x7fffffff;
 const INVALID_HANDLER: u8 = u8::MAX;
 
 // TODO: look into `extern "rust-preserve-none"`
-const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 41] = [
+const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 45] = [
     Interpreter::eval_nop,
     Interpreter::eval_end,
     Interpreter::eval_binop,
@@ -73,6 +73,10 @@ const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 41]
     Interpreter::eval_field,
     Interpreter::eval_set_field,
     Interpreter::eval_is_variant,
+    Interpreter::eval_binop_local_local,
+    Interpreter::eval_binop_local_const,
+    Interpreter::eval_binop_local_local_store,
+    Interpreter::eval_binop_local_const_store,
 ];
 
 const fn build_dispatch_indices() -> [u8; 256] {
@@ -137,6 +141,12 @@ const fn build_dispatch_indices() -> [u8; 256] {
         table[opcode] = 11;
         opcode += 1;
     }
+
+    // Super instructions
+    table[0x81] = 41;
+    table[0x82] = 42;
+    table[0x83] = 43;
+    table[0x84] = 44;
 
     table
 }
@@ -1112,31 +1122,25 @@ impl Interpreter {
     }
 
     fn eval_binop(&mut self) -> Result<(), InterpreterError> {
-        // println!("binop called at {}", self.decoder.ip);
-
         let subopcode = self.current_opcode & 0x0f;
 
         let right = self.pop()?;
         let left = self.pop()?;
 
-        // unsafe {
-        //     print!(
-        //         "left: {:#?} ",
-        //         CStr::from_ptr(RAP_stringify_object(left.raw()))
-        //     );
-        //     print!(" {:#?} ", op);
-        //     println!(
-        //         "right: {:#?}",
-        //         CStr::from_ptr(RAP_stringify_object(right.raw()))
-        //     );
-        // }
-
         if matches!(subopcode, 0x4 | 0x5 | 0xe) && right.unbox() == 0 {
             return Err(InterpreterError::DivisionByZero);
         }
 
-        let result = if let Some(result) = Self::eval_immediate_binop(subopcode, left, right) {
-            result
+        let result = Self::binop(left, right, subopcode)?;
+        self.push(result)?;
+
+        become self.dispatch()
+    }
+
+    #[inline(always)]
+    fn binop(left: Object, right: Object, subopcode: u8) -> Result<Object, InterpreterError> {
+        if let Some(result) = Self::eval_immediate_binop(subopcode, left, right) {
+            return Ok(result);
         } else {
             let result = unsafe {
                 match subopcode {
@@ -1155,25 +1159,14 @@ impl Interpreter {
                     0xd => RAP_or(left.raw(), right.raw()),
                     0xe => RAP_floor_divide(left.raw(), right.raw()),
                     0xf => RAP_power(left.raw(), right.raw()),
-                    _ => return Err(InterpreterError::InvalidOpcode(self.current_opcode)),
+                    _ => return Err(InterpreterError::InvalidOpcode(subopcode)),
                 }
             };
 
             Self::dec_ref_if_ptr(right);
             Self::dec_ref_if_ptr(left);
-            Object::new(result)
+            return Ok(Object::new(result));
         };
-
-        // unsafe {
-        //     println!(
-        //         "result: {:#?} ",
-        //         CStr::from_ptr(RAP_stringify_object(result))
-        //     );
-        // }
-
-        self.push(result)?;
-
-        become self.dispatch()
     }
 
     /// Evaluate operations whose operands are represented entirely inside a
@@ -1329,6 +1322,75 @@ impl Interpreter {
         Self::dec_ref_if_ptr(collection);
 
         self.push(Object::new(result))?;
+
+        become self.dispatch()
+    }
+
+    fn eval_binop_local_local(&mut self) -> Result<(), InterpreterError> {
+        let rhs_index = self.decoder.next::<i32>()?;
+        let lhs_index = self.decoder.next::<i32>()?;
+
+        let subopcode = self.decoder.next::<u8>()?;
+
+        let right = self.load_local(rhs_index as usize)?;
+        let left = self.load_local(lhs_index as usize)?;
+        Self::inc_ref_if_ptr(left);
+        Self::inc_ref_if_ptr(right);
+        let result = Self::binop(left, right, subopcode)?;
+        self.push(result)?;
+
+        become self.dispatch()
+    }
+
+    fn eval_binop_local_const(&mut self) -> Result<(), InterpreterError> {
+        let index = self.decoder.next::<i32>()?;
+        let subopcode = self.decoder.next::<u8>()?;
+        let value = self.decoder.next::<i32>()?;
+
+        let left = self.load_local(index as usize)?;
+        let right = Object::new_boxed(value as i64);
+        Self::inc_ref_if_ptr(left);
+        let result = Self::binop(left, right, subopcode)?;
+        self.push(result)?;
+
+        become self.dispatch()
+    }
+
+    fn eval_binop_local_local_store(&mut self) -> Result<(), InterpreterError> {
+        let rhs_index = self.decoder.next::<i32>()?;
+        let lhs_index = self.decoder.next::<i32>()?;
+        let dst_index = self.decoder.next::<i32>()?;
+
+        let subopcode = self.decoder.next::<u8>()?;
+
+        let right = self.load_local(rhs_index as usize)?;
+        let left = self.load_local(lhs_index as usize)?;
+        Self::inc_ref_if_ptr(left);
+        Self::inc_ref_if_ptr(right);
+        let result = Self::binop(left, right, subopcode)?;
+
+        let old = self.store_local(dst_index as usize, result)?;
+        if old.raw() != result.raw() {
+            Self::dec_ref_if_ptr(old);
+        }
+
+        become self.dispatch()
+    }
+
+    fn eval_binop_local_const_store(&mut self) -> Result<(), InterpreterError> {
+        let index = self.decoder.next::<i32>()?;
+        let dst_index = self.decoder.next::<i32>()?;
+        let subopcode = self.decoder.next::<u8>()?;
+        let value = self.decoder.next::<i32>()?;
+
+        let left = self.load_local(index as usize)?;
+        let right = Object::new_boxed(value as i64);
+        Self::inc_ref_if_ptr(left);
+        let result = Self::binop(left, right, subopcode)?;
+        let old = self.store_local(dst_index as usize, result)?;
+        if old.raw() != result.raw() {
+            Self::dec_ref_if_ptr(old);
+        }
 
         become self.dispatch()
     }

@@ -1136,7 +1136,10 @@ impl CodegenTarget for BcGen {
         instrs.push(Instruction::NULL);
         instrs.push(Instruction::END);
 
-        self.bytefile.add_instructions(&instrs).unwrap();
+        // TODO: opt pass abstracted
+        let optimized = fuse_instructions(&instrs);
+
+        self.bytefile.add_instructions(&optimized).unwrap();
 
         self.bytefile.main_offset = self.bytefile.label_offset("main").unwrap() as u32;
         self.bytefile.add_string("main".to_string());
@@ -1259,4 +1262,184 @@ impl CodegenTarget for BcGen {
         instructions.push(Instruction::END);
         instructions
     }
+}
+
+// ```
+// LOAD Local(lhs)
+// LOAD Local(rhs)
+// BINOP Op
+// STORE Local(lhs)
+// ```
+// =>
+// ```
+// BINOP_LOCAL_LOCAL_STORE Op
+// ```
+fn match_local_local_store(instructions: &[Instruction]) -> Option<(Instruction, usize)> {
+    if instructions.len() < 4 {
+        return None;
+    }
+
+    match instructions[..4] {
+        [
+            Instruction::LOAD {
+                rel: ValueRel::Local,
+                index: lhs_index,
+            },
+            Instruction::LOAD {
+                rel: ValueRel::Local,
+                index: rhs_index,
+            },
+            Instruction::BINOP { ref op },
+            Instruction::STORE {
+                rel: ValueRel::Local,
+                index: dst_index,
+            },
+        ] => Some((
+            Instruction::BINOP_LOCAL_LOCAL_STORE {
+                rhs_index,
+                lhs_index,
+                dst_index,
+                op: op.clone(),
+            },
+            4,
+        )),
+        _ => None,
+    }
+}
+
+// ```
+// LOAD Local(lhs)
+// CONST value
+// BINOP op
+// STORE Local(dst)
+// ```
+// =>
+// ```
+// BINOP_LOCAL_CONST_STORE {
+//     index: rhs_index,
+//     dst_index,
+//     value,
+//     op: op.clone(),
+// }
+// ```
+fn match_local_const_store(instructions: &[Instruction]) -> Option<(Instruction, usize)> {
+    if instructions.len() < 4 {
+        return None;
+    }
+
+    match instructions[..4] {
+        [
+            Instruction::LOAD {
+                rel: ValueRel::Local,
+                index: lrhs_index,
+            },
+            Instruction::CONST { value },
+            Instruction::BINOP { ref op },
+            Instruction::STORE {
+                rel: ValueRel::Local,
+                index: dst_index,
+            },
+        ] => Some((
+            Instruction::BINOP_LOCAL_CONST_STORE {
+                index: lrhs_index,
+                dst_index,
+                value,
+                op: op.clone(),
+            },
+            4,
+        )),
+        _ => None,
+    }
+}
+
+// ```
+// LOAD Local(lhs)
+// LOAD Local(rhs)
+// BINOP Op
+// ```
+// =>
+// ```
+// BINOP_LOCAL_LOCAL Op
+// ```
+fn match_local_local(instructions: &[Instruction]) -> Option<(Instruction, usize)> {
+    if instructions.len() < 3 {
+        return None;
+    }
+
+    match instructions[..3] {
+        [
+            Instruction::LOAD {
+                rel: ValueRel::Local,
+                index: lhs_index,
+            },
+            Instruction::LOAD {
+                rel: ValueRel::Local,
+                index: rhs_index,
+            },
+            Instruction::BINOP { ref op },
+        ] => Some((
+            Instruction::BINOP_LOCAL_LOCAL {
+                rhs_index,
+                lhs_index,
+                op: op.clone(),
+            },
+            3,
+        )),
+        _ => None,
+    }
+}
+
+// ```
+// LOAD Local(lhs)
+// CONST value
+// BINOP Op
+// ```
+// =>
+// ```
+// BINOP_LOCAL_CONST Op
+// ```
+fn match_local_const(instructions: &[Instruction]) -> Option<(Instruction, usize)> {
+    if instructions.len() < 3 {
+        return None;
+    }
+
+    match instructions[..3] {
+        [
+            Instruction::LOAD {
+                rel: ValueRel::Local,
+                index: lhs_index,
+            },
+            Instruction::CONST { value },
+            Instruction::BINOP { ref op },
+        ] => Some((
+            Instruction::BINOP_LOCAL_CONST {
+                index: lhs_index,
+                value,
+                op: op.clone(),
+            },
+            3,
+        )),
+        _ => None,
+    }
+}
+
+pub fn fuse_instructions(instructions: &Vec<Instruction>) -> Vec<Instruction> {
+    let mut fused = Vec::with_capacity(instructions.len());
+    let mut pos = 0;
+
+    while pos < instructions.len() {
+        if let Some((new_fused, consumed)) = match_local_local_store(&instructions[pos..])
+            .or_else(|| match_local_const_store(&instructions[pos..]))
+            .or_else(|| match_local_local(&instructions[pos..]))
+            .or_else(|| match_local_const(&instructions[pos..]))
+        {
+            fused.push(new_fused);
+            pos += consumed;
+        } else {
+            fused.push(instructions[pos].clone());
+            pos += 1;
+        }
+    }
+
+    fused
 }

@@ -42,6 +42,34 @@ fn evaluate_with_globals(
     interp.run_with_result().map_err(Into::into)
 }
 
+fn prepare_bytefile_with_locals(program: &[Instruction], globals: u32, locals: i32) -> Decoder {
+    let mut bytefile = Bytefile::new();
+    bytefile.main_offset = 0;
+    bytefile.global_area_size = globals;
+    bytefile.add_string("main".to_string());
+    bytefile.add_public_symbol("main", 0).unwrap();
+
+    bytefile
+        .add_instruction(&Instruction::BEGIN { args: 0, locals })
+        .unwrap();
+    for instr in program {
+        bytefile.add_instruction(instr).unwrap();
+    }
+    bytefile.add_instruction(&Instruction::END).unwrap();
+
+    Decoder::new(bytefile)
+}
+
+fn evaluate_with_locals(
+    program: &[Instruction],
+    locals: u32,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    let _guard = INTERPRETER_LOCK.lock().unwrap();
+    let decoder = prepare_bytefile_with_locals(program, 0, locals as i32);
+    let mut interp = Interpreter::new(decoder);
+    interp.run_with_result().map_err(Into::into)
+}
+
 fn smi(raw: usize) -> i64 {
     (raw as i64) >> 32
 }
@@ -286,6 +314,162 @@ fn eval_complex_logical_expr() -> Result<(), Box<dyn std::error::Error>> {
 
     assert!(((chained as u32) & RAP_TAG_MASK) == 0x1);
     assert!(boolean(chained));
+
+    Ok(())
+}
+
+#[test]
+fn eval_super_binop_local_local() -> Result<(), Box<dyn std::error::Error>> {
+    // BINOP_LOCAL_LOCAL computes `local[lhs] op local[rhs]` and pushes the result.
+    let result = evaluate_with_locals(
+        &[
+            // local[0] = 4, local[1] = 5
+            Instruction::CONST { value: 4 },
+            Instruction::STORE {
+                rel: ValueRel::Local,
+                index: 0,
+            },
+            Instruction::CONST { value: 5 },
+            Instruction::STORE {
+                rel: ValueRel::Local,
+                index: 1,
+            },
+            Instruction::BINOP_LOCAL_LOCAL {
+                rhs_index: 1,
+                lhs_index: 0,
+                op: Op::MUL,
+            },
+        ],
+        2,
+    )?;
+    assert_eq!(smi(result), 20);
+
+    // The instruction order is `lhs op rhs`, mirroring the plain BINOP.
+    let subtracted = evaluate_with_locals(
+        &[
+            // local[0] = 10, local[1] = 3
+            Instruction::CONST { value: 10 },
+            Instruction::STORE {
+                rel: ValueRel::Local,
+                index: 0,
+            },
+            Instruction::CONST { value: 3 },
+            Instruction::STORE {
+                rel: ValueRel::Local,
+                index: 1,
+            },
+            Instruction::BINOP_LOCAL_LOCAL {
+                rhs_index: 1,
+                lhs_index: 0,
+                op: Op::SUB,
+            },
+        ],
+        2,
+    )?;
+    assert_eq!(smi(subtracted), 7);
+
+    Ok(())
+}
+
+#[test]
+fn eval_super_binop_local_const() -> Result<(), Box<dyn std::error::Error>> {
+    // BINOP_LOCAL_CONST computes `local[index] op value` (mirroring the source
+    // pattern LOAD local; CONST value; BINOP) and pushes the result.
+    const VALUE: i32 = 10;
+    for (op, expected) in [
+        (Op::ADD, (4 + VALUE) as i64),
+        (Op::SUB, (4 - VALUE) as i64),
+        (Op::MUL, (4 * VALUE) as i64),
+        (Op::IDIV, (4 / VALUE) as i64),
+    ] {
+        let op_name = format!("{op:#?}");
+        let result = evaluate_with_locals(
+            &[
+                // local[0] = 4
+                Instruction::CONST { value: 4 },
+                Instruction::STORE {
+                    rel: ValueRel::Local,
+                    index: 0,
+                },
+                Instruction::BINOP_LOCAL_CONST {
+                    index: 0,
+                    op,
+                    value: VALUE,
+                },
+            ],
+            1,
+        )?;
+        assert_eq!(smi(result), expected, "op={op_name}");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn eval_super_binop_local_local_store() -> Result<(), Box<dyn std::error::Error>> {
+    // BINOP_LOCAL_LOCAL_STORE fuses `LOAD lhs; LOAD rhs; BINOP; STORE dst`: it
+    // stores `local[lhs] op local[rhs]` into local[dst] and leaves the stack
+    // unchanged (matching the original four instruction's net effect). Load the
+    // destination slot back to prove the store persisted.
+    let result = evaluate_with_locals(
+        &[
+            // local[0] = 6, local[1] = 7
+            Instruction::CONST { value: 6 },
+            Instruction::STORE {
+                rel: ValueRel::Local,
+                index: 0,
+            },
+            Instruction::CONST { value: 7 },
+            Instruction::STORE {
+                rel: ValueRel::Local,
+                index: 1,
+            },
+            Instruction::BINOP_LOCAL_LOCAL_STORE {
+                rhs_index: 1,
+                lhs_index: 0,
+                dst_index: 2,
+                op: Op::MUL,
+            },
+            Instruction::LOAD {
+                rel: ValueRel::Local,
+                index: 2,
+            },
+        ],
+        3,
+    )?;
+    assert_eq!(smi(result), 42);
+
+    Ok(())
+}
+
+#[test]
+fn eval_super_binop_local_const_store() -> Result<(), Box<dyn std::error::Error>> {
+    // BINOP_LOCAL_CONST_STORE fuses `LOAD idx; CONST value; BINOP; STORE dst`:
+    // it stores `local[index] op value` into local[dst] and leaves the stack
+    // unchanged. Load the destination slot back to prove the store persisted.
+    let result = evaluate_with_locals(
+        &[
+            // local[0] = 5
+            Instruction::CONST { value: 5 },
+            Instruction::STORE {
+                rel: ValueRel::Local,
+                index: 0,
+            },
+            Instruction::BINOP_LOCAL_CONST_STORE {
+                index: 0,
+                dst_index: 1,
+                op: Op::POW,
+                value: 2,
+            },
+            Instruction::LOAD {
+                rel: ValueRel::Local,
+                index: 1,
+            },
+        ],
+        2,
+    )?;
+    // 5 ^ 2 = 25
+    assert_eq!(smi(result), 25_i64);
 
     Ok(())
 }
