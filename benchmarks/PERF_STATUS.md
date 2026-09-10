@@ -6,20 +6,19 @@
 
 | Benchmark | Python | Rapira26 E2E | Rapira26 VM-only | E2E/Python | VM/Python |
 |---|---:|---:|---:|---:|---:|
-| mandelbrot | 1.0844 s | 5.3999 s | 5.4126 s | 4.98 | 4.99 |
-| fibonacci | 5.9731 s | 5.2093 s | 5.2340 s | 0.87 | 0.88 |
-| binary-tree | 4.0844 s | 12.7725 s | 12.7674 s | 3.13 | 3.13 |
-| nbody | 1.4607 s | 5.4698 s | 5.4725 s | 3.74 | 3.75 |
-| fannkuch-redux | 4.6351 s | 11.5986 s | 11.5811 s | 2.50 | 2.50 |
-| reverse-complement | 0.0266 s | 1.9473 s | 2.0369 s | 73.29 | 76.67 |
+| mandelbrot | 1.0793 s | 4.1947 s | 4.1937 s | 3.89 | 3.89 |
+| fibonacci | 6.2561 s | 4.8126 s | 4.6597 s | 0.77 | 0.74 |
+| binary-tree | 4.0518 s | 12.4003 s | 12.3934 s | 3.06 | 3.06 |
+| nbody | 1.4144 s | 5.2242 s | 5.2329 s | 3.69 | 3.70 |
+| fannkuch-redux | 4.6320 s | 10.9484 s | 11.0012 s | 2.36 | 2.38 |
+| reverse-complement | 0.0241 s | 1.9590 s | 1.7655 s | 81.20 | 73.17 |
 
 ## Version
 
-- Run timestamp: `2026-09-05T15:46:02.151105+00:00`
-- Reverse-complement run timestamp: `2026-09-05T16:14:25.455483+00:00`
-- Git commit: `8289a5424365d544a36cccf8b245308418f0d843`
+- Run timestamp: `2026-09-10T14:53-44.612980+00-00`
+- Git commit: `cfcac89f24d9d349731156bfdbb4dc488e30a6f8`
 - Commit message: `[runtime][perf][VM] Add hints for branch predictor, fix text repeat...`
-- Commit date: `2026-09-05T19:21:26+03:00`
+- Commit date: `2026-09-10T18:22:05+03:00`
 
 ## Environment
 
@@ -34,12 +33,6 @@ Command:
 
 ```bash
 python3 -B benchmarks/bench.py run --samples 5
-```
-
-The refreshed reverse-complement row used:
-
-```bash
-python3 -B benchmarks/bench.py --no-build --case reverse-complement run --samples 5
 ```
 
 Each result is the median of 5 measured executions after 3 warmups. Before
