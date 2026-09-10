@@ -4,6 +4,9 @@
 #include "runtime.h"
 #include "runtime_internal.h"
 
+#define likely(x) __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
+
 #ifndef _SOURCE_
 #define _SOURCE_ "не удалось получить исходный текст файла"
 #endif
@@ -41,7 +44,8 @@ void RAP_fatal_error(const char *message) {
   //   exit(1);
   // }
 
-  // runtime_error_description(cnts, RAP_curret_module_path, RAP_current_pos_start,
+  // runtime_error_description(cnts, RAP_curret_module_path,
+  // RAP_current_pos_start,
   //                           RAP_current_pos_end, message);
 
   // free(cnts);
@@ -132,17 +136,11 @@ void RAP_check_leaks(void) {
 
 // CHECKERS
 
-bool RAP_IS_SMI(RAP_Value value) {
-    return ((value) & RAP_TAG_MASK) == 0x0;
-}
+bool RAP_IS_SMI(RAP_Value value) { return ((value)&RAP_TAG_MASK) == 0x0; }
 
-bool RAP_IS_BOOL(RAP_Value value) {
-    return ((value) & RAP_TAG_MASK) == 0x1;
-}
+bool RAP_IS_BOOL(RAP_Value value) { return ((value)&RAP_TAG_MASK) == 0x1; }
 
-bool RAP_IS_PTR(RAP_Value value) {
-    return ((value) & RAP_TAG_MASK) == 0x3;
-}
+bool RAP_IS_PTR(RAP_Value value) { return ((value)&RAP_TAG_MASK) == 0x3; }
 
 bool RAP_IS_FLOAT(RAP_Value value) {
   return RAP_IS_PTR(value) && RAP_PTR_VALUE(value)->tag == RAP_OBJECT_TAG_FLOAT;
@@ -165,11 +163,13 @@ bool RAP_IS_NULL(RAP_Value value) {
 }
 
 bool RAP_IS_VARIANT(RAP_Value value) {
-  return RAP_IS_PTR(value) && RAP_PTR_VALUE(value)->tag == RAP_OBJECT_TAG_VARIANT;
+  return RAP_IS_PTR(value) &&
+         RAP_PTR_VALUE(value)->tag == RAP_OBJECT_TAG_VARIANT;
 }
 
 bool RAP_IS_CALLABLE(RAP_Value value) {
-  return RAP_IS_PTR(value) && RAP_PTR_VALUE(value)->tag == RAP_OBJECT_TAG_CALLABLE;
+  return RAP_IS_PTR(value) &&
+         RAP_PTR_VALUE(value)->tag == RAP_OBJECT_TAG_CALLABLE;
 }
 
 // CONSTRUCTORS
@@ -383,19 +383,26 @@ RAP_Value RAP_get_objects_refcount(RAP_Value obj) {
   return RAP_create_int_obj(RAP_PTR_VALUE(obj)->refcount);
 }
 
-const char* RAP_type_to_string(RAP_ObjectTag tag) {
+const char *RAP_type_to_string(RAP_ObjectTag tag) {
   switch (tag) {
-    case RAP_OBJECT_TAG_SLICE: return "отрезок";
-    case RAP_OBJECT_TAG_TUPLE: return "кортеж";
-    case RAP_OBJECT_TAG_VARIANT: return "тип";
-    case RAP_OBJECT_TAG_TEXT: return "текст";
-    case RAP_OBJECT_TAG_CALLABLE: return "функция";
-    case RAP_OBJECT_TAG_NULL: return "null";
-    default: return "неизвестный тип";
+  case RAP_OBJECT_TAG_SLICE:
+    return "отрезок";
+  case RAP_OBJECT_TAG_TUPLE:
+    return "кортеж";
+  case RAP_OBJECT_TAG_VARIANT:
+    return "тип";
+  case RAP_OBJECT_TAG_TEXT:
+    return "текст";
+  case RAP_OBJECT_TAG_CALLABLE:
+    return "функция";
+  case RAP_OBJECT_TAG_NULL:
+    return "null";
+  default:
+    return "неизвестный тип";
   }
 }
 
-const char* RAP_get_type_name(RAP_Value val) {
+const char *RAP_get_type_name(RAP_Value val) {
   if (RAP_IS_SMI(val))
     return "число";
   else if (RAP_IS_BOOL(val))

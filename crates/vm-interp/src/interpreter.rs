@@ -29,10 +29,10 @@ const MAX_OPERAND_STACK_SIZE: usize = 1024 * 64; // 0x7fffffff;
 const INVALID_HANDLER: u8 = u8::MAX;
 
 // TODO: look into `extern "rust-preserve-none"`
-const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 41] = [
+const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 55] = [
     Interpreter::eval_nop,
     Interpreter::eval_end,
-    Interpreter::eval_binop,
+    Interpreter::eval_binop_add,
     Interpreter::eval_const,
     Interpreter::eval_string,
     Interpreter::eval_begin,
@@ -73,17 +73,41 @@ const DISPATCH_TABLE: [fn(&mut Interpreter) -> Result<(), InterpreterError>; 41]
     Interpreter::eval_field,
     Interpreter::eval_set_field,
     Interpreter::eval_is_variant,
+    Interpreter::eval_binop_subtract,
+    Interpreter::eval_binop_multiply,
+    Interpreter::eval_binop_divide,
+    Interpreter::eval_binop_modulo,
+    Interpreter::eval_binop_less_than,
+    Interpreter::eval_binop_less_or_equal,
+    Interpreter::eval_binop_greater_than,
+    Interpreter::eval_binop_greater_or_equal,
+    Interpreter::eval_binop_equal,
+    Interpreter::eval_binop_not_equal,
+    Interpreter::eval_binop_and,
+    Interpreter::eval_binop_or,
+    Interpreter::eval_binop_floor_divide,
+    Interpreter::eval_binop_power,
 ];
 
 const fn build_dispatch_indices() -> [u8; 256] {
     let mut table = [INVALID_HANDLER; 256];
 
     table[0x00] = 0;
-    let mut opcode = 0x01;
-    while opcode <= 0x0f {
-        table[opcode] = 2;
-        opcode += 1;
-    }
+    table[0x01] = 2;
+    table[0x02] = 41;
+    table[0x03] = 42;
+    table[0x04] = 43;
+    table[0x05] = 44;
+    table[0x06] = 45;
+    table[0x07] = 46;
+    table[0x08] = 47;
+    table[0x09] = 48;
+    table[0x0a] = 49;
+    table[0x0b] = 50;
+    table[0x0c] = 51;
+    table[0x0d] = 52;
+    table[0x0e] = 53;
+    table[0x0f] = 54;
 
     table[0x10] = 3;
     table[0x11] = 4;
@@ -132,7 +156,7 @@ const fn build_dispatch_indices() -> [u8; 256] {
     table[0x74] = 11;
     table[0x75] = 23;
     table[0x76] = 27;
-    opcode = 0x77;
+    let mut opcode = 0x77;
     while opcode <= 0x7f {
         table[opcode] = 11;
         opcode += 1;
@@ -160,6 +184,17 @@ struct RuntimeVariantSchema {
     name: *const c_char,
     tag: u16,
     field_names: Vec<*const c_char>,
+}
+
+impl Drop for Interpreter {
+    fn drop(&mut self) {
+        // Object is a Copy wrapper around a manually reference-counted value,
+        // so Vec's destructor cannot release references left behind by an
+        // interpreter error.
+        for object in self.operand_stack.drain(..) {
+            Self::dec_ref_if_ptr(object);
+        }
+    }
 }
 
 impl Interpreter {
@@ -787,9 +822,10 @@ impl Interpreter {
         let old = self.globals()[index];
         self.globals_mut()[index] = value;
 
-        if old.raw() != value.raw() {
-            Self::dec_ref_if_ptr(old);
-        }
+        // The popped value transfers one owning reference into the slot - so the
+        // old slot reference must be released even when both values point to
+        // the same object (e.g. `x = x`)
+        Self::dec_ref_if_ptr(old);
 
         become self.dispatch()
     }
@@ -799,9 +835,7 @@ impl Interpreter {
         let value = self.pop()?;
         let old = self.store_local(index, value)?;
 
-        if old.raw() != value.raw() {
-            Self::dec_ref_if_ptr(old);
-        }
+        Self::dec_ref_if_ptr(old);
 
         become self.dispatch()
     }
@@ -811,9 +845,7 @@ impl Interpreter {
         let value = self.pop()?;
         let old = self.store_arg(index, value)?;
 
-        if old.raw() != value.raw() {
-            Self::dec_ref_if_ptr(old);
-        }
+        Self::dec_ref_if_ptr(old);
 
         become self.dispatch()
     }
@@ -823,116 +855,57 @@ impl Interpreter {
     }
 
     fn eval_end(&mut self) -> Result<(), InterpreterError> {
-        // Get procedures return value
         let return_value = self
             .pop()
             .map_err(|_| InterpreterError::NotEnoughArguments("END"))?;
 
-        let n_locals = self.frame_local_count;
-        let n_args = self.frame_arg_count;
-        let ret_frame_pointer = self.frame_return_pointer()?;
-        let ret_ip = self.frame_return_ip()?;
-
-        // `return_value` is removed from the operand stack above, but may
-        // alias an argument/local slot that is about to be released -> so we retain
-        // it before tearing down the frame (caller becomes owner)
-        if isPtr(return_value.raw()) {
-            let args_start = self.frame_pointer - n_args;
-            let locals_start = self.frame_pointer + 5;
-            if self.operand_stack[args_start..self.frame_pointer]
-                .iter()
-                .chain(self.operand_stack[locals_start..locals_start + n_locals].iter())
-                .any(|value| value.raw() == return_value.raw())
-            {
-                Self::inc_ref_if_ptr(return_value);
-            }
+        let argument_count = self.frame_arg_count;
+        let local_count = self.frame_local_count;
+        let return_frame_pointer = self.frame_return_pointer()?;
+        let return_ip = self.frame_return_ip()?;
+        let arguments_start = self
+            .frame_pointer
+            .checked_sub(argument_count)
+            .ok_or(InterpreterError::NotEnoughArguments("END arguments"))?;
+        let frame_end = self
+            .frame_pointer
+            .checked_add(5 + local_count)
+            .ok_or(InterpreterError::StackOverflow)?;
+        if self.operand_stack.len() < frame_end {
+            return Err(InterpreterError::NotEnoughArguments("END frame"));
         }
 
-        // A value may be aliased by more than one frame slot, e.g. stores currently
-        // transfer stack ownership, so releasing every slot would free the
-        // same native object repeatedly.
-        //
-        // The bytecode generator avoids materializing a selector local for a
-        // name expression, which prevents value-match statements from adding a
-        // second frame slot for their subject.
-        let mut released = Vec::new();
-        for _ in 0..n_locals {
-            let obj = self.pop()?;
-            if !released.contains(&obj.raw()) {
-                Self::dec_ref_if_ptr(obj);
-                released.push(obj.raw());
-            }
+        // Each argument, metadata, and local slot is an owning stack slot
+        // The return value was popped above and retains its own reference
+        for object in self.operand_stack[arguments_start..frame_end]
+            .iter()
+            .copied()
+        {
+            Self::dec_ref_if_ptr(object);
         }
+        self.operand_stack.truncate(arguments_start);
 
-        // Pop return ip
-        self.pop()?;
-
-        // Pop old frame pointer
-        self.pop()?;
-
-        // Pop local count
-        self.pop()?;
-
-        // Pop argument count
-        self.pop()?;
-
-        // Pop closure object
-        self.pop()?;
-
-        for _ in 0..n_args {
-            let obj = self.pop()?;
-            if !released.contains(&obj.raw()) {
-                Self::dec_ref_if_ptr(obj);
-                released.push(obj.raw());
-            }
-        }
-
-        // Return to callee's frame pointer
-        self.frame_pointer = ret_frame_pointer;
-
-        // Return to caller's instruction pointer
-        // NOTE: returning from main is not possible in this implementation
-        //       the program will exit after the main function returns
-        self.decoder.ip = ret_ip;
-
-        // After removing current frames metadata,
-        // we can re-push the return value to send it back to the caller
+        self.frame_pointer = return_frame_pointer;
+        self.decoder.ip = return_ip;
         self.push(return_value)?;
 
-        // if we encounter END instruction, while in frame 0
-        // (a.k.a main function) we exit the interpreter
         if self.frame_pointer == self.global_areas_size {
             return Ok(());
         }
 
-        // The caller's frame is still present on the operand stack. Restore
-        // its cached metadata after removing the callee frame.
-        self.frame_arg_count = self
-            .operand_stack
-            .get(ret_frame_pointer + 1)
-            .copied()
-            .ok_or(InterpreterError::NotEnoughArguments(
-                "caller frame arg count",
-            ))?
-            .unbox() as usize;
+        self.frame_arg_count =
+            self.frame_stack_value(1, "caller frame arg count")?.unbox() as usize;
         self.frame_local_count = self
-            .operand_stack
-            .get(ret_frame_pointer + 2)
-            .copied()
-            .ok_or(InterpreterError::NotEnoughArguments(
-                "caller frame local count",
-            ))?
+            .frame_stack_value(2, "caller frame local count")?
             .unbox() as usize;
 
         become self.dispatch()
     }
 
     fn eval_begin(&mut self) -> Result<(), InterpreterError> {
-        // println!("eval_begin: {:?}", instr);
-
         let payload = self.decoder.next::<i32>()?;
-        let locals = self.decoder.next::<i32>()?;
-
+        let locals = usize::try_from(self.decoder.next::<i32>()?)
+            .map_err(|_| InterpreterError::NotEnoughArguments("BEGIN locals"))?;
         let stack_size_for_function = payload >> 16;
         let args = (payload & 0xFFFF) as usize;
 
@@ -940,25 +913,21 @@ impl Interpreter {
             return Err(InterpreterError::StackOverflow);
         }
 
-        // let closure_obj = self
-        //     .pop()
-        //     .map_err(|_| InterpreterError::NotEnoughArguments("BEGIN"))?;
-
         // Top object is either return_ip or a closure obj
         let ret_ip = self
             .pop()
-            .map_err(|_| InterpreterError::NotEnoughArguments("BEGIN"))?; // must be a closure
+            .map_err(|_| InterpreterError::NotEnoughArguments("BEGIN"))?;
 
         // Save previous frame pointer
         let ret_frame_pointer = self.frame_pointer;
 
-        // Set new frame pointer as index into operand stack
-        if self.operand_stack.is_empty() {
-            return Err(InterpreterError::NotEnoughArguments("BEGIN"));
+        if self.operand_stack.len() < args {
+            return Err(InterpreterError::NotEnoughArguments("BEGIN arguments"));
         }
+
         self.frame_pointer = self.operand_stack.len();
         self.frame_arg_count = args;
-        self.frame_local_count = locals as usize;
+        self.frame_local_count = locals;
 
         // the closure slot must still exist for the frame layout expected
         self.push(Object::new_empty())?;
@@ -978,13 +947,6 @@ impl Interpreter {
         for _ in 0..locals {
             self.push(Object::new_boxed(0))?;
         }
-
-        // TODO:
-        // let mut frame = FrameMetadata::get_from_stack(&self.operand_stack.0, self.frame_pointer)
-        //     .ok_or(InterpreterError::NotEnoughArguments(
-        //         "trying to call closure frame",
-        //     ))?;
-        // frame.save_closure(&mut self.operand_stack.0, self.frame_pointer, closure_obj);
 
         become self.dispatch()
     }
@@ -1111,124 +1073,231 @@ impl Interpreter {
         become self.dispatch()
     }
 
-    fn eval_binop(&mut self) -> Result<(), InterpreterError> {
-        // println!("binop called at {}", self.decoder.ip);
-
-        let subopcode = self.current_opcode & 0x0f;
-
+    fn eval_binop_add(&mut self) -> Result<(), InterpreterError> {
         let right = self.pop()?;
         let left = self.pop()?;
-
-        // unsafe {
-        //     print!(
-        //         "left: {:#?} ",
-        //         CStr::from_ptr(RAP_stringify_object(left.raw()))
-        //     );
-        //     print!(" {:#?} ", op);
-        //     println!(
-        //         "right: {:#?}",
-        //         CStr::from_ptr(RAP_stringify_object(right.raw()))
-        //     );
-        // }
-
-        if matches!(subopcode, 0x4 | 0x5 | 0xe) && right.unbox() == 0 {
-            return Err(InterpreterError::DivisionByZero);
-        }
-
-        let result = if let Some(result) = Self::eval_immediate_binop(subopcode, left, right) {
-            result
+        let result = if isSMI(left.raw()) && isSMI(right.raw()) {
+            Object::new_boxed(left.unbox() + right.unbox())
         } else {
-            let result = unsafe {
-                match subopcode {
-                    0x1 => RAP_add(left.raw(), right.raw()),
-                    0x2 => RAP_subtract(left.raw(), right.raw()),
-                    0x3 => RAP_multiply(left.raw(), right.raw()),
-                    0x4 => RAP_divide(left.raw(), right.raw()),
-                    0x5 => RAP_modulo(left.raw(), right.raw()),
-                    0x6 => RAP_less_than(left.raw(), right.raw()),
-                    0x7 => RAP_less_or_equal(left.raw(), right.raw()),
-                    0x8 => RAP_greater_than(left.raw(), right.raw()),
-                    0x9 => RAP_greater_or_equal(left.raw(), right.raw()),
-                    0xa => RAP_equal(left.raw(), right.raw()),
-                    0xb => RAP_not_equal(left.raw(), right.raw()),
-                    0xc => RAP_and(left.raw(), right.raw()),
-                    0xd => RAP_or(left.raw(), right.raw()),
-                    0xe => RAP_floor_divide(left.raw(), right.raw()),
-                    0xf => RAP_power(left.raw(), right.raw()),
-                    _ => return Err(InterpreterError::InvalidOpcode(self.current_opcode)),
-                }
-            };
-
-            Self::dec_ref_if_ptr(right);
-            Self::dec_ref_if_ptr(left);
-            Object::new(result)
+            let raw = unsafe { RAP_add(left.raw(), right.raw()) };
+            Self::consume_runtime_binop(left, right, raw)
         };
-
-        // unsafe {
-        //     println!(
-        //         "result: {:#?} ",
-        //         CStr::from_ptr(RAP_stringify_object(result))
-        //     );
-        // }
-
         self.push(result)?;
-
         become self.dispatch()
     }
 
-    /// Evaluate operations whose operands are represented entirely inside a
-    /// `RAP_Value`. This avoids crossing the Rust/C boundary for the common
-    /// integer and boolean cases while retaining the generic runtime fallback
-    /// for floats and aggregate values.
-    #[inline(always)]
-    fn eval_immediate_binop(subopcode: u8, left: Object, right: Object) -> Option<Object> {
-        if isSMI(left.raw()) && isSMI(right.raw()) {
-            let left = left.unbox();
-            let right = right.unbox();
-
-            let result = match subopcode {
-                0x1 => Object::new_boxed(left + right),
-                0x2 => Object::new_boxed(left - right),
-                0x3 => Object::new_boxed(left * right),
-                0x4 if left % right == 0 => Object::new_boxed(left / right),
-                0x5 => {
-                    let mut remainder = left % right;
-                    if remainder != 0 && ((remainder < 0) != (right < 0)) {
-                        remainder += right;
-                    }
-                    Object::new_boxed(remainder)
-                }
-                0x6 => Object::new_bool(left < right),
-                0x7 => Object::new_bool(left <= right),
-                0x8 => Object::new_bool(left > right),
-                0x9 => Object::new_bool(left >= right),
-                0xa => Object::new_bool(left == right),
-                0xb => Object::new_bool(left != right),
-                0xe => {
-                    let mut quotient = left / right;
-                    let remainder = left % right;
-                    if remainder != 0 && ((remainder < 0) != (right < 0)) {
-                        quotient -= 1;
-                    }
-                    Object::new_boxed(quotient)
-                }
-                _ => return None,
-            };
-            return Some(result);
-        }
-
-        let (Some(left), Some(right)) = (left.get_bool(), right.get_bool()) else {
-            return None;
+    fn eval_binop_subtract(&mut self) -> Result<(), InterpreterError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        let result = if isSMI(left.raw()) && isSMI(right.raw()) {
+            Object::new_boxed(left.unbox() - right.unbox())
+        } else {
+            let raw = unsafe { RAP_subtract(left.raw(), right.raw()) };
+            Self::consume_runtime_binop(left, right, raw)
         };
-        match subopcode {
-            0xa => Some(Object::new_bool(left == right)),
-            0xb => Some(Object::new_bool(left != right)),
-            0xc => Some(Object::new_bool(left && right)),
-            0xd => Some(Object::new_bool(left || right)),
-            _ => None,
-        }
+        self.push(result)?;
+        become self.dispatch()
     }
 
+    fn eval_binop_multiply(&mut self) -> Result<(), InterpreterError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        let result = if isSMI(left.raw()) && isSMI(right.raw()) {
+            Object::new_boxed(left.unbox() * right.unbox())
+        } else {
+            let raw = unsafe { RAP_multiply(left.raw(), right.raw()) };
+            Self::consume_runtime_binop(left, right, raw)
+        };
+        self.push(result)?;
+        become self.dispatch()
+    }
+
+    fn eval_binop_divide(&mut self) -> Result<(), InterpreterError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        if isSMI(right.raw()) && right.unbox() == 0 {
+            return Err(InterpreterError::DivisionByZero);
+        }
+        let result = if isSMI(left.raw()) && isSMI(right.raw()) && left.unbox() % right.unbox() == 0
+        {
+            Object::new_boxed(left.unbox() / right.unbox())
+        } else {
+            let raw = unsafe { RAP_divide(left.raw(), right.raw()) };
+            Self::consume_runtime_binop(left, right, raw)
+        };
+        self.push(result)?;
+        become self.dispatch()
+    }
+
+    fn eval_binop_modulo(&mut self) -> Result<(), InterpreterError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        if isSMI(right.raw()) && right.unbox() == 0 {
+            return Err(InterpreterError::DivisionByZero);
+        }
+        let result = if isSMI(left.raw()) && isSMI(right.raw()) {
+            let right = right.unbox();
+            let mut remainder = left.unbox() % right;
+            if remainder != 0 && ((remainder < 0) != (right < 0)) {
+                remainder += right;
+            }
+            Object::new_boxed(remainder)
+        } else {
+            let raw = unsafe { RAP_modulo(left.raw(), right.raw()) };
+            Self::consume_runtime_binop(left, right, raw)
+        };
+        self.push(result)?;
+        become self.dispatch()
+    }
+
+    fn eval_binop_less_than(&mut self) -> Result<(), InterpreterError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        let result = if isSMI(left.raw()) && isSMI(right.raw()) {
+            Object::new_bool(left.unbox() < right.unbox())
+        } else {
+            let raw = unsafe { RAP_less_than(left.raw(), right.raw()) };
+            Self::consume_runtime_binop(left, right, raw)
+        };
+        self.push(result)?;
+        become self.dispatch()
+    }
+
+    fn eval_binop_less_or_equal(&mut self) -> Result<(), InterpreterError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        let result = if isSMI(left.raw()) && isSMI(right.raw()) {
+            Object::new_bool(left.unbox() <= right.unbox())
+        } else {
+            let raw = unsafe { RAP_less_or_equal(left.raw(), right.raw()) };
+            Self::consume_runtime_binop(left, right, raw)
+        };
+        self.push(result)?;
+        become self.dispatch()
+    }
+
+    fn eval_binop_greater_than(&mut self) -> Result<(), InterpreterError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        let result = if isSMI(left.raw()) && isSMI(right.raw()) {
+            Object::new_bool(left.unbox() > right.unbox())
+        } else {
+            let raw = unsafe { RAP_greater_than(left.raw(), right.raw()) };
+            Self::consume_runtime_binop(left, right, raw)
+        };
+        self.push(result)?;
+        become self.dispatch()
+    }
+
+    fn eval_binop_greater_or_equal(&mut self) -> Result<(), InterpreterError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        let result = if isSMI(left.raw()) && isSMI(right.raw()) {
+            Object::new_bool(left.unbox() >= right.unbox())
+        } else {
+            let raw = unsafe { RAP_greater_or_equal(left.raw(), right.raw()) };
+            Self::consume_runtime_binop(left, right, raw)
+        };
+        self.push(result)?;
+        become self.dispatch()
+    }
+
+    fn eval_binop_equal(&mut self) -> Result<(), InterpreterError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        let result = if isSMI(left.raw()) && isSMI(right.raw()) {
+            Object::new_bool(left.unbox() == right.unbox())
+        } else if let (Some(left), Some(right)) = (left.get_bool(), right.get_bool()) {
+            Object::new_bool(left == right)
+        } else {
+            let raw = unsafe { RAP_equal(left.raw(), right.raw()) };
+            Self::consume_runtime_binop(left, right, raw)
+        };
+        self.push(result)?;
+        become self.dispatch()
+    }
+
+    fn eval_binop_not_equal(&mut self) -> Result<(), InterpreterError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        let result = if isSMI(left.raw()) && isSMI(right.raw()) {
+            Object::new_bool(left.unbox() != right.unbox())
+        } else if let (Some(left), Some(right)) = (left.get_bool(), right.get_bool()) {
+            Object::new_bool(left != right)
+        } else {
+            let raw = unsafe { RAP_not_equal(left.raw(), right.raw()) };
+            Self::consume_runtime_binop(left, right, raw)
+        };
+        self.push(result)?;
+        become self.dispatch()
+    }
+
+    fn eval_binop_and(&mut self) -> Result<(), InterpreterError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        let result = if let (Some(left), Some(right)) = (left.get_bool(), right.get_bool()) {
+            Object::new_bool(left && right)
+        } else {
+            let raw = unsafe { RAP_and(left.raw(), right.raw()) };
+            Self::consume_runtime_binop(left, right, raw)
+        };
+        self.push(result)?;
+        become self.dispatch()
+    }
+
+    fn eval_binop_or(&mut self) -> Result<(), InterpreterError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        let result = if let (Some(left), Some(right)) = (left.get_bool(), right.get_bool()) {
+            Object::new_bool(left || right)
+        } else {
+            let raw = unsafe { RAP_or(left.raw(), right.raw()) };
+            Self::consume_runtime_binop(left, right, raw)
+        };
+        self.push(result)?;
+        become self.dispatch()
+    }
+
+    fn eval_binop_floor_divide(&mut self) -> Result<(), InterpreterError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        if isSMI(right.raw()) && right.unbox() == 0 {
+            return Err(InterpreterError::DivisionByZero);
+        }
+        let result = if isSMI(left.raw()) && isSMI(right.raw()) {
+            let right = right.unbox();
+            let left = left.unbox();
+            let mut quotient = left / right;
+            let remainder = left % right;
+            if remainder != 0 && ((remainder < 0) != (right < 0)) {
+                quotient -= 1;
+            }
+            Object::new_boxed(quotient)
+        } else {
+            let raw = unsafe { RAP_floor_divide(left.raw(), right.raw()) };
+            Self::consume_runtime_binop(left, right, raw)
+        };
+        self.push(result)?;
+        become self.dispatch()
+    }
+
+    fn eval_binop_power(&mut self) -> Result<(), InterpreterError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        let raw = unsafe { RAP_power(left.raw(), right.raw()) };
+        let result = Self::consume_runtime_binop(left, right, raw);
+        self.push(result)?;
+        become self.dispatch()
+    }
+
+    #[inline(always)]
+    fn consume_runtime_binop(left: Object, right: Object, result: usize) -> Object {
+        Self::dec_ref_if_ptr(right);
+        Self::dec_ref_if_ptr(left);
+        Object::new(result)
+    }
+
+    #[inline(always)]
     fn eval_unary(&mut self) -> Result<(), InterpreterError> {
         let op = UnaryOp::try_from(self.current_opcode & 0x0f)
             .map_err(|_| InterpreterError::InvalidOpcode(self.current_opcode))?;
@@ -1273,9 +1342,11 @@ impl Interpreter {
 
         let obj = Object::new_tuple(n as usize, borrow_operand_stack_elements);
 
-        // Pop arguments from the stack
+        // RAP_create_tuple_obj retains every element. Remove and release the
+        // original owning stack references now that the tuple owns copies.
         for _ in 0..n {
-            self.pop()?;
+            let element = self.pop()?;
+            Self::dec_ref_if_ptr(element);
         }
 
         self.push(obj)?;
@@ -1340,10 +1411,6 @@ impl Interpreter {
             return Err(InterpreterError::StackOverflow);
         }
 
-        if unlikely((self.operand_stack.len() - 1) <= self.global_areas_size) {
-            return Err(InterpreterError::StackUnderflow);
-        }
-
         self.operand_stack.push(obj);
 
         Ok(())
@@ -1352,7 +1419,7 @@ impl Interpreter {
     /// Pop from the operand stack
     #[inline(always)]
     fn pop(&mut self) -> Result<Object, InterpreterError> {
-        if unlikely((self.operand_stack.len() - 1) <= self.global_areas_size) {
+        if unlikely(self.operand_stack.len() <= self.global_areas_size) {
             return Err(InterpreterError::StackUnderflow);
         }
 
@@ -1378,12 +1445,12 @@ impl Interpreter {
     fn frame_stack_value(
         &self,
         offset: usize,
-        opname: &'static str,
+        operation: &'static str,
     ) -> Result<Object, InterpreterError> {
         self.operand_stack
             .get(self.frame_pointer + offset)
             .copied()
-            .ok_or(InterpreterError::NotEnoughArguments(opname))
+            .ok_or(InterpreterError::NotEnoughArguments(operation))
     }
 
     #[inline(always)]
@@ -1398,18 +1465,16 @@ impl Interpreter {
 
     #[inline(always)]
     fn arg_slot_index(&self, index: usize) -> Result<usize, InterpreterError> {
-        let n_args = self.frame_arg_count;
-        if index >= n_args {
+        if index >= self.frame_arg_count {
             return Err(InterpreterError::NotEnoughArguments("LOAD/STORE arg"));
         }
 
-        Ok(self.frame_pointer - n_args + index)
+        Ok(self.frame_pointer - self.frame_arg_count + index)
     }
 
     #[inline(always)]
     fn local_slot_index(&self, index: usize) -> Result<usize, InterpreterError> {
-        let n_locals = self.frame_local_count;
-        if index >= n_locals {
+        if index >= self.frame_local_count {
             return Err(InterpreterError::NotEnoughArguments("LOAD/STORE local"));
         }
 
@@ -1659,50 +1724,22 @@ mod tests {
         assert_eq!(DISPATCH_INDICES[0x44], 35);
         assert_eq!(DISPATCH_INDICES[0x20], INVALID_HANDLER);
         assert_eq!(DISPATCH_INDICES[0x45], INVALID_HANDLER);
-    }
-
-    fn immediate_integer(left: i64, subopcode: u8, right: i64) -> i64 {
-        Interpreter::eval_immediate_binop(
-            subopcode,
-            Object::new_boxed(left),
-            Object::new_boxed(right),
-        )
-        .expect("integer operation should use the immediate fast path")
-        .unbox()
+        assert_eq!(DISPATCH_INDICES[0x81], INVALID_HANDLER);
     }
 
     #[test]
-    fn immediate_modulo_uses_floor_division_semantics() {
-        for (left, right, expected) in [(7, 2, 1), (-7, 2, 1), (7, -2, -1), (-7, -2, -1)] {
-            assert_eq!(immediate_integer(left, 0x5, right), expected);
-
-            let runtime_result = unsafe {
-                RAP_modulo(
-                    Object::new_boxed(left).raw(),
-                    Object::new_boxed(right).raw(),
-                )
-            };
-            assert_eq!(Object::new(runtime_result).unbox(), expected);
+    fn dispatch_table_specializes_binary_operations() {
+        assert_eq!(DISPATCH_INDICES[0x01], 2);
+        for opcode in 0x02..=0x0f {
+            assert_eq!(DISPATCH_INDICES[opcode], (39 + opcode) as u8);
         }
-    }
 
-    #[test]
-    fn immediate_floor_division_rounds_toward_negative_infinity() {
-        for (left, right, expected) in [(7, 2, 3), (-7, 2, -4), (7, -2, -4), (-7, -2, 3)] {
-            assert_eq!(immediate_integer(left, 0xe, right), expected);
+        let mut handlers = Vec::with_capacity(15);
+        for opcode in 0x01..=0x0f {
+            handlers.push(DISPATCH_TABLE[DISPATCH_INDICES[opcode] as usize] as usize);
         }
-    }
-
-    #[test]
-    fn immediate_boolean_operations_stay_unboxed() {
-        for (subopcode, expected) in [(0xc, false), (0xd, true), (0xb, true)] {
-            let result = Interpreter::eval_immediate_binop(
-                subopcode,
-                Object::new_bool(true),
-                Object::new_bool(false),
-            )
-            .expect("boolean operation should use the immediate fast path");
-            assert_eq!(result.get_bool(), Some(expected));
-        }
+        handlers.sort_unstable();
+        handlers.dedup();
+        assert_eq!(handlers.len(), 15);
     }
 }
