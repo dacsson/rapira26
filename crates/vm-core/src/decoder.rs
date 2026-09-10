@@ -371,8 +371,6 @@ impl Decoder {
                 let name_: &i32 = name.into();
                 buf.push(0x70 | (*name_ as u8));
 
-                // println!("{:?} to u8: {:x}", name, *name_ as u8);
-
                 // NOTE: not all builtins need to push n,
                 // however some use this as arg count as well as
                 // pack their flags into the lower bits of the opcode
@@ -389,7 +387,6 @@ impl Decoder {
                 buf.push(0x76);
             }
             Instruction::LABEL { .. } => {}
-            _ => return Err(DecoderError::InvalidInstruction(instruction.clone())),
         }
 
         Ok(buf)
