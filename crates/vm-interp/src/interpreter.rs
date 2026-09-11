@@ -4,13 +4,13 @@ use crate::object::{Object, ObjectError};
 use crate::{
     RAP_IS_BOOL, RAP_IS_CALLABLE, RAP_IS_FLOAT, RAP_IS_NULL, RAP_IS_SLICE, RAP_IS_SMI, RAP_IS_TEXT,
     RAP_IS_TUPLE, RAP_IS_VARIANT, RAP_abs, RAP_add, RAP_and, RAP_create_callable_obj,
-    RAP_create_custom_typed_obj, RAP_create_slice, RAP_dec_ref, RAP_divide, RAP_equal, RAP_floor,
+    RAP_create_custom_typed_obj, RAP_create_slice, RAP_divide, RAP_equal, RAP_floor,
     RAP_floor_divide, RAP_get_callable_arity, RAP_get_callable_offset_or_ptr, RAP_get_tuple_item,
     RAP_get_variant_field_at, RAP_get_variant_tag, RAP_greater_or_equal, RAP_greater_than,
-    RAP_inc_ref, RAP_input_text, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than,
-    RAP_modulo, RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_power, RAP_round,
+    RAP_input_text, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than, RAP_modulo,
+    RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_power, RAP_round,
     RAP_set_tuple_item, RAP_set_variant_field_at, RAP_slice_assign, RAP_sqrt, RAP_stringify_object,
-    RAP_subtract, isPtr, isSMI,
+    RAP_subtract, isSMI,
 };
 use core::ffi::{CStr, c_char};
 use core::hint::unlikely;
@@ -1078,6 +1078,8 @@ impl Interpreter {
         let left = self.pop()?;
         let result = if isSMI(left.raw()) && isSMI(right.raw()) {
             Object::new_boxed(left.unbox() + right.unbox())
+        } else if let (Some(left_value), Some(right_value)) = (left.as_float(), right.as_float()) {
+            Self::consume_float_binop(left, right, left_value + right_value)
         } else {
             let raw = unsafe { RAP_add(left.raw(), right.raw()) };
             Self::consume_runtime_binop(left, right, raw)
@@ -1091,6 +1093,8 @@ impl Interpreter {
         let left = self.pop()?;
         let result = if isSMI(left.raw()) && isSMI(right.raw()) {
             Object::new_boxed(left.unbox() - right.unbox())
+        } else if let (Some(left_value), Some(right_value)) = (left.as_float(), right.as_float()) {
+            Self::consume_float_binop(left, right, left_value - right_value)
         } else {
             let raw = unsafe { RAP_subtract(left.raw(), right.raw()) };
             Self::consume_runtime_binop(left, right, raw)
@@ -1104,6 +1108,8 @@ impl Interpreter {
         let left = self.pop()?;
         let result = if isSMI(left.raw()) && isSMI(right.raw()) {
             Object::new_boxed(left.unbox() * right.unbox())
+        } else if let (Some(left_value), Some(right_value)) = (left.as_float(), right.as_float()) {
+            Self::consume_float_binop(left, right, left_value * right_value)
         } else {
             let raw = unsafe { RAP_multiply(left.raw(), right.raw()) };
             Self::consume_runtime_binop(left, right, raw)
@@ -1290,6 +1296,31 @@ impl Interpreter {
         become self.dispatch()
     }
 
+    /// Both operands are owned stack references to floats
+    ///
+    /// A uniquely owned operand (rc = 1) can hold the new result because
+    /// no local, container, or other stack slot can observe its old value
+    #[inline]
+    fn consume_float_binop(left: Object, right: Object, result: f64) -> Object {
+        unsafe {
+            let left_pointer = left.as_ptr_mut_unchecked::<crate::RAP_Object>();
+            if (*left_pointer).refcount == 1 {
+                (*left_pointer).__bindgen_anon_1.float_val = result;
+                Self::dec_ref_if_ptr(right);
+                return left;
+            }
+            let right_pointer = right.as_ptr_mut_unchecked::<crate::RAP_Object>();
+            if (*right_pointer).refcount == 1 {
+                (*right_pointer).__bindgen_anon_1.float_val = result;
+                Self::dec_ref_if_ptr(left);
+                return right;
+            }
+        }
+        Self::dec_ref_if_ptr(right);
+        Self::dec_ref_if_ptr(left);
+        Object::new_float(result)
+    }
+
     #[inline(always)]
     fn consume_runtime_binop(left: Object, right: Object, result: usize) -> Object {
         Self::dec_ref_if_ptr(right);
@@ -1429,15 +1460,23 @@ impl Interpreter {
 
     #[inline(always)]
     fn inc_ref_if_ptr(obj: Object) {
-        if isPtr(obj.raw()) {
-            unsafe { RAP_inc_ref(obj.raw()) };
+        if let Some(pointer) = obj.as_ptr_mut::<crate::RAP_Object>() {
+            unsafe { (*pointer).refcount += 1 };
         }
     }
 
     #[inline(always)]
     fn dec_ref_if_ptr(obj: Object) {
-        if isPtr(obj.raw()) {
-            unsafe { RAP_dec_ref(obj.raw()) };
+        if let Some(pointer) = obj.as_ptr_mut::<crate::RAP_Object>() {
+            // Mirror RAP_dec_ref, keeping recursive destruction in the runtime.
+            unsafe {
+                if !pointer.is_null() {
+                    (*pointer).refcount -= 1;
+                    if (*pointer).refcount <= 0 {
+                        crate::RAP_free_object(pointer);
+                    }
+                }
+            }
         }
     }
 
