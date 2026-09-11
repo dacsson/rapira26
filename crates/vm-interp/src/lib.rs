@@ -7,7 +7,6 @@
 // TODO: explore this feat
 // #![feature(rust_preserve_none_cc)]
 
-mod frame;
 pub mod interpreter;
 pub mod object;
 

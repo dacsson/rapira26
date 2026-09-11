@@ -23,6 +23,19 @@ impl Object {
         unsafe { Object(RAP_create_float_obj(data)) }
     }
 
+    /// Read the C runtime's float representation without an FFI type check.
+    #[inline]
+    pub fn as_float(&self) -> Option<f64> {
+        let pointer = self.as_ptr::<crate::RAP_Object>()?;
+        unsafe {
+            if (*pointer).tag == crate::RAP_ObjectTag_RAP_OBJECT_TAG_FLOAT {
+                Some((*pointer).__bindgen_anon_1.float_val)
+            } else {
+                None
+            }
+        }
+    }
+
     /// Empty placeholder slot (raw 0). Used for globals and uninitialized
     /// frame metadata, which is read back via [`raw`](Self::raw).
     pub fn new_empty() -> Self {

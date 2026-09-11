@@ -133,6 +133,87 @@ fn eval_boolean_and_unary_operations() -> Result<(), Box<dyn std::error::Error>>
 }
 
 #[test]
+fn float_arithmetic_preserves_shared_operands() -> Result<(), Box<dyn std::error::Error>> {
+    for (op, expected) in [(Op::ADD, 7.0), (Op::SUB, 0.0), (Op::MUL, 12.25)] {
+        // The same object owns two stack references and one global reference
+        // Neither operand may be recycled into the result
+        let result = evaluate_with_globals(
+            &[
+                Instruction::CONSTF { value: 3.5 },
+                Instruction::STORE {
+                    rel: ValueRel::Global,
+                    index: 0,
+                },
+                Instruction::LOAD {
+                    rel: ValueRel::Global,
+                    index: 0,
+                },
+                Instruction::DUP,
+                Instruction::BINOP { op },
+                Instruction::CONSTF { value: expected },
+                Instruction::BINOP { op: Op::EQ },
+                Instruction::LOAD {
+                    rel: ValueRel::Global,
+                    index: 0,
+                },
+                Instruction::CONSTF { value: 3.5 },
+                Instruction::BINOP { op: Op::EQ },
+                Instruction::BINOP { op: Op::AND },
+            ],
+            1,
+        )?;
+        assert!(boolean(result));
+    }
+    Ok(())
+}
+
+#[test]
+fn float_arithmetic_with_one_shared_operand() -> Result<(), Box<dyn std::error::Error>> {
+    for shared_left in [false, true] {
+        for (op, expected) in [
+            (Op::ADD, 5.5),
+            (Op::SUB, if shared_left { 1.5 } else { -1.5 }),
+            (Op::MUL, 7.0),
+        ] {
+            let shared = Instruction::LOAD {
+                rel: ValueRel::Global,
+                index: 0,
+            };
+            let temporary = Instruction::CONSTF { value: 2.0 };
+            let (left, right) = if shared_left {
+                (shared, temporary)
+            } else {
+                (temporary, shared)
+            };
+            let result = evaluate_with_globals(
+                &[
+                    Instruction::CONSTF { value: 3.5 },
+                    Instruction::STORE {
+                        rel: ValueRel::Global,
+                        index: 0,
+                    },
+                    left,
+                    right,
+                    Instruction::BINOP { op },
+                    Instruction::CONSTF { value: expected },
+                    Instruction::BINOP { op: Op::EQ },
+                    Instruction::LOAD {
+                        rel: ValueRel::Global,
+                        index: 0,
+                    },
+                    Instruction::CONSTF { value: 3.5 },
+                    Instruction::BINOP { op: Op::EQ },
+                    Instruction::BINOP { op: Op::AND },
+                ],
+                1,
+            )?;
+            assert!(boolean(result));
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn eval_float_and_null_equality() -> Result<(), Box<dyn std::error::Error>> {
     let floats_equal = evaluate(&[
         Instruction::CONSTF { value: 3.5 },

@@ -33,7 +33,6 @@ fn main() {
         // FIXME: for some reason when i directly use WASI as a target
         // the bindings for functions are not generated, so we use this workaround
         // untill i wrap my head why its happening
-        .opaque_type("RAP_Object")
         .opaque_type("RAP_Callable")
         .opaque_type("RAP_Tuple")
         .opaque_type("RAP_Slice")
