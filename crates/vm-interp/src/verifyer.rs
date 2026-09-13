@@ -1,3 +1,6 @@
+//! THIS MODULE IS CURRENTLY NOT USED ANYWHERE
+//! NOT EVEN EXPOSED TO lib.rs, PLEASE REVIVE IT
+
 use std::collections::{HashMap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 

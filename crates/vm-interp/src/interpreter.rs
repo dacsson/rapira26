@@ -3,14 +3,14 @@
 use crate::object::{Object, ObjectError};
 use crate::{
     RAP_IS_BOOL, RAP_IS_CALLABLE, RAP_IS_FLOAT, RAP_IS_NULL, RAP_IS_SLICE, RAP_IS_SMI, RAP_IS_TEXT,
-    RAP_IS_TUPLE, RAP_IS_VARIANT, RAP_abs, RAP_add, RAP_and, RAP_create_callable_obj,
-    RAP_create_custom_typed_obj, RAP_create_slice, RAP_divide, RAP_equal, RAP_floor,
-    RAP_floor_divide, RAP_get_callable_arity, RAP_get_callable_offset_or_ptr, RAP_get_tuple_item,
-    RAP_get_variant_field_at, RAP_get_variant_tag, RAP_greater_or_equal, RAP_greater_than,
-    RAP_input_text, RAP_input_value, RAP_length, RAP_less_or_equal, RAP_less_than, RAP_modulo,
-    RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_power, RAP_round,
-    RAP_set_tuple_item, RAP_set_variant_field_at, RAP_slice_assign, RAP_sqrt, RAP_stringify_object,
-    RAP_subtract, isSMI,
+    RAP_IS_TUPLE, RAP_IS_VARIANT, RAP_ObjectTag, RAP_abs, RAP_add, RAP_and,
+    RAP_create_callable_obj, RAP_create_custom_typed_obj, RAP_create_slice, RAP_divide, RAP_equal,
+    RAP_floor, RAP_floor_divide, RAP_get_callable_arity, RAP_get_callable_offset_or_ptr,
+    RAP_get_tuple_item, RAP_get_variant_field_at, RAP_get_variant_tag, RAP_greater_or_equal,
+    RAP_greater_than, RAP_input_text, RAP_input_value, RAP_length, RAP_less_or_equal,
+    RAP_less_than, RAP_modulo, RAP_multiply, RAP_negate, RAP_not, RAP_not_equal, RAP_or, RAP_power,
+    RAP_round, RAP_set_tuple_item, RAP_set_variant_field_at, RAP_slice_assign, RAP_sqrt,
+    RAP_stringify_object, RAP_subtract, isSMI,
 };
 use core::ffi::{CStr, c_char};
 use core::hint::unlikely;
@@ -186,17 +186,6 @@ struct RuntimeVariantSchema {
     field_names: Vec<*const c_char>,
 }
 
-impl Drop for Interpreter {
-    fn drop(&mut self) {
-        // Object is a Copy wrapper around a manually reference-counted value,
-        // so Vec's destructor cannot release references left behind by an
-        // interpreter error.
-        for object in self.operand_stack.drain(..) {
-            Self::dec_ref_if_ptr(object);
-        }
-    }
-}
-
 impl Interpreter {
     /// Create a new interpreter with operand stack filled with
     /// emulated call to main
@@ -278,7 +267,7 @@ impl Interpreter {
     }
 
     #[cfg(test)]
-    pub(crate) fn run_with_result(&mut self) -> Result<usize, RunError> {
+    pub fn run_with_result(&mut self) -> Result<usize, RunError> {
         self.decoder.ip = self.decoder.bf.main_offset as usize;
 
         self.dispatch().map_err(|e| -> RunError {
@@ -444,46 +433,63 @@ impl Interpreter {
     fn eval_variant(&mut self) -> Result<(), InterpreterError> {
         let id = self.decoder.next::<i32>()?;
         let count = self.get_variant_schema(id)?.field_names.len();
-        if self.operand_stack.len() < count {
+        if unlikely(self.operand_stack.len() < count) {
             return Err(InterpreterError::StackUnderflow);
         }
 
-        let start = self.operand_stack.len() - count;
-        let values: Vec<Object> = self.operand_stack[start..].to_vec();
-        let mut payload = vec![0u8; 2 + count * core::mem::size_of::<usize>()];
-        let tag = self.get_variant_schema(id)?.tag;
-        payload[..2].copy_from_slice(&tag.to_le_bytes());
-        for (index, value) in values.iter().enumerate() {
-            unsafe {
-                payload
-                    .as_mut_ptr()
-                    .add(2 + index * core::mem::size_of::<usize>())
-                    .cast::<usize>()
-                    .write_unaligned(value.raw());
-            }
-        }
+        if count == 0 {
+            let schema = self.get_variant_schema(id)?;
 
-        // Removing the arguments transfers their owning stack references to
-        // the newly created variant so dont decrement them here
-        for _ in 0..count {
-            self.pop()?;
+            // fast path for zero field variants
+            let value = unsafe {
+                RAP_create_custom_typed_obj(
+                    schema.name,
+                    schema.field_names.as_ptr().cast_mut(),
+                    count,
+                    [schema.tag].as_ptr().cast_mut().cast(),
+                )
+            };
+            self.push(Object::new(value))?;
+            become self.dispatch()
+        } else {
+            let start = self.operand_stack.len() - count;
+            let values = &self.operand_stack[start..(start + count)];
+            let mut payload = vec![0u8; 2 + count * core::mem::size_of::<usize>()];
+            let tag = self.get_variant_schema(id)?.tag;
+            payload[..2].copy_from_slice(&tag.to_le_bytes());
+            for (index, value) in values.iter().enumerate() {
+                unsafe {
+                    payload
+                        .as_mut_ptr()
+                        .add(2 + index * core::mem::size_of::<usize>())
+                        .cast::<usize>()
+                        .write_unaligned(value.raw());
+                }
+            }
+
+            // Removing the arguments transfers their owning stack references to
+            // the newly created variant so dont decrement them here
+            for _ in 0..count {
+                self.pop()?;
+            }
+
+            let schema = self.get_variant_schema(id)?;
+            let value = unsafe {
+                RAP_create_custom_typed_obj(
+                    schema.name,
+                    schema.field_names.as_ptr().cast_mut(),
+                    count,
+                    payload.as_ptr().cast_mut().cast(),
+                )
+            };
+            self.push(Object::new(value))?;
+            become self.dispatch()
         }
-        let schema = self.get_variant_schema(id)?;
-        let value = unsafe {
-            RAP_create_custom_typed_obj(
-                schema.name,
-                schema.field_names.as_ptr().cast_mut(),
-                count,
-                payload.as_ptr().cast_mut().cast(),
-            )
-        };
-        self.push(Object::new(value))?;
-        become self.dispatch()
     }
 
     fn eval_variant_tag(&mut self) -> Result<(), InterpreterError> {
         let value = self.pop()?;
-        if !unsafe { RAP_IS_VARIANT(value.raw()) } {
+        if unlikely(!unsafe { RAP_IS_VARIANT(value.raw()) }) {
             return Err(InterpreterError::InvalidType("expected variant"));
         }
         let tag = unsafe { RAP_get_variant_tag(value.raw()) };
@@ -507,7 +513,7 @@ impl Interpreter {
         let index = self.decoder.next::<i32>()?;
         let index = usize::try_from(index).map_err(|_| InterpreterError::InvalidFieldIndex)?;
         let value = self.pop()?;
-        if !unsafe { RAP_IS_VARIANT(value.raw()) } {
+        if unlikely(!unsafe { RAP_IS_VARIANT(value.raw()) }) {
             return Err(InterpreterError::InvalidType("expected variant"));
         }
         let field = unsafe { RAP_get_variant_field_at(value.raw(), index) };
@@ -524,7 +530,7 @@ impl Interpreter {
         // object so the variant is at the top
         let variant_value = self.pop()?;
         let value = self.pop()?;
-        if !unsafe { RAP_IS_VARIANT(variant_value.raw()) } {
+        if unlikely(!unsafe { RAP_IS_VARIANT(variant_value.raw()) }) {
             return Err(InterpreterError::InvalidType("expected variant"));
         }
         unsafe { RAP_set_variant_field_at(variant_value.raw(), index, value.raw()) };
@@ -1596,6 +1602,17 @@ impl Interpreter {
 
     fn globals_mut(&mut self) -> &mut [Object] {
         &mut self.operand_stack[0..self.global_areas_size]
+    }
+}
+
+impl Drop for Interpreter {
+    fn drop(&mut self) {
+        // Object is a Copy wrapper around a manually reference-counted value,
+        // so Vec's destructor cannot release references left behind by an
+        // interpreter error.
+        for object in self.operand_stack.drain(..) {
+            Self::dec_ref_if_ptr(object);
+        }
     }
 }
 
