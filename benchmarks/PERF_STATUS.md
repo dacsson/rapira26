@@ -4,21 +4,21 @@
 
 3-warmup, 5-sample method:
 
-| Benchmark | Python | Rapira26 E2E | Rapira26 VM-only | E2E/Python | VM/Python |
-|---|---:|---:|---:|---:|---:|
-| mandelbrot | 1.0793 s | 4.1947 s | 4.1937 s | 3.89 | 3.89 |
-| fibonacci | 6.2561 s | 4.8126 s | 4.6597 s | 0.77 | 0.74 |
-| binary-tree | 4.0518 s | 12.4003 s | 12.3934 s | 3.06 | 3.06 |
-| nbody | 1.4144 s | 5.2242 s | 5.2329 s | 3.69 | 3.70 |
-| fannkuch-redux | 4.6320 s | 10.9484 s | 11.0012 s | 2.36 | 2.38 |
-| reverse-complement | 0.0241 s | 1.9590 s | 1.7655 s | 81.20 | 73.17 |
+| Benchmark          |   Python | Rapira26 E2E | Rapira26 VM-only | E2E/Python | VM/Python | E2E improvement | VM improvement |
+| ------------------ | -------: | -----------: | ---------------: | ---------: | --------: | --------------: | -------------: |
+| mandelbrot         | 1.0824 s |     1.8227 s |         1.8169 s |       1.68 |      1.68 |           56.5% |          56.7% |
+| fibonacci          | 6.1225 s |     2.6090 s |         2.6077 s |       0.43 |      0.43 |           45.8% |          44.0% |
+| binary-tree        | 4.2234 s |    10.5760 s |        10.5312 s |       2.50 |      2.49 |           14.7% |          15.0% |
+| nbody              | 1.4187 s |     3.2440 s |         3.2449 s |       2.29 |      2.29 |           37.9% |          38.0% |
+| fannkuch-redux     | 4.6494 s |     9.7255 s |         9.7724 s |       2.09 |      2.10 |           11.2% |          11.2% |
+| reverse-complement | 0.0255 s |     1.5384 s |         1.5721 s |      60.22 |     61.54 |           21.5% |          11.0% |
 
 ## Version
 
-- Run timestamp: `2026-09-10T14:53-44.612980+00-00`
-- Git commit: `cfcac89f24d9d349731156bfdbb4dc488e30a6f8`
-- Commit message: `[runtime][perf][VM] Add hints for branch predictor, fix text repeat...`
-- Commit date: `2026-09-10T18:22:05+03:00`
+- Run timestamp: `2026-09-13T17:38:07.882846+00:00`
+- Git commit: `d9a24ab736a0aef1e92758cf2ea949f42d2200ca`
+- Commit message: `[VM] Fast path for zero fields variants`
+- Commit date: `2026-09-13T20:25:39+03:00`
 
 ## Environment
 
