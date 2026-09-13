@@ -186,6 +186,17 @@ struct RuntimeVariantSchema {
     field_names: Vec<*const c_char>,
 }
 
+impl Drop for Interpreter {
+    fn drop(&mut self) {
+        // Object is a Copy wrapper around a manually reference-counted value,
+        // so Vec's destructor cannot release references left behind by an
+        // interpreter error.
+        for object in self.operand_stack.drain(..) {
+            Self::dec_ref_if_ptr(object);
+        }
+    }
+}
+
 impl Interpreter {
     /// Create a new interpreter with operand stack filled with
     /// emulated call to main
