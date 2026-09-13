@@ -61,3 +61,32 @@ K := 0
     вывод бпс: I, ",", J, " "
 вывод: ""
 \ => 1,1 2,1 3,1
+
+\ A named bound is read again after each iteration, not cached at entry.
+предел := 5
+сумма := 0
+для И от 1 до предел цикл
+  сумма = сумма + И
+  предел = предел - 1
+вывод: сумма
+\ => 6
+
+\ A bound call keeps the generic guard's two evaluations per check.
+функ граница()
+  вывод: "граница"
+  возврат 1
+для И от 1 до граница() цикл
+  вывод: И
+\ => граница
+\ => граница
+\ => 1
+\ => граница
+\ => граница
+
+\ An explicit step can change while the loop runs.
+шаг_цикла := 1
+для И от 1 до 3 шаг шаг_цикла цикл
+  вывод: И
+  шаг_цикла = 2
+\ => 1
+\ => 3
