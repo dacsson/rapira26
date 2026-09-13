@@ -1300,7 +1300,7 @@ impl Interpreter {
     ///
     /// A uniquely owned operand (rc = 1) can hold the new result because
     /// no local, container, or other stack slot can observe its old value
-    #[inline]
+    #[inline(always)]
     fn consume_float_binop(left: Object, right: Object, result: f64) -> Object {
         unsafe {
             let left_pointer = left.as_ptr_mut_unchecked::<crate::RAP_Object>();

@@ -622,25 +622,41 @@ impl BcGen {
 
                         // An omitted upper bound makes the `for` loop unbounded.
                         if let Some(to) = to_expr {
-                            // step > 0 && variable <= to
-                            instrs.extend(step_expr.clone());
-                            instrs.push(Instruction::CONST { value: 0 });
-                            instrs.push(Instruction::BINOP { op: Op::GT });
-                            instrs.push(Instruction::LOAD { rel, index });
-                            instrs.extend(to.clone());
-                            instrs.push(Instruction::BINOP { op: Op::LEQ });
-                            instrs.push(Instruction::BINOP { op: Op::AND });
+                            // The generic guard evaluates the bound twice,
+                            // emit that second evaluation for a plain load or
+                            // numeric constant, so calls keep their side effects
+                            let simple_default_step_guard = step.is_none()
+                                && matches!(
+                                    to.as_slice(),
+                                    [Instruction::LOAD { .. }
+                                        | Instruction::CONST { .. }
+                                        | Instruction::CONSTF { .. }]
+                                );
+                            if simple_default_step_guard {
+                                instrs.push(Instruction::LOAD { rel, index });
+                                instrs.extend(to);
+                                instrs.push(Instruction::BINOP { op: Op::LEQ });
+                            } else {
+                                // step > 0 && variable <= to
+                                instrs.extend(step_expr.clone());
+                                instrs.push(Instruction::CONST { value: 0 });
+                                instrs.push(Instruction::BINOP { op: Op::GT });
+                                instrs.push(Instruction::LOAD { rel, index });
+                                instrs.extend(to.clone());
+                                instrs.push(Instruction::BINOP { op: Op::LEQ });
+                                instrs.push(Instruction::BINOP { op: Op::AND });
 
-                            // step <= 0 && variable >= to
-                            instrs.extend(step_expr.clone());
-                            instrs.push(Instruction::CONST { value: 0 });
-                            instrs.push(Instruction::BINOP { op: Op::LEQ });
-                            instrs.push(Instruction::LOAD { rel, index });
-                            instrs.extend(to);
-                            instrs.push(Instruction::BINOP { op: Op::GEQ });
-                            instrs.push(Instruction::BINOP { op: Op::AND });
+                                // step <= 0 && variable >= to
+                                instrs.extend(step_expr.clone());
+                                instrs.push(Instruction::CONST { value: 0 });
+                                instrs.push(Instruction::BINOP { op: Op::LEQ });
+                                instrs.push(Instruction::LOAD { rel, index });
+                                instrs.extend(to);
+                                instrs.push(Instruction::BINOP { op: Op::GEQ });
+                                instrs.push(Instruction::BINOP { op: Op::AND });
 
-                            instrs.push(Instruction::BINOP { op: Op::OR });
+                                instrs.push(Instruction::BINOP { op: Op::OR });
+                            }
 
                             instrs.push(Instruction::CJMP {
                                 dest: end_label.clone(),
